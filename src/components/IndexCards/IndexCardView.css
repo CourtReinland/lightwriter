@@ -16,6 +16,12 @@
   padding: 0 4px;
 }
 
+.cards-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .cards-hint {
   color: #bbb;
   font-size: 10px;
@@ -27,12 +33,88 @@
   font-size: 11px;
 }
 
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+.ai-desc-toggle {
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  color: #999;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
+.ai-desc-toggle:hover {
+  border-color: #aaa;
+  color: #666;
+}
+
+.ai-desc-toggle.active {
+  background: #c4b5fd22;
+  border-color: #c4b5fd;
+  color: #7c3aed;
+}
+
+/* Vertical list layout */
+.cards-list {
+  display: flex;
+  flex-direction: column;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+/* Drop slots — invisible normally, shows line when active */
+.drop-slot {
+  height: 8px;
+  position: relative;
+  transition: height 0.15s;
+}
+
+.drop-slot .drop-indicator {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 3px;
+  background: #3b82f6;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+}
+
+.drop-slot .drop-indicator::before,
+.drop-slot .drop-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #3b82f6;
+}
+
+.drop-slot .drop-indicator::before {
+  left: -4px;
+}
+
+.drop-slot .drop-indicator::after {
+  right: -4px;
+}
+
+.drop-slot.active {
+  height: 16px;
+}
+
+.drop-slot.active .drop-indicator {
+  display: block;
+}
+
+/* Empty state */
 .index-cards-empty {
   flex: 1;
   display: flex;

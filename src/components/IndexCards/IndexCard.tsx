@@ -8,12 +8,9 @@ interface IndexCardProps {
   pageRange: string;
   index: number;
   isDragging?: boolean;
-  isDropTarget?: boolean;
+  aiDescription?: string;
+  aiLoading?: boolean;
   onDragStart?: (e: DragEvent) => void;
-  onDragOver?: (e: DragEvent) => void;
-  onDragEnter?: (e: DragEvent) => void;
-  onDragLeave?: (e: DragEvent) => void;
-  onDrop?: (e: DragEvent) => void;
   onDragEnd?: () => void;
 }
 
@@ -24,18 +21,14 @@ export default function IndexCard({
   pageRange,
   index,
   isDragging,
-  isDropTarget,
+  aiDescription,
+  aiLoading,
   onDragStart,
-  onDragOver,
-  onDragEnter,
-  onDragLeave,
-  onDrop,
   onDragEnd,
 }: IndexCardProps) {
   const className = [
     "index-card",
     isDragging ? "dragging" : "",
-    isDropTarget ? "drop-target" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -45,10 +38,6 @@ export default function IndexCard({
       className={className}
       draggable
       onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
       onDragEnd={onDragEnd}
     >
       <div className="card-header">
@@ -59,6 +48,12 @@ export default function IndexCard({
       </div>
       <div className="card-heading">{heading}</div>
       {synopsis && <div className="card-synopsis">{synopsis}</div>}
+      {aiLoading && (
+        <div className="card-ai-desc loading">Analyzing scene...</div>
+      )}
+      {aiDescription && !aiLoading && (
+        <div className="card-ai-desc">{aiDescription}</div>
+      )}
       <div className="card-drag-handle">: :</div>
     </div>
   );

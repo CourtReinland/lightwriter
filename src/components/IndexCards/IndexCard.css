@@ -4,14 +4,14 @@
   border-radius: 4px;
   padding: 12px 14px;
   cursor: grab;
-  transition: box-shadow 0.15s, transform 0.15s, opacity 0.15s, border-color 0.15s;
+  transition: box-shadow 0.15s, transform 0.15s, opacity 0.15s;
   font-family: 'Courier Prime', 'Courier New', monospace;
-  min-height: 100px;
+  min-height: 80px;
   position: relative;
 }
 
 .index-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   transform: translateY(-1px);
 }
 
@@ -20,26 +20,17 @@
   transform: translateY(0);
 }
 
-/* Dragging state */
 .index-card.dragging {
-  opacity: 0.4;
-  transform: scale(0.95);
+  opacity: 0.35;
+  transform: scale(0.97);
   box-shadow: none;
-}
-
-/* Drop target state */
-.index-card.drop-target {
-  border-color: #3b82f6;
-  border-width: 2px;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-  transform: translateY(-2px);
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .card-number {
@@ -64,7 +55,7 @@
   color: #333;
   text-transform: uppercase;
   line-height: 1.4;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .card-synopsis {
@@ -72,6 +63,25 @@
   color: #777;
   font-style: italic;
   line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.card-ai-desc {
+  font-size: 10px;
+  color: #6b7280;
+  line-height: 1.5;
+  padding: 6px 8px;
+  background: #f0efea;
+  border-radius: 3px;
+  border-left: 2px solid #c4b5fd;
+  margin-top: 6px;
+}
+
+.card-ai-desc.loading {
+  color: #aaa;
+  font-style: italic;
+  border-left-color: #ddd;
+  background: #f5f4f0;
 }
 
 .card-drag-handle {

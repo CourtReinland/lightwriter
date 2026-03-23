@@ -1,6 +1,8 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { SceneInfo } from "../../types/fountain";
+import { GrokService } from "../../services/grokService";
 import IndexCard from "./IndexCard";
+import ConnectorToggle, { type Connector } from "./ConnectorToggle";
 import "./IndexCardView.css";
 
 interface IndexCardViewProps {
@@ -11,10 +13,6 @@ interface IndexCardViewProps {
   onContentChange: (content: string) => void;
 }
 
-/**
- * Extract scene blocks from raw fountain text.
- * Each block = from scene heading line to just before the next scene heading.
- */
 function getSceneBlocks(content: string): { heading: string; startIdx: number; endIdx: number }[] {
   const lines = content.split("\n");
   const scenePattern = /^\.((?!\.)\S)|^(INT|EXT|EST|INT\.\/EXT|I\/E)[.\s]/i;
@@ -26,10 +24,9 @@ function getSceneBlocks(content: string): { heading: string; startIdx: number; e
     if (scenePattern.test(line.trim())) {
       blocks.push({ heading: line.trim(), startIdx: charIdx, endIdx: -1 });
     }
-    charIdx += line.length + 1; // +1 for \n
+    charIdx += line.length + 1;
   }
 
-  // Set end indices
   for (let i = 0; i < blocks.length; i++) {
     blocks[i].endIdx = i + 1 < blocks.length
       ? blocks[i + 1].startIdx
@@ -37,6 +34,14 @@ function getSceneBlocks(content: string): { heading: string; startIdx: number; e
   }
 
   return blocks;
+}
+
+/** Extract the raw text of a scene block for AI analysis */
+function getSceneText(content: string, sceneIdx: number): string {
+  const blocks = getSceneBlocks(content);
+  if (sceneIdx >= blocks.length) return "";
+  const block = blocks[sceneIdx];
+  return content.slice(block.startIdx, block.endIdx).trim();
 }
 
 export default function IndexCardView({
@@ -47,8 +52,61 @@ export default function IndexCardView({
   onContentChange,
 }: IndexCardViewProps) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dropIdx, setDropIdx] = useState<number | null>(null);
-  const dragCounter = useRef(0);
+  // dropSlot: the index of the gap (0 = before first card, 1 = between card 0 and 1, etc.)
+  const [dropSlot, setDropSlot] = useState<number | null>(null);
+  const [connectors, setConnectors] = useState<Record<number, Connector>>({});
+  const [aiDescs, setAiDescs] = useState<Record<number, string>>({});
+  const [aiLoading, setAiLoading] = useState<Record<number, boolean>>({});
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const prevSceneCount = useRef(0);
+
+  // Generate AI descriptions when toggled on
+  useEffect(() => {
+    if (!aiEnabled) return;
+    const apiKey = GrokService.getStoredApiKey();
+    if (!apiKey) return;
+
+    const service = new GrokService(apiKey);
+
+    for (let i = 0; i < scenes.length; i++) {
+      // Skip if already have description or currently loading
+      if (aiDescs[i] || aiLoading[i]) continue;
+
+      const sceneText = getSceneText(content, i);
+      if (!sceneText) continue;
+
+      // Truncate to ~500 chars to keep API calls fast
+      const truncated = sceneText.length > 500 ? sceneText.slice(0, 500) + "..." : sceneText;
+
+      setAiLoading((prev) => ({ ...prev, [i]: true }));
+
+      service
+        .suggest(
+          truncated,
+          "",
+          "custom",
+          "Describe what happens in this screenplay scene in 1-2 short sentences. Be concise and factual. Return ONLY the description, nothing else.",
+        )
+        .then((desc) => {
+          setAiDescs((prev) => ({ ...prev, [i]: desc }));
+        })
+        .catch(() => {
+          // Silently fail — user will just not see a description
+        })
+        .finally(() => {
+          setAiLoading((prev) => ({ ...prev, [i]: false }));
+        });
+    }
+  }, [aiEnabled, scenes.length, content]);
+
+  // Clear AI descriptions when scene count changes (content restructured)
+  useEffect(() => {
+    if (scenes.length !== prevSceneCount.current) {
+      setAiDescs({});
+      setAiLoading({});
+      prevSceneCount.current = scenes.length;
+    }
+  }, [scenes.length]);
 
   const handleDragStart = useCallback((idx: number, e: React.DragEvent) => {
     setDragIdx(idx);
@@ -56,90 +114,107 @@ export default function IndexCardView({
     e.dataTransfer.setData("text/plain", String(idx));
   }, []);
 
-  const handleDragOver = useCallback((idx: number, e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (dragIdx !== null && idx !== dragIdx) {
-      setDropIdx(idx);
-    }
-  }, [dragIdx]);
-
-  const handleDragEnter = useCallback((idx: number, e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current++;
-    if (dragIdx !== null && idx !== dragIdx) {
-      setDropIdx(idx);
-    }
-  }, [dragIdx]);
-
-  const handleDragLeave = useCallback((_idx: number, _e: React.DragEvent) => {
-    dragCounter.current--;
-    if (dragCounter.current === 0) {
-      setDropIdx(null);
-    }
+  const handleDragEnd = useCallback(() => {
+    setDragIdx(null);
+    setDropSlot(null);
   }, []);
 
-  const handleDrop = useCallback((targetIdx: number, e: React.DragEvent) => {
+  const handleSlotDragOver = useCallback((slotIdx: number, e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropSlot(slotIdx);
+  }, []);
+
+  const handleSlotDrop = useCallback((slotIdx: number, e: React.DragEvent) => {
     e.preventDefault();
     const sourceIdx = parseInt(e.dataTransfer.getData("text/plain"), 10);
-    if (isNaN(sourceIdx) || sourceIdx === targetIdx) {
+    if (isNaN(sourceIdx)) {
       setDragIdx(null);
-      setDropIdx(null);
+      setDropSlot(null);
       return;
     }
 
-    // Reorder scenes in the actual fountain text
+    // Calculate the actual target index after removal
+    // slotIdx is the gap index: 0=before card 0, 1=between card 0 and 1, etc.
+    let targetIdx = slotIdx;
+    if (sourceIdx < slotIdx) {
+      targetIdx = slotIdx - 1; // Account for removal shifting indices
+    }
+
+    if (sourceIdx === targetIdx) {
+      setDragIdx(null);
+      setDropSlot(null);
+      return;
+    }
+
     const blocks = getSceneBlocks(content);
-    if (sourceIdx >= blocks.length || targetIdx >= blocks.length) {
+    if (sourceIdx >= blocks.length) {
       setDragIdx(null);
-      setDropIdx(null);
+      setDropSlot(null);
       return;
     }
 
-    // Extract scene text blocks
     const sceneTexts = blocks.map((b) => content.slice(b.startIdx, b.endIdx));
-
-    // Get content before the first scene (title page, etc.)
     const preamble = blocks.length > 0 ? content.slice(0, blocks[0].startIdx) : "";
 
-    // Reorder
     const moved = sceneTexts.splice(sourceIdx, 1)[0];
     sceneTexts.splice(targetIdx, 0, moved);
 
-    // Rebuild content
     const newContent = preamble + sceneTexts.join("");
     onContentChange(newContent);
 
+    // Also reorder connectors and AI descs
+    setAiDescs({});
+    setAiLoading({});
+
     setDragIdx(null);
-    setDropIdx(null);
-    dragCounter.current = 0;
+    setDropSlot(null);
   }, [content, onContentChange]);
 
-  const handleDragEnd = useCallback(() => {
-    setDragIdx(null);
-    setDropIdx(null);
-    dragCounter.current = 0;
+  const handleConnectorChange = useCallback((index: number, value: Connector) => {
+    setConnectors((prev) => ({ ...prev, [index]: value }));
   }, []);
 
   if (scenes.length === 0) {
     return (
       <div className="index-cards-empty">
         <p>No scenes found.</p>
-        <p className="hint">
-          Start a scene with INT. or EXT. in the editor.
-        </p>
+        <p className="hint">Start a scene with INT. or EXT. in the editor.</p>
       </div>
     );
   }
+
+  const hasApiKey = !!GrokService.getStoredApiKey();
 
   return (
     <div className="index-cards-view">
       <div className="cards-header">
         <span>{scenes.length} scene{scenes.length !== 1 ? "s" : ""}</span>
         <span className="cards-hint">Drag to reorder</span>
-        <span className="cards-target">Target: {targetPages}pp</span>
+        <div className="cards-header-right">
+          {hasApiKey && (
+            <button
+              className={`ai-desc-toggle ${aiEnabled ? "active" : ""}`}
+              onClick={() => setAiEnabled(!aiEnabled)}
+              title="Generate AI scene descriptions"
+            >
+              AI Desc
+            </button>
+          )}
+          <span className="cards-target">Target: {targetPages}pp</span>
+        </div>
       </div>
-      <div className="cards-grid">
+
+      <div className="cards-list">
+        {/* Drop slot before first card */}
+        <div
+          className={`drop-slot ${dropSlot === 0 && dragIdx !== null && dragIdx !== 0 ? "active" : ""}`}
+          onDragOver={(e) => handleSlotDragOver(0, e)}
+          onDrop={(e) => handleSlotDrop(0, e)}
+        >
+          <div className="drop-indicator" />
+        </div>
+
         {scenes.map((scene, i) => {
           const startPage = Math.max(
             1,
@@ -148,31 +223,53 @@ export default function IndexCardView({
           const endPage = Math.min(
             targetPages,
             Math.ceil(
-              ((scene.startIndex + scene.tokenCount) /
-                Math.max(1, totalLines)) *
-                targetPages,
+              ((scene.startIndex + scene.tokenCount) / Math.max(1, totalLines)) * targetPages,
             ),
           );
 
-          const isDragging = dragIdx === i;
-          const isDropTarget = dropIdx === i;
-
           return (
-            <IndexCard
-              key={`${i}-${scene.heading}`}
-              heading={scene.heading}
-              sceneNumber={scene.sceneNumber}
-              pageRange={`p${startPage}${endPage > startPage ? `-${endPage}` : ""}`}
-              index={i}
-              isDragging={isDragging}
-              isDropTarget={isDropTarget}
-              onDragStart={(e) => handleDragStart(i, e)}
-              onDragOver={(e) => handleDragOver(i, e)}
-              onDragEnter={(e) => handleDragEnter(i, e)}
-              onDragLeave={(e) => handleDragLeave(i, e)}
-              onDrop={(e) => handleDrop(i, e)}
-              onDragEnd={handleDragEnd}
-            />
+            <div key={`scene-${i}-${scene.heading}`}>
+              <IndexCard
+                heading={scene.heading}
+                sceneNumber={scene.sceneNumber}
+                pageRange={`p${startPage}${endPage > startPage ? `-${endPage}` : ""}`}
+                index={i}
+                isDragging={dragIdx === i}
+                aiDescription={aiEnabled ? aiDescs[i] : undefined}
+                aiLoading={aiEnabled ? aiLoading[i] : false}
+                onDragStart={(e) => handleDragStart(i, e)}
+                onDragEnd={handleDragEnd}
+              />
+
+              {/* Connector toggle + drop slot between cards */}
+              {i < scenes.length - 1 && (
+                <>
+                  <ConnectorToggle
+                    index={i}
+                    value={connectors[i] || "AND"}
+                    onChange={handleConnectorChange}
+                  />
+                  <div
+                    className={`drop-slot ${dropSlot === i + 1 && dragIdx !== null && dragIdx !== i + 1 && dragIdx !== i ? "active" : ""}`}
+                    onDragOver={(e) => handleSlotDragOver(i + 1, e)}
+                    onDrop={(e) => handleSlotDrop(i + 1, e)}
+                  >
+                    <div className="drop-indicator" />
+                  </div>
+                </>
+              )}
+
+              {/* Drop slot after last card */}
+              {i === scenes.length - 1 && (
+                <div
+                  className={`drop-slot ${dropSlot === scenes.length && dragIdx !== null && dragIdx !== scenes.length - 1 ? "active" : ""}`}
+                  onDragOver={(e) => handleSlotDragOver(scenes.length, e)}
+                  onDrop={(e) => handleSlotDrop(scenes.length, e)}
+                >
+                  <div className="drop-indicator" />
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

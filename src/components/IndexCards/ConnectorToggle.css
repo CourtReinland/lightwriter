@@ -1,0 +1,42 @@
+.connector-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.connector-line {
+  flex: 1;
+  height: 1px;
+  background: #d5d2c4;
+}
+
+.connector-buttons {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.connector-btn {
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.connector-btn:hover {
+  background: #eae8dd;
+}
+
+.connector-btn.active {
+  background: #f5f4ee;
+  border-style: solid;
+}
