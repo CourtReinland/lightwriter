@@ -102,6 +102,10 @@ export default function App() {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const [currentElement, setCurrentElement] = useState<ElementType>("action");
+  // Cards view state — persists across view switches
+  const [cardConnectors, setCardConnectors] = useState<Record<number, string>>({});
+  const [cardAiDescs, setCardAiDescs] = useState<Record<number, string>>({});
+  const [cardAiEnabled, setCardAiEnabled] = useState(false);
 
   const editorViewRef = useRef<EditorView>(null as unknown as EditorView);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined as unknown as ReturnType<typeof setTimeout>);
@@ -373,6 +377,12 @@ export default function App() {
                 targetPages={project.targetPages}
                 content={project.content}
                 onContentChange={handleContentChange}
+                connectors={cardConnectors}
+                onConnectorsChange={setCardConnectors}
+                aiDescs={cardAiDescs}
+                onAiDescsChange={setCardAiDescs}
+                aiEnabled={cardAiEnabled}
+                onAiEnabledChange={setCardAiEnabled}
               />
             )}
           </div>

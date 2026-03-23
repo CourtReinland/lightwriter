@@ -11,6 +11,12 @@ interface IndexCardViewProps {
   targetPages: number;
   content: string;
   onContentChange: (content: string) => void;
+  connectors: Record<number, string>;
+  onConnectorsChange: (connectors: Record<number, string>) => void;
+  aiDescs: Record<number, string>;
+  onAiDescsChange: (descs: Record<number, string>) => void;
+  aiEnabled: boolean;
+  onAiEnabledChange: (enabled: boolean) => void;
 }
 
 function getSceneBlocks(content: string): { heading: string; startIdx: number; endIdx: number }[] {
@@ -50,17 +56,19 @@ export default function IndexCardView({
   targetPages,
   content,
   onContentChange,
+  connectors,
+  onConnectorsChange,
+  aiDescs,
+  onAiDescsChange,
+  aiEnabled,
+  onAiEnabledChange,
 }: IndexCardViewProps) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  // dropSlot: the index of the gap (0 = before first card, 1 = between card 0 and 1, etc.)
   const [dropSlot, setDropSlot] = useState<number | null>(null);
-  const [connectors, setConnectors] = useState<Record<number, Connector>>({});
-  const [aiDescs, setAiDescs] = useState<Record<number, string>>({});
   const [aiLoading, setAiLoading] = useState<Record<number, boolean>>({});
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const prevSceneCount = useRef(0);
+  const prevSceneCount = useRef(scenes.length);
 
-  // Generate AI descriptions when toggled on
+  // Generate AI descriptions when toggled on (or when re-entering cards view with aiEnabled)
   useEffect(() => {
     if (!aiEnabled) return;
     const apiKey = GrokService.getStoredApiKey();
@@ -69,13 +77,11 @@ export default function IndexCardView({
     const service = new GrokService(apiKey);
 
     for (let i = 0; i < scenes.length; i++) {
-      // Skip if already have description or currently loading
       if (aiDescs[i] || aiLoading[i]) continue;
 
       const sceneText = getSceneText(content, i);
       if (!sceneText) continue;
 
-      // Truncate to ~500 chars to keep API calls fast
       const truncated = sceneText.length > 500 ? sceneText.slice(0, 500) + "..." : sceneText;
 
       setAiLoading((prev) => ({ ...prev, [i]: true }));
@@ -88,21 +94,19 @@ export default function IndexCardView({
           "Describe what happens in this screenplay scene in 1-2 short sentences. Be concise and factual. Return ONLY the description, nothing else.",
         )
         .then((desc) => {
-          setAiDescs((prev) => ({ ...prev, [i]: desc }));
+          onAiDescsChange({ ...aiDescs, [i]: desc });
         })
-        .catch(() => {
-          // Silently fail — user will just not see a description
-        })
+        .catch(() => {})
         .finally(() => {
           setAiLoading((prev) => ({ ...prev, [i]: false }));
         });
     }
-  }, [aiEnabled, scenes.length, content]);
+  }, [aiEnabled, scenes.length]);
 
   // Clear AI descriptions when scene count changes (content restructured)
   useEffect(() => {
     if (scenes.length !== prevSceneCount.current) {
-      setAiDescs({});
+      onAiDescsChange({});
       setAiLoading({});
       prevSceneCount.current = scenes.length;
     }
@@ -163,8 +167,8 @@ export default function IndexCardView({
     const newContent = preamble + sceneTexts.join("");
     onContentChange(newContent);
 
-    // Also reorder connectors and AI descs
-    setAiDescs({});
+    // Clear AI descs on reorder (scene content moved)
+    onAiDescsChange({});
     setAiLoading({});
 
     setDragIdx(null);
@@ -172,8 +176,8 @@ export default function IndexCardView({
   }, [content, onContentChange]);
 
   const handleConnectorChange = useCallback((index: number, value: Connector) => {
-    setConnectors((prev) => ({ ...prev, [index]: value }));
-  }, []);
+    onConnectorsChange({ ...connectors, [index]: value });
+  }, [connectors, onConnectorsChange]);
 
   if (scenes.length === 0) {
     return (
@@ -195,7 +199,15 @@ export default function IndexCardView({
           {hasApiKey && (
             <button
               className={`ai-desc-toggle ${aiEnabled ? "active" : ""}`}
-              onClick={() => setAiEnabled(!aiEnabled)}
+              onClick={() => {
+                const next = !aiEnabled;
+                onAiEnabledChange(next);
+                // If toggling ON again, clear existing to regenerate
+                if (next) {
+                  onAiDescsChange({});
+                  setAiLoading({});
+                }
+              }}
               title="Generate AI scene descriptions"
             >
               AI Desc
