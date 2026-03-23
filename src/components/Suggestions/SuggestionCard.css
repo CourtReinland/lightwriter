@@ -1,0 +1,55 @@
+.suggestion-card {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.suggestion-text {
+  padding: 12px;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 11px;
+  color: #ccc;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.suggestion-actions {
+  display: flex;
+  border-top: 1px solid #3a3a3a;
+}
+
+.suggestion-btn {
+  flex: 1;
+  padding: 6px;
+  font-family: 'Courier Prime', monospace;
+  font-size: 10px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.suggestion-btn.apply {
+  background: #1e3a5f;
+  color: #60a5fa;
+  border-right: 1px solid #3a3a3a;
+}
+
+.suggestion-btn.apply:hover {
+  background: #1e4a7f;
+}
+
+.suggestion-btn.insert {
+  background: #1e3f2a;
+  color: #4ade80;
+}
+
+.suggestion-btn.insert:hover {
+  background: #1e5f3a;
+}

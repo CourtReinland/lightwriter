@@ -1,0 +1,39 @@
+.element-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 16px;
+  background: #222;
+  border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+}
+
+.element-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: #777;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 3px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.12s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.element-btn:hover {
+  color: #ccc;
+  background: #2a2a2a;
+}
+
+.element-btn.active {
+  color: #fff;
+  background: #333;
+  border-color: #555;
+}
+
+.element-label {
+  pointer-events: none;
+}

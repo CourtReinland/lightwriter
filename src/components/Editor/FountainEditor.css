@@ -1,0 +1,13 @@
+.fountain-editor {
+  flex: 1;
+  overflow: auto;
+  background: #fefefe;
+}
+
+.fountain-editor .cm-editor {
+  height: 100%;
+}
+
+.fountain-editor .cm-scroller {
+  overflow: auto;
+}

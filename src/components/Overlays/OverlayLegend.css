@@ -1,0 +1,49 @@
+.overlay-legend {
+  background: #1a1a1a;
+  border-top: 1px solid #333;
+  padding: 8px 12px;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.legend-header {
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 9px;
+  margin-bottom: 6px;
+}
+
+.legend-beats {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.legend-beat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #999;
+}
+
+.legend-color {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-pages {
+  color: #666;
+  min-width: 42px;
+  font-size: 9px;
+}
+
+.legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

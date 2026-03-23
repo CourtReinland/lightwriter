@@ -1,0 +1,87 @@
+.framework-panel {
+  background: #1e1e1e;
+  border-left: 1px solid #333;
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+}
+
+.framework-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #333;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.panel-label {
+  color: #888;
+}
+
+.panel-target {
+  color: #666;
+  font-size: 10px;
+}
+
+.framework-toggles {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 2px;
+}
+
+.framework-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: none;
+  border: 1px solid transparent;
+  color: #888;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.framework-toggle:hover {
+  background: #2a2a2a;
+  color: #ccc;
+}
+
+.framework-toggle.active {
+  background: #252525;
+  color: #e5e5e5;
+  border-color: #444;
+}
+
+.toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+}
+
+.toggle-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toggle-count {
+  color: #555;
+  font-size: 10px;
+}
+
+.framework-toggle.active .toggle-count {
+  color: #777;
+}

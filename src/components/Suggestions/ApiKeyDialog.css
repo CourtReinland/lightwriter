@@ -1,0 +1,91 @@
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 24px;
+  width: 400px;
+  max-width: 90vw;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+}
+
+.dialog-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #e5e5e5;
+  margin-bottom: 8px;
+}
+
+.dialog-desc {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.dialog-input {
+  width: 100%;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #e5e5e5;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.dialog-input:focus {
+  outline: none;
+  border-color: #666;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dialog-btn.secondary {
+  background: none;
+  color: #999;
+}
+
+.dialog-btn.secondary:hover {
+  background: #2a2a2a;
+  color: #ccc;
+}
+
+.dialog-btn.primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+.dialog-btn.primary:hover {
+  background: #2563eb;
+}
+
+.dialog-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

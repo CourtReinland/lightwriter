@@ -1,0 +1,195 @@
+.project-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 60px;
+  z-index: 100;
+}
+
+.project-menu {
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 8px;
+  width: 440px;
+  max-width: 90vw;
+  max-height: 70vh;
+  overflow-y: auto;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+}
+
+.pm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #333;
+}
+
+.pm-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: #e5e5e5;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.pm-close {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 16px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 2px 6px;
+}
+
+.pm-close:hover {
+  color: #ccc;
+}
+
+.pm-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.pm-section-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.pm-new-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pm-input {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #e5e5e5;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.pm-input:focus {
+  outline: none;
+  border-color: #666;
+}
+
+.pm-btn {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: #2a2a2a;
+  color: #999;
+}
+
+.pm-btn:hover:not(:disabled) {
+  background: #333;
+  color: #ddd;
+}
+
+.pm-btn.primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+.pm-btn.primary:hover {
+  background: #2563eb;
+}
+
+.pm-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.import-btn {
+  width: 100%;
+  text-align: center;
+  padding: 10px;
+}
+
+.pm-error {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #2a1a1a;
+  border: 1px solid #3a2020;
+  border-radius: 3px;
+  color: #ef4444;
+  font-size: 10px;
+}
+
+.pm-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-project {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.pm-project:hover {
+  background: #2a2a2a;
+}
+
+.pm-project.active {
+  background: #252530;
+  border: 1px solid #3b82f640;
+}
+
+.pm-project-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-project-name {
+  font-size: 12px;
+  color: #ddd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-project-meta {
+  font-size: 9px;
+  color: #666;
+}
+
+.pm-delete {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.pm-delete:hover {
+  color: #ef4444;
+  background: #2a1a1a;
+}

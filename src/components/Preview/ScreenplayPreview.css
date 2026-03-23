@@ -1,0 +1,153 @@
+/*
+ * Screenplay formatting following industry standard conventions.
+ * Based on Beat's ScreenplayStyles.css character widths:
+ *   - Page: ~60ch wide (US Letter)
+ *   - Character name indent: 22ch from left (~37% centered)
+ *   - Dialogue indent: 10ch left, 10ch right
+ *   - Parenthetical indent: 16ch left
+ *   - Transition: right-aligned
+ */
+
+.screenplay-preview {
+  flex: 1;
+  overflow: auto;
+  background: #fff;
+  padding: 40px 24px;
+  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+  font-size: 12pt;
+  line-height: 1;
+  color: #1a1a1a;
+}
+
+.screenplay-preview .preview-page {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.preview-title-page {
+  text-align: center;
+  margin-bottom: 48px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #ddd;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.preview-title-page p {
+  margin: 4px 0;
+}
+
+.preview-script {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Scene headings */
+.preview-script .scene_heading,
+.preview-script h3 {
+  font-size: 12pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  margin: 24px 0 12px 0;
+  padding: 0;
+}
+
+/* Action */
+.preview-script .action,
+.preview-script p:not([class]) {
+  margin: 12px 0;
+  padding: 0;
+}
+
+/* Character names — centered, uppercase */
+/* fountain-js outputs character names as <h4> elements */
+.preview-script .character,
+.preview-script h4 {
+  font-weight: bold;
+  font-size: 12pt;
+  text-transform: uppercase;
+  margin-top: 22px;
+  margin-bottom: 0;
+  padding-left: 200px;
+  /* ~37% indent for centering on 640px page */
+}
+
+/* Dialogue — narrower column, indented to ~35ch width */
+.preview-script .dialogue {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-left: 100px;
+  padding-right: 200px;
+}
+
+/* Parenthetical — between character and dialogue indent */
+.preview-script .parenthetical {
+  font-style: italic;
+  color: #555;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-left: 160px;
+  padding-right: 240px;
+}
+
+/* Transition — right-aligned, uppercase */
+.preview-script .transition {
+  text-align: right;
+  text-transform: uppercase;
+  margin: 12px 0;
+}
+
+/* Centered text */
+.preview-script .centered {
+  text-align: center;
+}
+
+/* Synopsis — italic, gray */
+.preview-script .synopsis {
+  color: #999;
+  font-style: italic;
+}
+
+/* Notes */
+.preview-script .note {
+  color: #999;
+  font-style: italic;
+  background: #f5f5f5;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+
+/* Sections */
+.preview-script .section {
+  color: #059669;
+  font-weight: bold;
+  font-size: 14pt;
+  margin-top: 32px;
+}
+
+/* Page break */
+.preview-script .page_break {
+  text-align: center;
+  color: #ccc;
+  margin: 24px 0;
+  border-bottom: 1px dashed #ddd;
+}
+
+/* Lyrics */
+.preview-script .lyrics {
+  font-style: italic;
+  margin: 12px 0;
+  padding-left: 100px;
+  padding-right: 100px;
+}
+
+/* Dual dialogue */
+.preview-script .dual-dialogue {
+  display: flex;
+  gap: 20px;
+}
+
+.preview-script .dual-dialogue > div {
+  flex: 1;
+}

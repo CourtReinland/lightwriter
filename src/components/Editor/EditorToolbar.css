@@ -1,0 +1,191 @@
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: #1a1a1a;
+  color: #e5e5e5;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 13px;
+  border-bottom: 1px solid #333;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toolbar-brand {
+  font-weight: bold;
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: #f0f0f0;
+  background: none;
+  border: 1px solid #444;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.toolbar-brand:hover {
+  background: #2a2a2a;
+  border-color: #666;
+}
+
+.toolbar-project-name {
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+  transition: color 0.15s;
+}
+
+.toolbar-project-name:hover {
+  color: #ddd;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #444;
+  flex-shrink: 0;
+}
+
+.view-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.view-tab {
+  background: none;
+  border: 1px solid transparent;
+  color: #999;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.view-tab:hover {
+  color: #ddd;
+  background: #2a2a2a;
+}
+
+.view-tab.active {
+  color: #fff;
+  background: #333;
+  border-color: #555;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-count {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.target-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.target-input label {
+  color: #888;
+}
+
+.target-input input {
+  width: 48px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #e5e5e5;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-align: center;
+}
+
+.target-input input:focus {
+  outline: none;
+  border-color: #666;
+}
+
+.target-input span {
+  color: #666;
+}
+
+.ai-toggle {
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.ai-toggle.active {
+  color: #60a5fa !important;
+  border-color: #3b82f6 !important;
+}
+
+/* Export dropdown */
+.export-dropdown {
+  position: relative;
+}
+
+.export-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  min-width: 160px;
+  z-index: 50;
+  overflow: hidden;
+}
+
+.export-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  color: #ccc;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.export-option:hover {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.export-option + .export-option {
+  border-top: 1px solid #333;
+}
