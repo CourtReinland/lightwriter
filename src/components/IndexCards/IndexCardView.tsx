@@ -66,19 +66,19 @@ export default function IndexCardView({
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropSlot, setDropSlot] = useState<number | null>(null);
   const [aiLoading, setAiLoading] = useState<Record<number, boolean>>({});
-  const prevSceneCount = useRef(scenes.length);
 
-  // Generate AI descriptions when toggled on (or when re-entering cards view with aiEnabled)
-  useEffect(() => {
-    if (!aiEnabled) return;
+  // Ref accumulator so concurrent async callbacks don't overwrite each other
+  const aiDescsRef = useRef(aiDescs);
+  aiDescsRef.current = aiDescs;
+
+  /** Generate AI descriptions for all scenes. Called only on explicit button click. */
+  const generateAiDescriptions = useCallback(() => {
     const apiKey = GrokService.getStoredApiKey();
     if (!apiKey) return;
 
     const service = new GrokService(apiKey);
 
     for (let i = 0; i < scenes.length; i++) {
-      if (aiDescs[i] || aiLoading[i]) continue;
-
       const sceneText = getSceneText(content, i);
       if (!sceneText) continue;
 
@@ -94,23 +94,17 @@ export default function IndexCardView({
           "Describe what happens in this screenplay scene in 1-2 short sentences. Be concise and factual. Return ONLY the description, nothing else.",
         )
         .then((desc) => {
-          onAiDescsChange({ ...aiDescs, [i]: desc });
+          // Use ref to get latest accumulated state, not stale closure
+          const updated = { ...aiDescsRef.current, [i]: desc };
+          aiDescsRef.current = updated;
+          onAiDescsChange(updated);
         })
         .catch(() => {})
         .finally(() => {
           setAiLoading((prev) => ({ ...prev, [i]: false }));
         });
     }
-  }, [aiEnabled, scenes.length]);
-
-  // Clear AI descriptions when scene count changes (content restructured)
-  useEffect(() => {
-    if (scenes.length !== prevSceneCount.current) {
-      onAiDescsChange({});
-      setAiLoading({});
-      prevSceneCount.current = scenes.length;
-    }
-  }, [scenes.length]);
+  }, [scenes.length, content, onAiDescsChange]);
 
   const handleDragStart = useCallback((idx: number, e: React.DragEvent) => {
     setDragIdx(idx);
@@ -167,8 +161,9 @@ export default function IndexCardView({
     const newContent = preamble + sceneTexts.join("");
     onContentChange(newContent);
 
-    // Clear AI descs on reorder (scene content moved)
+    // Clear AI descs on reorder (scene positions changed)
     onAiDescsChange({});
+    aiDescsRef.current = {};
     setAiLoading({});
 
     setDragIdx(null);
@@ -200,12 +195,16 @@ export default function IndexCardView({
             <button
               className={`ai-desc-toggle ${aiEnabled ? "active" : ""}`}
               onClick={() => {
-                const next = !aiEnabled;
-                onAiEnabledChange(next);
-                // If toggling ON again, clear existing to regenerate
-                if (next) {
+                if (!aiEnabled) {
+                  // Turning ON: enable display and generate fresh descriptions
+                  onAiEnabledChange(true);
                   onAiDescsChange({});
                   setAiLoading({});
+                  // Small delay so state updates before generation reads scenes
+                  setTimeout(() => generateAiDescriptions(), 50);
+                } else {
+                  // Turning OFF: just hide, keep cached descriptions
+                  onAiEnabledChange(false);
                 }
               }}
               title="Generate AI scene descriptions"
