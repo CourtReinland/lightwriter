@@ -253,7 +253,7 @@ function buildPageBreakDecorations(view: EditorView): DecorationSet {
   const doc = view.state.doc;
   const totalLines = doc.lines;
 
-  for (let lineNum = LINES_PER_PAGE; lineNum < totalLines; lineNum += LINES_PER_PAGE) {
+  for (let lineNum = LINES_PER_PAGE; lineNum <= totalLines; lineNum += LINES_PER_PAGE) {
     const pageNum = Math.floor(lineNum / LINES_PER_PAGE) + 1;
     const line = doc.line(lineNum);
     builder.add(
@@ -272,10 +272,11 @@ function buildPageBreakDecorations(view: EditorView): DecorationSet {
 
 /**
  * Auto-capitalize scene headings and shot lines as the user types.
- * Only fires when the document changes and the cursor is on a scene/shot line.
+ * Uses requestAnimationFrame to avoid dispatching during a ViewPlugin update.
  */
+let autoCapsPending = false;
 function autoCapsOnChange(update: ViewUpdate) {
-  if (!update.docChanged) return;
+  if (!update.docChanged || autoCapsPending) return;
 
   const view = update.view;
   const doc = view.state.doc;
@@ -295,10 +296,21 @@ function autoCapsOnChange(update: ViewUpdate) {
   const upper = lineObj.text.toUpperCase();
   if (upper === lineObj.text) return; // Already uppercase
 
-  // Dispatch the uppercase change, preserving cursor position
-  view.dispatch({
-    changes: { from: lineObj.from, to: lineObj.to, insert: upper },
-    selection: { anchor: lineObj.from + (pos - lineObj.from) },
+  // Defer the dispatch to avoid dispatching inside a ViewPlugin update
+  autoCapsPending = true;
+  requestAnimationFrame(() => {
+    autoCapsPending = false;
+    // Re-read state since it may have changed
+    const currentDoc = view.state.doc;
+    const currentPos = view.state.selection.main.head;
+    const currentLine = currentDoc.lineAt(currentPos);
+    const currentUpper = currentLine.text.toUpperCase();
+    if (currentUpper !== currentLine.text && currentPos === currentLine.to) {
+      view.dispatch({
+        changes: { from: currentLine.from, to: currentLine.to, insert: currentUpper },
+        selection: { anchor: currentLine.from + (currentPos - currentLine.from) },
+      });
+    }
   });
 }
 

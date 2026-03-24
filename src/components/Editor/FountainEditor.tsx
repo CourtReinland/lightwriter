@@ -20,9 +20,21 @@ const ELEMENT_CYCLE: ElementType[] = [
   "scene", "action", "character", "dialogue", "parenthetical", "transition", "shot",
 ];
 
+/**
+ * Track the last TAB-selected element type so we cycle correctly
+ * even when content-based detection would loop (e.g., ALL CAPS character → dialogue → character).
+ */
+let lastTabElement: ElementType | null = null;
+let lastTabLineFrom = -1;
+
 function getNextElement(current: ElementType): ElementType {
   const idx = ELEMENT_CYCLE.indexOf(current);
   return ELEMENT_CYCLE[(idx + 1) % ELEMENT_CYCLE.length];
+}
+
+function getPrevElement(current: ElementType): ElementType {
+  const idx = ELEMENT_CYCLE.indexOf(current);
+  return ELEMENT_CYCLE[(idx - 1 + ELEMENT_CYCLE.length) % ELEMENT_CYCLE.length];
 }
 
 /**
@@ -152,9 +164,14 @@ export default function FountainEditor({
             run: (view) => {
               const pos = view.state.selection.main.head;
               const line = view.state.doc.lineAt(pos);
-              const current = detectElementType(line.text);
+              // Use tracked element if on same line, else detect from content
+              const current = (lastTabElement && lastTabLineFrom === line.from)
+                ? lastTabElement
+                : detectElementType(line.text);
               const next = getNextElement(current);
               convertLineToType(view, next);
+              lastTabElement = next;
+              lastTabLineFrom = line.from;
               onElementRef.current?.(next);
               return true;
             },
@@ -164,10 +181,13 @@ export default function FountainEditor({
             run: (view) => {
               const pos = view.state.selection.main.head;
               const line = view.state.doc.lineAt(pos);
-              const current = detectElementType(line.text);
-              const idx = ELEMENT_CYCLE.indexOf(current);
-              const prev = ELEMENT_CYCLE[(idx - 1 + ELEMENT_CYCLE.length) % ELEMENT_CYCLE.length];
+              const current = (lastTabElement && lastTabLineFrom === line.from)
+                ? lastTabElement
+                : detectElementType(line.text);
+              const prev = getPrevElement(current);
               convertLineToType(view, prev);
+              lastTabElement = prev;
+              lastTabLineFrom = line.from;
               onElementRef.current?.(prev);
               return true;
             },
@@ -181,7 +201,13 @@ export default function FountainEditor({
             onChangeRef.current(update.state.doc.toString());
           }
           if (update.selectionSet || update.docChanged) {
+            // Reset TAB tracking when user moves to a different line
             const sel = update.state.selection.main;
+            const curLine = update.state.doc.lineAt(sel.head);
+            if (lastTabLineFrom !== curLine.from) {
+              lastTabElement = null;
+              lastTabLineFrom = -1;
+            }
             if (sel.from !== sel.to) {
               const selectedText = update.state.doc.sliceString(sel.from, sel.to);
               // Get surrounding context (200 chars before and after)
