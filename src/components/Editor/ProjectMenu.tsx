@@ -101,7 +101,7 @@ export default function ProjectMenu({
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
           >
-            {importing ? "Importing..." : "Open .fountain / .fdx / .celtx"}
+            {importing ? "Importing..." : "Open .fountain / .fdx / .celtx / .pdf / .txt"}
           </button>
           <input
             ref={fileInputRef}
