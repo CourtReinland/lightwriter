@@ -16,7 +16,7 @@ import {
   type Extension,
   RangeSetBuilder,
 } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 
 type LineType =
   | "scene"
@@ -188,42 +188,6 @@ function classifyDocument(lineTexts: string[]): LineType[] {
 
 const LINES_PER_PAGE = 56;
 
-/** Widget for page break line with page number */
-class PageBreakWidget extends WidgetType {
-  constructor(readonly pageNum: number) {
-    super();
-  }
-
-  toDOM(): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "cm-page-break";
-    el.style.cssText = `
-      border-bottom: 1px dashed #ccc;
-      margin: 8px 16px;
-      position: relative;
-      height: 1px;
-    `;
-    const label = document.createElement("span");
-    label.style.cssText = `
-      position: absolute;
-      right: 0;
-      top: -8px;
-      font-size: 9px;
-      color: #aaa;
-      font-family: 'Courier Prime', monospace;
-      background: #fefefe;
-      padding: 0 4px;
-    `;
-    label.textContent = `${this.pageNum}.`;
-    el.appendChild(label);
-    return el;
-  }
-
-  ignoreEvent(): boolean {
-    return true;
-  }
-}
-
 function buildFormattingDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
@@ -247,7 +211,11 @@ function buildFormattingDecorations(view: EditorView): DecorationSet {
   return builder.finish();
 }
 
-/** Build page break widget decorations separately to avoid sort conflicts */
+/**
+ * Build page break line decorations using CSS classes instead of block widgets.
+ * This avoids viewport calculation bugs that block widgets can cause.
+ * The page number is rendered via a CSS `content` attr.
+ */
 function buildPageBreakDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
@@ -257,12 +225,11 @@ function buildPageBreakDecorations(view: EditorView): DecorationSet {
     const pageNum = Math.floor(lineNum / LINES_PER_PAGE) + 1;
     const line = doc.line(lineNum);
     builder.add(
-      line.to,
-      line.to,
-      Decoration.widget({
-        widget: new PageBreakWidget(pageNum),
-        side: 1,
-        block: true,
+      line.from,
+      line.from,
+      Decoration.line({
+        class: "cm-page-break-line",
+        attributes: { "data-page": String(pageNum) },
       }),
     );
   }
@@ -375,6 +342,24 @@ const formattingTheme = EditorView.baseTheme({
   },
   ".cm-fmt-shot": {
     /* Shot: same left margin as action (flush left), uppercase handled by text content */
+  },
+  /* Page break: dashed line below the last line of each page with page number */
+  ".cm-page-break-line": {
+    borderBottom: "1px dashed #ccc",
+    marginBottom: "12px !important",
+    paddingBottom: "12px !important",
+    position: "relative",
+  },
+  ".cm-page-break-line::after": {
+    content: "attr(data-page)",
+    position: "absolute",
+    right: "16px",
+    bottom: "-2px",
+    fontSize: "9px",
+    color: "#aaa",
+    fontFamily: "'Courier Prime', monospace",
+    background: "#fefefe",
+    padding: "0 4px",
   },
 });
 
