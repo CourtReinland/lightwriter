@@ -390,6 +390,128 @@ function parseCeltxHtml(html: string): string {
   return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim() + "\n";
 }
 
+// ─── .pdf import ─────────────────────────────────────────────────────
+// Uses pdf.js (pdfjs-dist) for client-side PDF text extraction.
+// Extracts text page-by-page, attempts to reconstruct screenplay structure
+// by analyzing vertical positioning of text items.
+
+export async function importPdf(arrayBuffer: ArrayBuffer): Promise<string> {
+  // Dynamic import to avoid loading pdf.js unless needed
+  const pdfjsLib = await import("pdfjs-dist");
+
+  // Set up the worker — use the bundled worker from pdfjs-dist
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/pdf.worker.min.mjs",
+    import.meta.url,
+  ).toString();
+
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const allLines: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const viewport = page.getViewport({ scale: 1.0 });
+    const pageWidth = viewport.width;
+
+    // Group text items into lines by Y position (items on similar Y = same line)
+    const lineMap = new Map<number, { x: number; text: string }[]>();
+
+    for (const item of textContent.items) {
+      if (!("str" in item) || !item.str.trim()) continue;
+
+      const typedItem = item as { str: string; transform: number[] };
+      const x = typedItem.transform[4]; // X position
+      const y = Math.round(typedItem.transform[5]); // Y position (round to group)
+
+      // Group by Y within a 2-unit tolerance
+      let bestY = y;
+      for (const existingY of lineMap.keys()) {
+        if (Math.abs(existingY - y) <= 2) {
+          bestY = existingY;
+          break;
+        }
+      }
+
+      if (!lineMap.has(bestY)) lineMap.set(bestY, []);
+      lineMap.get(bestY)!.push({ x, text: typedItem.str });
+    }
+
+    // Sort lines by Y position (descending — PDF coordinates are bottom-up)
+    const sortedLines = Array.from(lineMap.entries())
+      .sort((a, b) => b[0] - a[0]);
+
+    for (const [, items] of sortedLines) {
+      // Sort items left-to-right within the line
+      items.sort((a, b) => a.x - b.x);
+      const lineText = items.map((i) => i.text).join("");
+      if (!lineText.trim()) continue;
+
+      // Analyze indentation to classify screenplay elements
+      const firstX = items[0].x;
+      const trimmed = lineText.trim();
+
+      // Heuristic classification based on horizontal position:
+      //   - Left margin (x < 110): Scene heading or action
+      //   - Character indent (x ~170-250): Character name
+      //   - Dialogue indent (x ~120-160): Dialogue
+      //   - Parenthetical indent (x ~140-180 + starts with "(")
+      //   - Right-aligned (x > 350): Transition
+      // These thresholds assume a standard US Letter page (612pt wide)
+      const relativeX = firstX / pageWidth;
+
+      if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+        // Parenthetical
+        allLines.push(trimmed);
+      } else if (relativeX > 0.55) {
+        // Right-aligned → Transition
+        allLines.push(`> ${trimmed}`);
+      } else if (relativeX > 0.32 && trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed) && trimmed.length < 40) {
+        // Centered + ALL CAPS + short → Character name
+        // Add blank line before character (Fountain convention)
+        if (allLines.length > 0 && allLines[allLines.length - 1].trim() !== "") {
+          allLines.push("");
+        }
+        allLines.push(trimmed);
+      } else if (relativeX > 0.18 && relativeX <= 0.32) {
+        // Dialogue indent range
+        allLines.push(trimmed);
+      } else {
+        // Left margin — could be scene heading or action
+        if (/^(INT|EXT|EST|INT\.?\/?EXT|I\/E)[\s.]/i.test(trimmed)) {
+          // Scene heading — ensure blank line before
+          if (allLines.length > 0 && allLines[allLines.length - 1].trim() !== "") {
+            allLines.push("");
+          }
+          allLines.push(trimmed.toUpperCase());
+        } else if (/^[A-Z\s]+TO:$/.test(trimmed)) {
+          // Transition ending in TO:
+          allLines.push(`> ${trimmed}`);
+        } else {
+          // Action
+          if (allLines.length > 0) {
+            const prevLine = allLines[allLines.length - 1].trim();
+            // Add blank line before action after dialogue
+            if (prevLine && !prevLine.startsWith("(") && !prevLine.startsWith(">") && !prevLine.startsWith(".") && !/^(INT|EXT)/.test(prevLine)) {
+              // Check if previous was dialogue (not uppercase) and this is action
+              // Simple heuristic: if this line is at left margin and previous wasn't a blank
+            }
+          }
+          allLines.push(trimmed);
+        }
+      }
+    }
+
+    // Page break between pages (except after last)
+    if (pageNum < pdf.numPages) {
+      allLines.push("");
+    }
+  }
+
+  // Clean up: normalize excessive blank lines
+  return allLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim() + "\n";
+}
+
 /**
  * Detect file type and import accordingly.
  */
@@ -406,6 +528,10 @@ export async function importFile(file: File): Promise<string> {
 
   if (name.endsWith(".celtx")) {
     return importCeltx(await file.arrayBuffer());
+  }
+
+  if (name.endsWith(".pdf")) {
+    return importPdf(await file.arrayBuffer());
   }
 
   return importFountain(await file.text());

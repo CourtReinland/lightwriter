@@ -106,7 +106,7 @@ export default function ProjectMenu({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".fountain,.fdx,.celtx,.txt"
+            accept=".fountain,.fdx,.celtx,.txt,.pdf"
             style={{ display: "none" }}
             onChange={handleImport}
           />

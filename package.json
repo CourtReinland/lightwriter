@@ -9,15 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@codemirror/view": "^6.36.0",
-    "@codemirror/state": "^6.5.0",
-    "@codemirror/language": "^6.10.0",
-    "@codemirror/commands": "^6.7.0",
-    "@codemirror/search": "^6.5.0",
     "@codemirror/autocomplete": "^6.18.0",
-    "fountain-js": "^1.1.0"
+    "@codemirror/commands": "^6.7.0",
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.0",
+    "fountain-js": "^1.1.0",
+    "pdfjs-dist": "^5.5.207",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
