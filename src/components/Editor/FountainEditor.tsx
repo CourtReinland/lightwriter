@@ -9,7 +9,98 @@ import { overlayExtension, setOverlayBeats } from "../../codemirror/overlay-deco
 import { screenplayFormatting } from "../../codemirror/screenplay-formatting";
 import { ALL_FRAMEWORKS, computeBeatRanges } from "../../frameworks";
 import type { ComputedBeat } from "../../frameworks";
+import { detectElementType, stripForcePrefix, type ElementType } from "./ElementBar";
 import "./FountainEditor.css";
+
+/**
+ * Element cycle order for TAB key:
+ * Scene → Action → Character → Dialogue → Parenthetical → Transition → Shot → Scene...
+ */
+const ELEMENT_CYCLE: ElementType[] = [
+  "scene", "action", "character", "dialogue", "parenthetical", "transition", "shot",
+];
+
+function getNextElement(current: ElementType): ElementType {
+  const idx = ELEMENT_CYCLE.indexOf(current);
+  return ELEMENT_CYCLE[(idx + 1) % ELEMENT_CYCLE.length];
+}
+
+/**
+ * Convert the current line to the given element type using Fountain conventions.
+ */
+function convertLineToType(view: EditorView, type: ElementType): boolean {
+  const pos = view.state.selection.main.head;
+  const line = view.state.doc.lineAt(pos);
+  const trimmed = line.text.trim();
+
+  // If line is empty, insert appropriate template prefix
+  if (!trimmed) {
+    let insert = "";
+    switch (type) {
+      case "scene": insert = "INT. "; break;
+      case "action": insert = ""; break;
+      case "character": insert = "@"; break;
+      case "dialogue": insert = ""; break;
+      case "parenthetical": insert = "("; break;
+      case "transition": insert = "> "; break;
+      case "shot": insert = "!!"; break;
+    }
+    if (insert) {
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert },
+        selection: { anchor: line.from + insert.length },
+      });
+    }
+    return true;
+  }
+
+  // Line has content — convert it
+  const { bare } = stripForcePrefix(trimmed);
+  let newText: string;
+
+  switch (type) {
+    case "character":
+      newText = `@${bare.toUpperCase()}`;
+      break;
+    case "shot":
+      newText = `!!${bare.toUpperCase()}`;
+      break;
+    case "action":
+      if (bare === bare.toUpperCase() && /[A-Z]/.test(bare)) {
+        newText = `!${bare}`;
+      } else {
+        newText = bare;
+      }
+      break;
+    case "scene":
+      if (/^(INT|EXT|EST|INT\.\/EXT|I\/E)[.\s]/i.test(bare)) {
+        newText = bare.toUpperCase();
+      } else {
+        newText = `.${bare.toUpperCase()}`;
+      }
+      break;
+    case "transition":
+      newText = `> ${bare.toUpperCase()}`;
+      break;
+    case "dialogue":
+      newText = bare;
+      break;
+    case "parenthetical":
+      newText = bare.startsWith("(") ? bare : `(${bare}`;
+      if (!newText.endsWith(")")) newText = `${newText})`;
+      break;
+    default:
+      newText = bare;
+  }
+
+  if (newText !== line.text) {
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: newText },
+      selection: { anchor: line.from + newText.length },
+    });
+  }
+  return true;
+}
 
 interface FountainEditorProps {
   content: string;
@@ -17,6 +108,7 @@ interface FountainEditorProps {
   activeFrameworks: string[];
   targetPages: number;
   onSelectionChange?: (selectedText: string, contextText: string) => void;
+  onElementChange?: (element: ElementType) => void;
   viewRef?: React.MutableRefObject<EditorView | undefined>;
 }
 
@@ -26,14 +118,17 @@ export default function FountainEditor({
   activeFrameworks,
   targetPages,
   onSelectionChange,
+  onElementChange,
   viewRef: externalViewRef,
 }: FountainEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView>(null as unknown as EditorView);
   const onChangeRef = useRef(onChange);
   const onSelectionRef = useRef(onSelectionChange);
+  const onElementRef = useRef(onElementChange);
   onChangeRef.current = onChange;
   onSelectionRef.current = onSelectionChange;
+  onElementRef.current = onElementChange;
 
   const createView = useCallback(() => {
     if (!containerRef.current) return;
@@ -51,7 +146,36 @@ export default function FountainEditor({
         fountainHighlightStyle,
         screenplayFormatting,
         overlayExtension,
-        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+        keymap.of([
+          {
+            key: "Tab",
+            run: (view) => {
+              const pos = view.state.selection.main.head;
+              const line = view.state.doc.lineAt(pos);
+              const current = detectElementType(line.text);
+              const next = getNextElement(current);
+              convertLineToType(view, next);
+              onElementRef.current?.(next);
+              return true;
+            },
+          },
+          {
+            key: "Shift-Tab",
+            run: (view) => {
+              const pos = view.state.selection.main.head;
+              const line = view.state.doc.lineAt(pos);
+              const current = detectElementType(line.text);
+              const idx = ELEMENT_CYCLE.indexOf(current);
+              const prev = ELEMENT_CYCLE[(idx - 1 + ELEMENT_CYCLE.length) % ELEMENT_CYCLE.length];
+              convertLineToType(view, prev);
+              onElementRef.current?.(prev);
+              return true;
+            },
+          },
+          ...defaultKeymap,
+          ...historyKeymap,
+          ...searchKeymap,
+        ]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());

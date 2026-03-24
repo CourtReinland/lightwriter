@@ -257,7 +257,7 @@ export default function IndexCardView({
                 <>
                   <ConnectorToggle
                     index={i}
-                    value={connectors[i] || "AND"}
+                    value={(connectors[i] || "AND") as Connector}
                     onChange={handleConnectorChange}
                   />
                   <div

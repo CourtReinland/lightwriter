@@ -16,7 +16,7 @@ import {
   type Extension,
   RangeSetBuilder,
 } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 
 type LineType =
   | "scene"
@@ -186,6 +186,44 @@ function classifyDocument(lineTexts: string[]): LineType[] {
   return types;
 }
 
+const LINES_PER_PAGE = 56;
+
+/** Widget for page break line with page number */
+class PageBreakWidget extends WidgetType {
+  constructor(readonly pageNum: number) {
+    super();
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "cm-page-break";
+    el.style.cssText = `
+      border-bottom: 1px dashed #ccc;
+      margin: 8px 16px;
+      position: relative;
+      height: 1px;
+    `;
+    const label = document.createElement("span");
+    label.style.cssText = `
+      position: absolute;
+      right: 0;
+      top: -8px;
+      font-size: 9px;
+      color: #aaa;
+      font-family: 'Courier Prime', monospace;
+      background: #fefefe;
+      padding: 0 4px;
+    `;
+    label.textContent = `${this.pageNum}.`;
+    el.appendChild(label);
+    return el;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 function buildFormattingDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
@@ -209,6 +247,61 @@ function buildFormattingDecorations(view: EditorView): DecorationSet {
   return builder.finish();
 }
 
+/** Build page break widget decorations separately to avoid sort conflicts */
+function buildPageBreakDecorations(view: EditorView): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const doc = view.state.doc;
+  const totalLines = doc.lines;
+
+  for (let lineNum = LINES_PER_PAGE; lineNum < totalLines; lineNum += LINES_PER_PAGE) {
+    const pageNum = Math.floor(lineNum / LINES_PER_PAGE) + 1;
+    const line = doc.line(lineNum);
+    builder.add(
+      line.to,
+      line.to,
+      Decoration.widget({
+        widget: new PageBreakWidget(pageNum),
+        side: 1,
+        block: true,
+      }),
+    );
+  }
+
+  return builder.finish();
+}
+
+/**
+ * Auto-capitalize scene headings and shot lines as the user types.
+ * Only fires when the document changes and the cursor is on a scene/shot line.
+ */
+function autoCapsOnChange(update: ViewUpdate) {
+  if (!update.docChanged) return;
+
+  const view = update.view;
+  const doc = view.state.doc;
+  const pos = view.state.selection.main.head;
+  const lineObj = doc.lineAt(pos);
+  const trimmed = lineObj.text.trim();
+
+  // Only auto-caps if cursor is at the end of the line (user is actively typing)
+  if (pos !== lineObj.to) return;
+
+  // Check if the line is a scene heading or shot
+  const isScene = /^\.((?!\.)\S)|^(INT|EXT|EST|INT\.\/EXT|I\/E)[.\s]/i.test(trimmed);
+  const isShot = /^!!/.test(trimmed);
+
+  if (!isScene && !isShot) return;
+
+  const upper = lineObj.text.toUpperCase();
+  if (upper === lineObj.text) return; // Already uppercase
+
+  // Dispatch the uppercase change, preserving cursor position
+  view.dispatch({
+    changes: { from: lineObj.from, to: lineObj.to, insert: upper },
+    selection: { anchor: lineObj.from + (pos - lineObj.from) },
+  });
+}
+
 const formattingPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
@@ -220,6 +313,27 @@ const formattingPlugin = ViewPlugin.fromClass(
     update(update: ViewUpdate) {
       if (update.docChanged || update.viewportChanged) {
         this.decorations = buildFormattingDecorations(update.view);
+      }
+      // Auto-caps for scene/shot lines
+      autoCapsOnChange(update);
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  },
+);
+
+const pageBreakPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = buildPageBreakDecorations(view);
+    }
+
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildPageBreakDecorations(update.view);
       }
     }
   },
@@ -252,4 +366,4 @@ const formattingTheme = EditorView.baseTheme({
   },
 });
 
-export const screenplayFormatting: Extension = [formattingPlugin, formattingTheme];
+export const screenplayFormatting: Extension = [formattingPlugin, pageBreakPlugin, formattingTheme];

@@ -358,6 +358,7 @@ export default function App() {
                 activeFrameworks={project.activeFrameworks}
                 targetPages={project.targetPages}
                 onSelectionChange={handleSelectionChange}
+                onElementChange={setCurrentElement}
                 viewRef={editorViewRef}
               />
             )}
