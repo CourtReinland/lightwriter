@@ -399,11 +399,8 @@ export async function importPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   // Dynamic import to avoid loading pdf.js unless needed
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Set up the worker — use the bundled worker from pdfjs-dist
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
+  // Use the worker from public/ (copied from node_modules/pdfjs-dist/build/)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const allLines: string[] = [];
