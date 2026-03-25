@@ -160,6 +160,60 @@ export default function FountainEditor({
         overlayExtension,
         keymap.of([
           {
+            key: "Enter",
+            run: (view) => {
+              const pos = view.state.selection.main.head;
+              const line = view.state.doc.lineAt(pos);
+              const trimmed = line.text.trim();
+              const type = detectElementType(line.text);
+
+              // Auto-uppercase character names on Enter
+              // If the line is a character (@ prefix or ALL CAPS), ensure it's uppercase
+              if (type === "character" && trimmed) {
+                const { bare } = stripForcePrefix(trimmed);
+                const upper = bare.toUpperCase();
+                const prefix = trimmed.startsWith("@") ? "@" : "";
+                const newText = prefix + upper;
+                if (newText !== line.text) {
+                  view.dispatch({
+                    changes: { from: line.from, to: line.to, insert: newText },
+                  });
+                }
+              }
+
+              // After character line → insert blank line + position for dialogue
+              if (type === "character" && trimmed) {
+                view.dispatch({
+                  changes: { from: line.to, insert: "\n" },
+                  selection: { anchor: line.to + 1 },
+                });
+                // Reset TAB tracking to dialogue for the new line
+                lastTabElement = "dialogue";
+                lastTabLineFrom = line.to + 1;
+                onElementRef.current?.("dialogue");
+                return true;
+              }
+
+              // After dialogue line → insert blank line (which ends dialogue block) for action
+              if (type === "dialogue" && trimmed) {
+                // If cursor is at end of line, transition to action
+                if (pos === line.to) {
+                  view.dispatch({
+                    changes: { from: line.to, insert: "\n\n" },
+                    selection: { anchor: line.to + 2 },
+                  });
+                  lastTabElement = "action";
+                  lastTabLineFrom = line.to + 2;
+                  onElementRef.current?.("action");
+                  return true;
+                }
+              }
+
+              // Default Enter behavior: just insert newline
+              return false; // Let CodeMirror handle it
+            },
+          },
+          {
             key: "Tab",
             run: (view) => {
               const pos = view.state.selection.main.head;
