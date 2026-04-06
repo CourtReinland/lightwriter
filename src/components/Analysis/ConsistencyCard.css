@@ -1,0 +1,95 @@
+.consistency-list {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.consistency-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: 12px 14px;
+}
+
+.consistency-card.score-high {
+  border-left-color: #22c55e;
+}
+
+.consistency-card.score-mid {
+  border-left-color: #eab308;
+}
+
+.consistency-card.score-low {
+  border-left-color: #ef4444;
+}
+
+.consistency-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.consistency-name {
+  font-size: 12px;
+  font-weight: bold;
+  color: #e5e5e5;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.consistency-score {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.consistency-score.high {
+  background: #1a3b2a;
+  color: #22c55e;
+}
+
+.consistency-score.mid {
+  background: #3b3a1a;
+  color: #eab308;
+}
+
+.consistency-score.low {
+  background: #3b1a1a;
+  color: #ef4444;
+}
+
+.consistency-notes {
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.consistency-issues {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 10px;
+  color: #999;
+  line-height: 1.6;
+}
+
+.consistency-issues li {
+  margin-bottom: 2px;
+}
+
+.consistency-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #666;
+  font-size: 11px;
+}
+
+.consistency-empty .hint {
+  font-size: 10px;
+  color: #555;
+  margin-top: 4px;
+}

@@ -16,6 +16,7 @@ import ElementBar, {
   stripForcePrefix,
 } from "./components/Editor/ElementBar";
 import KBPanel from "./components/KnowledgeBase/KBPanel";
+import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import { useFountainParser } from "./hooks/useFountainParser";
 import { exportFountain, exportFdx, exportPdf } from "./services/fountainExporter";
 import {
@@ -99,7 +100,7 @@ function loadOrCreateInitialProject(): Project {
 
 export default function App() {
   const [project, setProject] = useState<Project>(loadOrCreateInitialProject);
-  const [activeView, setActiveView] = useState<"editor" | "preview" | "cards">("editor");
+  const [activeView, setActiveView] = useState<"editor" | "preview" | "cards" | "analysis">("editor");
   const [selectedText, setSelectedText] = useState("");
   const [contextText, setContextText] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -401,6 +402,16 @@ export default function App() {
                 onAiDescsChange={setCardAiDescs}
                 aiEnabled={cardAiEnabled}
                 onAiEnabledChange={setCardAiEnabled}
+              />
+            )}
+            {activeView === "analysis" && (
+              <AnalysisPanel
+                projectId={project.id}
+                content={project.content}
+                knowledgeBase={knowledgeBase}
+                styleProfile={styleProfile}
+                activeFrameworks={project.activeFrameworks}
+                targetPages={project.targetPages}
               />
             )}
           </div>

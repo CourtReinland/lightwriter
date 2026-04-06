@@ -1,0 +1,120 @@
+.beat-alignment-list {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.beat-framework-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.beat-framework-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #1e1e1e;
+  border-left: 3px solid;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #e5e5e5;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.beat-framework-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.beat-card {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-left: 12px;
+}
+
+.beat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.beat-card-name {
+  flex: 1;
+  font-size: 11px;
+  color: #ccc;
+  font-weight: bold;
+}
+
+.beat-card-pages {
+  font-size: 9px;
+  color: #666;
+  background: #252525;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.beat-card-score {
+  font-size: 10px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.beat-card-score.high {
+  background: #1a3b2a;
+  color: #22c55e;
+}
+
+.beat-card-score.mid {
+  background: #3b3a1a;
+  color: #eab308;
+}
+
+.beat-card-score.low {
+  background: #3b1a1a;
+  color: #ef4444;
+}
+
+.beat-card-row {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.beat-card-label {
+  color: #22c55e;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.beat-card-label.missing {
+  color: #eab308;
+}
+
+.beat-card-text {
+  color: #aaa;
+}
+
+.beat-alignment-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #666;
+  font-size: 11px;
+}
+
+.beat-alignment-empty .hint {
+  font-size: 10px;
+  color: #555;
+  margin-top: 4px;
+}
