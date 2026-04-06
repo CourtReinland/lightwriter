@@ -1,0 +1,267 @@
+.kb-panel {
+  background: #1a1a1a;
+  border-left: 1px solid #333;
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  overflow-y: auto;
+}
+
+.kb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #333;
+}
+
+.kb-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+}
+
+.kb-scan-btn {
+  font-family: inherit;
+  font-size: 9px;
+  padding: 3px 8px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kb-scan-btn:hover:not(:disabled) {
+  background: #333;
+  color: #ccc;
+}
+
+.kb-scan-btn:disabled {
+  opacity: 0.5;
+}
+
+.kb-error {
+  padding: 6px 12px;
+  font-size: 10px;
+  color: #ef4444;
+  background: #2a1a1a;
+}
+
+.kb-section {
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.kb-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: #aaa;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kb-section-header:hover {
+  background: #222;
+  color: #ddd;
+}
+
+.kb-add-btn {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #888;
+  font-family: inherit;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.kb-add-btn:hover {
+  background: #333;
+  color: #ddd;
+}
+
+.kb-entry {
+  padding: 6px 12px 6px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid #1f1f1f;
+}
+
+.kb-entry:hover {
+  background: #222;
+}
+
+.kb-entry-name {
+  font-size: 11px;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kb-entry-preview {
+  font-size: 9px;
+  color: #666;
+}
+
+.kb-entry-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.kb-entry-actions button {
+  background: none;
+  border: none;
+  color: #555;
+  font-family: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kb-entry-actions button:hover {
+  color: #aaa;
+}
+
+.kb-tag {
+  font-size: 8px;
+  color: #666;
+  background: #2a2a2a;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.kb-status {
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.kb-status.unresolved { background: #3b1a1a; color: #ef4444; }
+.kb-status.foreshadowed { background: #3b3a1a; color: #eab308; }
+.kb-status.resolved { background: #1a3b2a; color: #22c55e; }
+
+.kb-tone-fields,
+.kb-style-section {
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kb-input-sm {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #ddd;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+
+.kb-textarea-sm {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #ddd;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.kb-input-sm:focus,
+.kb-textarea-sm:focus {
+  outline: none;
+  border-color: #60a5fa;
+}
+
+.kb-style-card {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.kb-style-row {
+  font-size: 10px;
+  color: #aaa;
+  margin-bottom: 2px;
+}
+
+.kb-style-row span {
+  color: #666;
+}
+
+.kb-style-analysis {
+  font-size: 10px;
+  color: #888;
+  font-style: italic;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #333;
+  line-height: 1.5;
+}
+
+.kb-style-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.kb-action-btn {
+  flex: 1;
+  font-family: inherit;
+  font-size: 9px;
+  padding: 4px 8px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kb-action-btn:hover:not(:disabled) {
+  background: #333;
+  color: #ccc;
+}
+
+.kb-action-btn.primary {
+  background: #1e3a5f;
+  border-color: #3b82f6;
+  color: #60a5fa;
+}
+
+.kb-action-btn.primary:hover:not(:disabled) {
+  background: #1e4a7f;
+}
+
+.kb-action-btn:disabled {
+  opacity: 0.5;
+}

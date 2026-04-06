@@ -81,6 +81,42 @@ export class GrokService {
     return stripLLMPreamble(raw);
   }
 
+  /**
+   * Lower-level completion method for the AI orchestrator.
+   * Accepts pre-built system/user prompts.
+   */
+  async complete(
+    systemPrompt: string,
+    userMessage: string,
+    options?: { temperature?: number; maxTokens?: number },
+  ): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        temperature: options?.temperature ?? 0.8,
+        max_tokens: options?.maxTokens ?? 2048,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Grok API error: ${response.status} — ${err}`);
+    }
+
+    const data = await response.json();
+    const raw = data.choices?.[0]?.message?.content ?? "";
+    return stripLLMPreamble(raw);
+  }
+
   static getStoredApiKey(): string | null {
     return localStorage.getItem("lw-grok-api-key");
   }

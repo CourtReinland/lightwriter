@@ -1,0 +1,81 @@
+.analysis-card {
+  background: #1a1a2a;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 12px;
+  margin: 8px;
+}
+
+.analysis-section {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2a2a3a;
+}
+
+.analysis-section:last-of-type {
+  border-bottom: none;
+}
+
+.analysis-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.analysis-label {
+  font-size: 10px;
+  font-weight: bold;
+  color: #8b8bbb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.analysis-score {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.analysis-score.high {
+  background: #1a3b2a;
+  color: #22c55e;
+}
+
+.analysis-score.mid {
+  background: #3b3a1a;
+  color: #eab308;
+}
+
+.analysis-score.low {
+  background: #3b1a1a;
+  color: #ef4444;
+}
+
+.analysis-body {
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.analysis-copy-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px;
+  font-family: 'Courier Prime', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #2a2a3a;
+  border: 1px solid #3a3a5a;
+  color: #8b8bbb;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.analysis-copy-btn:hover {
+  background: #3a3a4a;
+  color: #bbb;
+}

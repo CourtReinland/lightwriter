@@ -121,6 +121,7 @@ interface FountainEditorProps {
   targetPages: number;
   onSelectionChange?: (selectedText: string, contextText: string) => void;
   onElementChange?: (element: ElementType) => void;
+  onCursorBeatChange?: (beats: ComputedBeat[]) => void;
   viewRef?: React.MutableRefObject<EditorView | undefined>;
 }
 
@@ -131,16 +132,20 @@ export default function FountainEditor({
   targetPages,
   onSelectionChange,
   onElementChange,
+  onCursorBeatChange,
   viewRef: externalViewRef,
 }: FountainEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView>(null as unknown as EditorView);
+  const beatsRef = useRef<ComputedBeat[]>([]);
   const onChangeRef = useRef(onChange);
   const onSelectionRef = useRef(onSelectionChange);
   const onElementRef = useRef(onElementChange);
+  const onCursorBeatRef = useRef(onCursorBeatChange);
   onChangeRef.current = onChange;
   onSelectionRef.current = onSelectionChange;
   onElementRef.current = onElementChange;
+  onCursorBeatRef.current = onCursorBeatChange;
 
   const createView = useCallback(() => {
     if (!containerRef.current) return;
@@ -272,6 +277,13 @@ export default function FountainEditor({
             } else {
               onSelectionRef.current?.("", "");
             }
+
+            // Cursor beat detection
+            const cursorLineNum = update.state.doc.lineAt(sel.head).number;
+            const matchingBeats = beatsRef.current.filter(
+              b => cursorLineNum >= (b.startLine + 1) && cursorLineNum <= (b.endLine + 1),
+            );
+            onCursorBeatRef.current?.(matchingBeats);
           }
         }),
         EditorView.lineWrapping,
@@ -308,6 +320,7 @@ export default function FountainEditor({
       }
     }
 
+    beatsRef.current = beats;
     view.dispatch({
       effects: setOverlayBeats.of(beats),
     });

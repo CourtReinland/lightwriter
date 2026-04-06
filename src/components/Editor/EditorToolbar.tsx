@@ -9,6 +9,8 @@ interface EditorToolbarProps {
   onViewChange: (view: "editor" | "preview" | "cards") => void;
   showSuggestions?: boolean;
   onToggleSuggestions?: () => void;
+  showKB?: boolean;
+  onToggleKB?: () => void;
   onExport?: () => void;
   onExportFdx?: () => void;
   onExportPdf?: () => void;
@@ -24,6 +26,8 @@ export default function EditorToolbar({
   onViewChange,
   showSuggestions,
   onToggleSuggestions,
+  showKB,
+  onToggleKB,
   onExport,
   onExportFdx,
   onExportPdf,
@@ -79,6 +83,14 @@ export default function EditorToolbar({
             onClick={onToggleSuggestions}
           >
             AI
+          </button>
+        )}
+        {activeView === "editor" && onToggleKB && (
+          <button
+            className={`view-tab kb-toggle ${showKB ? "active" : ""}`}
+            onClick={onToggleKB}
+          >
+            KB
           </button>
         )}
         <div className="export-dropdown">

@@ -15,12 +15,16 @@ import ElementBar, {
   detectElementType,
   stripForcePrefix,
 } from "./components/Editor/ElementBar";
+import KBPanel from "./components/KnowledgeBase/KBPanel";
 import { useFountainParser } from "./hooks/useFountainParser";
 import { exportFountain, exportFdx, exportPdf } from "./services/fountainExporter";
 import {
   StorageService,
   type Project,
 } from "./services/storageService";
+import { KnowledgeBaseService, type KnowledgeBase } from "./services/knowledgeBase";
+import { StyleProfileService, type StyleProfile } from "./services/styleProfile";
+import type { ComputedBeat } from "./frameworks/utils";
 
 const SAMPLE_FOUNTAIN = `Title: My Screenplay
 Author: Writer Name
@@ -106,6 +110,15 @@ export default function App() {
   const [cardConnectors, setCardConnectors] = useState<Record<number, string>>({});
   const [cardAiDescs, setCardAiDescs] = useState<Record<number, string>>({});
   const [cardAiEnabled, setCardAiEnabled] = useState(false);
+  const [showKB, setShowKB] = useState(false);
+  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(() =>
+    KnowledgeBaseService.getKB(loadOrCreateInitialProject().id),
+  );
+  const [styleProfile, setStyleProfile] = useState<StyleProfile | null>(() =>
+    StyleProfileService.getProfile(loadOrCreateInitialProject().id),
+  );
+  const [cursorBeats, setCursorBeats] = useState<ComputedBeat[]>([]);
+  const [cursorLine, setCursorLine] = useState(0);
 
   const editorViewRef = useRef<EditorView>(null as unknown as EditorView);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined as unknown as ReturnType<typeof setTimeout>);
@@ -162,6 +175,7 @@ export default function App() {
       const pos = view.state.selection.main.head;
       const line = view.state.doc.lineAt(pos);
       setCurrentElement(detectElementType(line.text));
+      setCursorLine(line.number);
     }
   }, []);
 
@@ -336,6 +350,8 @@ export default function App() {
           onViewChange={setActiveView}
           showSuggestions={showSuggestions}
           onToggleSuggestions={() => setShowSuggestions(!showSuggestions)}
+          showKB={showKB}
+          onToggleKB={() => setShowKB(!showKB)}
           onExport={handleExportFountain}
           onExportFdx={handleExportFdx}
           onExportPdf={handleExportPdf}
@@ -359,6 +375,7 @@ export default function App() {
                 targetPages={project.targetPages}
                 onSelectionChange={handleSelectionChange}
                 onElementChange={setCurrentElement}
+                onCursorBeatChange={setCursorBeats}
                 viewRef={editorViewRef}
               />
             )}
@@ -391,8 +408,23 @@ export default function App() {
             <SuggestionPanel
               selectedText={selectedText}
               contextText={contextText}
+              fullScript={project.content}
+              cursorLine={cursorLine}
+              cursorBeats={cursorBeats}
+              knowledgeBase={knowledgeBase}
+              styleProfile={styleProfile}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
+            />
+          )}
+          {activeView === "editor" && showKB && (
+            <KBPanel
+              kb={knowledgeBase}
+              onKBChange={setKnowledgeBase}
+              styleProfile={styleProfile}
+              onStyleChange={setStyleProfile}
+              scriptContent={project.content}
+              projectId={project.id}
             />
           )}
           {activeView === "editor" && (
