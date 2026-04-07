@@ -3,10 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:mac": "npm run build && electron-builder --mac --config electron-builder.json",
+    "build:mac-arm": "npm run build && electron-builder --mac --arm64 --config electron-builder.json",
+    "build:mac-x64": "npm run build && electron-builder --mac --x64 --config electron-builder.json"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",
@@ -24,7 +28,10 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vite-plugin-electron": "^0.29.1"
   }
 }

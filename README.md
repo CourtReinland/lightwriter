@@ -2,7 +2,28 @@
 
 A lightweight, client-side screenplay editor with story structure framework overlays, AI writing assistance, and industry-standard Fountain format support.
 
-## Quick Start
+## Install — Mac App (Recommended)
+
+The easiest way to use LightWriter on macOS is the native `.dmg` installer:
+
+1. Download the latest `LightWriter-{version}.dmg` from the [Releases page](https://github.com/CourtReinland/lightwriter/releases)
+   - **Apple Silicon (M1/M2/M3)**: `LightWriter-{version}-arm64.dmg`
+   - **Intel Macs**: `LightWriter-{version}.dmg`
+2. Open the `.dmg` file
+3. Drag **LightWriter** to your **Applications** folder
+4. Launch LightWriter from Applications or Spotlight
+
+**First launch warning:** Because the app isn't signed with an Apple Developer certificate, macOS may say "LightWriter cannot be opened because the developer cannot be verified." To bypass this:
+
+- Right-click (or Control-click) the LightWriter app in Applications
+- Choose **Open** from the menu
+- Click **Open** in the dialog that appears
+
+You only need to do this once. After that, LightWriter launches normally.
+
+Everything is bundled into the app — no Node.js, npm, or other dependencies needed. All your projects, knowledge bases, and settings are stored locally on your Mac.
+
+## Run from Source (Developers)
 
 ```bash
 git clone https://github.com/CourtReinland/lightwriter.git
@@ -13,7 +34,22 @@ npm run dev
 
 Open `http://localhost:5173` in your browser.
 
-## Build for Production
+## Build the Mac Installer Yourself
+
+```bash
+npm install
+npm run build:mac
+```
+
+This produces `release/LightWriter-{version}-arm64.dmg` (Apple Silicon) and `release/LightWriter-{version}.dmg` (Intel) in the `release/` directory.
+
+For a single-arch build:
+```bash
+npm run build:mac-arm   # Apple Silicon only
+npm run build:mac-x64   # Intel only
+```
+
+## Build for the Web
 
 ```bash
 npm run build
