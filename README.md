@@ -13,13 +13,15 @@ The easiest way to use LightWriter on macOS is the native `.dmg` installer:
 3. Drag **LightWriter** to your **Applications** folder
 4. Launch LightWriter from Applications or Spotlight
 
-**First launch warning:** Because the app isn't signed with an Apple Developer certificate, macOS may say "LightWriter cannot be opened because the developer cannot be verified." To bypass this:
+**First launch — important:** Because the app isn't signed with an Apple Developer certificate, macOS will block it. After dragging LightWriter to Applications, open Terminal and run:
 
-- Right-click (or Control-click) the LightWriter app in Applications
-- Choose **Open** from the menu
-- Click **Open** in the dialog that appears
+```bash
+xattr -cr /Applications/LightWriter.app
+```
 
-You only need to do this once. After that, LightWriter launches normally.
+Then launch LightWriter normally from Applications or Spotlight. You only need to run the command once.
+
+If you see "LightWriter is damaged and can't be opened" — the `xattr -cr` command above fixes this. It removes the macOS quarantine flag that's applied to unsigned apps downloaded from the internet.
 
 Everything is bundled into the app — no Node.js, npm, or other dependencies needed. All your projects, knowledge bases, and settings are stored locally on your Mac.
 
