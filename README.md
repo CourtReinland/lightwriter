@@ -90,6 +90,7 @@ Powered by xAI's Grok API with these modes:
 - **Compress** — Tighten content while preserving beats
 - **Alt Lines** — Generate 3 alternative versions with different tones
 - **Action** — Add vivid visual description around content
+- **Shots** — Add context-aware `MS`/`WS`/`CU` camera direction lines in forced Fountain shot format
 - **Fix Fmt** — Correct Fountain formatting errors
 - **Custom Prompt** — Free-text: ask anything about the selected text
 

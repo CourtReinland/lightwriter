@@ -127,6 +127,7 @@ Select text in the editor first, then click:
 | **Compress** | Tightens for impact, preserves key beats |
 | **Alt Lines** | 3 numbered alternative versions with different tones |
 | **Action** | Adds vivid description/action lines |
+| **Shots** | Adds context-aware camera shot direction lines using `MS`, `WS`, and `CU` in Fountain forced-shot format, e.g. `!!MS AIDEN TURNS HIS HEAD AND COUGHS` |
 | **Fix Fmt** | Corrects Fountain formatting |
 
 Each mode uses your KB, style profile, and beat context automatically.

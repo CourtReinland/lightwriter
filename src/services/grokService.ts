@@ -4,6 +4,7 @@ export type SuggestionMode =
   | "compress"
   | "alternative_line"
   | "add_action"
+  | "add_shots"
   | "fix_formatting"
   | "general"
   | "custom";
@@ -19,6 +20,8 @@ const MODE_PROMPTS: Record<SuggestionMode, string> = {
     "Write 3 alternative versions of this line/dialogue. Number them 1-3. Each should have a different tone or approach.",
   add_action:
     "Add vivid action/description lines around this content to enhance the visual storytelling.",
+  add_shots:
+    "Add concise camera shot direction lines to this screenplay passage where they clarify visual storytelling. Use MS for Medium Shot, WS for Wide Shot, and CU for Close Up. Format each added shot line as Fountain forced-shot text: !!SHOT CHARACTER NAME ACTION IN CONTEXT, for example !!MS AIDEN TURNS HIS HEAD AND COUGHS. Preserve the original story beats and dialogue.",
   fix_formatting:
     "Fix the Fountain formatting of this content. Ensure proper scene headings, character names, dialogue, parentheticals, and transitions.",
   general:

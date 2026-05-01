@@ -32,6 +32,7 @@ const WRITING_MODES: { id: OrchestratorMode; label: string; icon: string }[] = [
   { id: "compress", label: "Compress", icon: "-" },
   { id: "alternative_line", label: "Alt Lines", icon: "~" },
   { id: "add_action", label: "Action", icon: "!" },
+  { id: "add_shots", label: "Shots", icon: "MS" },
   { id: "fix_formatting", label: "Fix Fmt", icon: "#" },
 ];
 

@@ -12,6 +12,7 @@ export type OrchestratorMode =
   | "compress"
   | "alternative_line"
   | "add_action"
+  | "add_shots"
   | "fix_formatting"
   | "custom"
   // New writing modes
@@ -75,6 +76,25 @@ const MODE_CONFIGS: Record<OrchestratorMode, ModeConfig> = {
   add_action: {
     taskPrompt: "Add vivid action/description lines to enhance visual storytelling. Return ONLY the enhanced version in Fountain format.",
     temperature: 0.8, maxTokens: 2048, needsSelection: true, isAnalysis: false,
+  },
+  add_shots: {
+    taskPrompt: `Add cinematic shot direction lines to the selected screenplay passage while preserving the original dialogue, action, scene order, and story beats.
+
+Use the shot vocabulary exactly:
+- MS = Medium Shot
+- WS = Wide Shot
+- CU = Close Up
+
+Format every added shot as a Fountain forced-shot line using this syntax:
+!!SHOT CHARACTER NAME ACTION IN CONTEXT
+
+Examples of valid added lines:
+!!WS AIDEN CROSSES THE EMPTY PARKING LOT UNDER THE FLICKERING SIGN
+!!MS AIDEN TURNS HIS HEAD AND COUGHS
+!!CU MARA HIDES THE MATCHBOOK IN HER PALM
+
+Choose shots based on scene context and professional film grammar: WS to establish geography or isolation, MS for character action and blocking, CU for important reactions, objects, emotion, or clues. Add only shots that help the reader visualize the scene; do not over-direct every sentence. Return ONLY the revised Fountain text.`,
+    temperature: 0.55, maxTokens: 2048, needsSelection: true, isAnalysis: false,
   },
   fix_formatting: {
     taskPrompt: "Fix the Fountain formatting. Ensure proper scene headings, character names, dialogue, parentheticals, and transitions. Return ONLY the corrected Fountain text.",

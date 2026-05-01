@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
     "preview": "vite preview",
     "build:mac": "npm run build && electron-builder --mac --config electron-builder.json",
     "build:mac-arm": "npm run build && electron-builder --mac --arm64 --config electron-builder.json",
@@ -32,6 +33,7 @@
     "electron-builder": "^26.8.1",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
-    "vite-plugin-electron": "^0.29.1"
+    "vite-plugin-electron": "^0.29.1",
+    "vitest": "^4.1.5"
   }
 }

@@ -242,6 +242,42 @@ function buildPageBreakDecorations(view: EditorView): DecorationSet {
  * Uses requestAnimationFrame to avoid dispatching during a ViewPlugin update.
  */
 let autoCapsPending = false;
+
+export interface AutoCapsSnapshot {
+  lineNumber: number;
+}
+
+export interface AutoCapsLineState {
+  lineNumber: number;
+  from: number;
+  to: number;
+  text: string;
+  cursorPos: number;
+}
+
+function isSceneOrShotLine(trimmed: string): boolean {
+  return /^\.((?!\.)\S)|^(INT|EXT|EST|INT\.\/EXT|I\/E)[.\s]/i.test(trimmed) || /^!!/.test(trimmed);
+}
+
+export function getAutoCapsChange(
+  snapshot: AutoCapsSnapshot,
+  current: AutoCapsLineState,
+): { from: number; to: number; insert: string; selectionAnchor: number } | null {
+  if (snapshot.lineNumber !== current.lineNumber) return null;
+  if (current.cursorPos !== current.to) return null;
+  if (!isSceneOrShotLine(current.text.trim())) return null;
+
+  const upper = current.text.toUpperCase();
+  if (upper === current.text) return null;
+
+  return {
+    from: current.from,
+    to: current.to,
+    insert: upper,
+    selectionAnchor: current.from + upper.length,
+  };
+}
+
 function autoCapsOnChange(update: ViewUpdate) {
   if (!update.docChanged || autoCapsPending) return;
 
@@ -253,29 +289,33 @@ function autoCapsOnChange(update: ViewUpdate) {
 
   // Only auto-caps if cursor is at the end of the line (user is actively typing)
   if (pos !== lineObj.to) return;
+  if (!isSceneOrShotLine(trimmed)) return;
+  if (lineObj.text.toUpperCase() === lineObj.text) return;
 
-  // Check if the line is a scene heading or shot
-  const isScene = /^\.((?!\.)\S)|^(INT|EXT|EST|INT\.\/EXT|I\/E)[.\s]/i.test(trimmed);
-  const isShot = /^!!/.test(trimmed);
+  const snapshot: AutoCapsSnapshot = { lineNumber: lineObj.number };
 
-  if (!isScene && !isShot) return;
-
-  const upper = lineObj.text.toUpperCase();
-  if (upper === lineObj.text) return; // Already uppercase
-
-  // Defer the dispatch to avoid dispatching inside a ViewPlugin update
+  // Defer the dispatch to avoid dispatching inside a ViewPlugin update. Re-check the
+  // original line number before touching the document; otherwise a quick arrow/click
+  // between the change and this RAF can uppercase the wrong line and move the cursor.
   autoCapsPending = true;
   requestAnimationFrame(() => {
     autoCapsPending = false;
-    // Re-read state since it may have changed
-    const currentDoc = view.state.doc;
+    if (snapshot.lineNumber > view.state.doc.lines) return;
+
     const currentPos = view.state.selection.main.head;
-    const currentLine = currentDoc.lineAt(currentPos);
-    const currentUpper = currentLine.text.toUpperCase();
-    if (currentUpper !== currentLine.text && currentPos === currentLine.to) {
+    const currentLine = view.state.doc.line(snapshot.lineNumber);
+    const change = getAutoCapsChange(snapshot, {
+      lineNumber: currentLine.number,
+      from: currentLine.from,
+      to: currentLine.to,
+      text: currentLine.text,
+      cursorPos: currentPos,
+    });
+
+    if (change) {
       view.dispatch({
-        changes: { from: currentLine.from, to: currentLine.to, insert: currentUpper },
-        selection: { anchor: currentLine.from + (currentPos - currentLine.from) },
+        changes: { from: change.from, to: change.to, insert: change.insert },
+        selection: { anchor: change.selectionAnchor },
       });
     }
   });
@@ -343,23 +383,25 @@ const formattingTheme = EditorView.baseTheme({
   ".cm-fmt-shot": {
     /* Shot: same left margin as action (flush left), uppercase handled by text content */
   },
-  /* Page break: dashed line below the last line of each page with page number */
+  /* Page break: visual marker only. Do not add margin/padding/height here —
+     CodeMirror's cursor motion relies on its measured line heights, and vertical
+     CSS on line decorations can make arrow-key movement skip or land oddly. */
   ".cm-page-break-line": {
     borderBottom: "1px dashed #ccc",
-    marginBottom: "12px !important",
-    paddingBottom: "12px !important",
     position: "relative",
   },
   ".cm-page-break-line::after": {
     content: "attr(data-page)",
     position: "absolute",
     right: "16px",
-    bottom: "-2px",
+    bottom: "-1px",
+    transform: "translateY(50%)",
     fontSize: "9px",
     color: "#aaa",
     fontFamily: "'Courier Prime', monospace",
     background: "#fefefe",
     padding: "0 4px",
+    pointerEvents: "none",
   },
 });
 
