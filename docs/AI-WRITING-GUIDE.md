@@ -132,6 +132,19 @@ Select text in the editor first, then click:
 
 Each mode uses your KB, style profile, and beat context automatically.
 
+### Full Script Shot Pass
+
+Click **Full Script Shot Pass** in the AI panel to run an integrated shooting-script rewrite across the entire screenplay. LightWriter parses the script into scenes, sends each scene to Grok with nearby-scene and KB context, and replaces the editor text with a shot-annotated version.
+
+This is designed for downstream image/video generation workflows, including Resolve plugins that need enough shot lines to create and sync visual coverage. The pass adds `!!` Fountain shot lines for:
+
+- Establishing `WS` geography and location changes
+- `MS` blocking, dialogue coverage, and over-the-shoulder setups
+- `CU` reactions, props, clues, emotional turns, and inserts
+- Rapid shot changes and movement for complex action beats
+
+The pass preserves existing dialogue/action/story order and keeps existing `!!` shot lines where possible.
+
 ### Custom Prompt Box
 
 Above the mode buttons is a textarea labeled "Ask anything about the selected text". Type any custom instruction:

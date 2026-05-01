@@ -298,6 +298,22 @@ export default function App() {
     [],
   );
 
+  const handleReplaceScript = useCallback(
+    (text: string) => {
+      const view = editorViewRef.current;
+      if (!view) {
+        handleContentChange(text);
+        return;
+      }
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+        selection: { anchor: Math.min(text.length, view.state.selection.main.head) },
+      });
+      view.focus();
+    },
+    [handleContentChange],
+  );
+
   const handleExportFountain = useCallback(() => {
     const filename = project.name.replace(/[^a-zA-Z0-9_-]/g, "_") + ".fountain";
     exportFountain(project.content, filename);
@@ -426,6 +442,7 @@ export default function App() {
               styleProfile={styleProfile}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
+              onReplaceScript={handleReplaceScript}
             />
           )}
           {activeView === "editor" && showKB && (

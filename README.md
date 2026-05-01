@@ -96,6 +96,8 @@ Powered by xAI's Grok API with these modes:
 
 Suggestions can be applied as a replacement or inserted below the selection. LLM explanatory text is automatically stripped — only screenplay content is inserted.
 
+For production visualization workflows, **Full Script Shot Pass** analyzes the screenplay scene-by-scene and automatically rewrites the editor content with dense professional shot coverage for downstream image/video generation tools.
+
 ### Views
 - **Write** — The main editor with syntax highlighting, overlays, and element bar
 - **Preview** — Formatted screenplay rendering matching industry print standards

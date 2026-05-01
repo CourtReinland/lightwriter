@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { GrokService } from "../../services/grokService";
+import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import {
   generate,
   isAnalysisMode,
@@ -24,6 +25,7 @@ interface SuggestionPanelProps {
   styleProfile: StyleProfile | null;
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
+  onReplaceScript: (text: string) => void;
 }
 
 const WRITING_MODES: { id: OrchestratorMode; label: string; icon: string }[] = [
@@ -55,6 +57,7 @@ export default function SuggestionPanel({
   styleProfile,
   onApply,
   onInsertBelow,
+  onReplaceScript,
 }: SuggestionPanelProps) {
   const [apiKey, setApiKey] = useState(GrokService.getStoredApiKey());
   const [showKeyDialog, setShowKeyDialog] = useState(false);
@@ -65,6 +68,44 @@ export default function SuggestionPanel({
   const [customPrompt, setCustomPrompt] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [charSelect, setCharSelect] = useState<string>("");
+  const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
+
+  const handleFullShotPass = useCallback(async () => {
+    if (!apiKey) {
+      setShowKeyDialog(true);
+      return;
+    }
+    if (!fullScript.trim()) {
+      setError("No script content to rewrite.");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Run a full-script shot pass? This will send the script to Grok scene-by-scene and replace the editor text with a shot-annotated version. Undo remains available in the editor.",
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode(null);
+    setShotPassProgress({ completed: 0, total: 1, label: "Starting full-script shot pass..." });
+
+    try {
+      const rewritten = await rewriteScriptWithShotDirections(
+        fullScript,
+        apiKey,
+        knowledgeBase,
+        setShotPassProgress,
+      );
+      onReplaceScript(rewritten);
+      setSuggestion("Full-script shot pass complete. The editor has been updated with professional shot direction lines.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Shot pass failed");
+    } finally {
+      setLoading(false);
+      setShotPassProgress(null);
+    }
+  }, [apiKey, fullScript, knowledgeBase, onReplaceScript]);
 
   const handleSuggest = useCallback(
     async (mode: OrchestratorMode, prompt?: string, characterName?: string) => {
@@ -145,6 +186,20 @@ export default function SuggestionPanel({
           <span className="ctx-badge kb">KB: {knowledgeBase.characters.length}ch</span>
         )}
         {styleProfile && <span className="ctx-badge style">Style</span>}
+      </div>
+
+      <div className="full-shot-pass">
+        <button
+          className="full-shot-pass-btn"
+          onClick={handleFullShotPass}
+          disabled={loading || !fullScript.trim()}
+          title="Analyze the whole script scene-by-scene and automatically add professional shot direction lines"
+        >
+          Full Script Shot Pass
+        </button>
+        <div className="full-shot-pass-hint">
+          Adds WS/MS/CU coverage, OTS dialogue shots, inserts, reactions, and action beats across the whole script.
+        </div>
       </div>
 
       {!selectedText.trim() && (
@@ -259,7 +314,9 @@ export default function SuggestionPanel({
       {loading && (
         <div className="suggestion-loading">
           <span className="spinner" />
-          Thinking...
+          {shotPassProgress
+            ? `${shotPassProgress.label} (${shotPassProgress.completed}/${shotPassProgress.total})`
+            : "Thinking..."}
         </div>
       )}
 
@@ -275,6 +332,10 @@ export default function SuggestionPanel({
           onApply={() => onApply(suggestion)}
           onInsertBelow={() => onInsertBelow(suggestion)}
         />
+      )}
+
+      {suggestion && !lastMode && (
+        <div className="suggestion-success">{suggestion}</div>
       )}
 
       {showKeyDialog && (
