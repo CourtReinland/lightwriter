@@ -185,16 +185,10 @@ function stripForcePrefixes(html: string): string {
     .replace(/>@(\s*)/g, ">");
 }
 
-export function exportPdf(scriptHtml: string, titlePageHtml: string, title = "Screenplay") {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    alert("Please allow popups to export PDF.");
-    return;
-  }
-
+export function buildPdfHtml(scriptHtml: string, titlePageHtml: string, title = "Screenplay"): string {
   const cleanScript = stripForcePrefixes(scriptHtml);
 
-  printWindow.document.write(`<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -309,14 +303,43 @@ export function exportPdf(scriptHtml: string, titlePageHtml: string, title = "Sc
 <body>
 ${titlePageHtml ? `<div class="title-page">${titlePageHtml}</div>` : ""}
 <div class="script">${cleanScript}</div>
-<script>
-  // Wait for fonts to load, then trigger print
-  document.fonts.ready.then(function() {
-    setTimeout(function() { window.print(); }, 300);
-  });
-<\/script>
 </body>
-</html>`);
+</html>`;
+}
 
-  printWindow.document.close();
+export function exportPdf(scriptHtml: string, titlePageHtml: string, title = "Screenplay") {
+  const iframe = document.createElement("iframe");
+  iframe.title = `${title} PDF export`;
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+
+  document.body.appendChild(iframe);
+
+  const printWindow = iframe.contentWindow;
+  const printDocument = iframe.contentDocument ?? printWindow?.document;
+  if (!printWindow || !printDocument) {
+    iframe.remove();
+    alert("Unable to prepare PDF export.");
+    return;
+  }
+
+  printDocument.open();
+  printDocument.write(buildPdfHtml(scriptHtml, titlePageHtml, title));
+  printDocument.close();
+
+  const cleanup = () => window.setTimeout(() => iframe.remove(), 1000);
+  printWindow.addEventListener?.("afterprint", cleanup, { once: true });
+
+  // Print from a same-page iframe instead of window.open(). This avoids browser
+  // and Electron popup blockers that caused false "allow popups" failures.
+  window.setTimeout(() => {
+    printWindow.focus();
+    printWindow.print();
+    cleanup();
+  }, 0);
 }
