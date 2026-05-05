@@ -6,6 +6,7 @@
   background: rgba(10, 12, 18, 0.94);
   color: #f5f0e8;
   overflow-y: auto;
+  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
 }
 
 .asset-panel h2,
@@ -19,11 +20,28 @@
 }
 
 .asset-panel-header p,
-.asset-empty {
+.asset-empty,
+.asset-muted,
+.asset-status {
   color: #b7ad9f;
   font-size: 12px;
   margin-top: 4px;
   line-height: 1.4;
+}
+
+.asset-status {
+  color: #ffd7aa;
+}
+
+.asset-settings-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid rgba(249, 115, 22, 0.28);
+  border-radius: 10px;
+  background: rgba(249, 115, 22, 0.08);
 }
 
 .asset-panel label {
@@ -37,16 +55,27 @@
   letter-spacing: 0.06em;
 }
 
+.asset-settings-box label {
+  margin-bottom: 4px;
+}
+
 .asset-panel select,
-.asset-panel textarea {
+.asset-panel textarea,
+.asset-panel input {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   color: #f5f0e8;
   padding: 8px;
-  font: inherit;
+  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+  font-size: 12px;
   text-transform: none;
   letter-spacing: normal;
+}
+
+.asset-panel input::placeholder,
+.asset-panel textarea::placeholder {
+  color: rgba(245, 240, 232, 0.42);
 }
 
 .asset-panel textarea {
@@ -61,12 +90,14 @@
 
 .asset-primary,
 .asset-export-row button,
-.asset-card button {
+.asset-card button,
+.asset-settings-actions button {
   background: #f97316;
   border: none;
   border-radius: 999px;
   color: #150b05;
   cursor: pointer;
+  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
   font-weight: 700;
   padding: 8px 12px;
 }
@@ -76,12 +107,17 @@
   opacity: 0.45;
 }
 
+.asset-settings-actions,
 .asset-export-row {
   display: flex;
   gap: 8px;
+}
+
+.asset-export-row {
   margin: 12px 0 18px;
 }
 
+.asset-settings-actions button,
 .asset-export-row button {
   background: rgba(249, 115, 22, 0.18);
   color: #ffd7aa;

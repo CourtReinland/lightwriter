@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { GeneratedAsset, AssetProvider, AssetKind } from "../../types/assets";
 import { AssetService } from "../../services/assetService";
 import {
@@ -12,7 +12,14 @@ import {
   type ScriptShotRef,
 } from "../../services/scriptStructure";
 import { buildLightWriterPackage, buildScript2ScreenManifest, exportJsonDownload } from "../../services/assetManifestExporter";
-import { getDefaultImageModel, providerLabel } from "../../services/imageGenerationService";
+import {
+  clearImageProviderApiKey,
+  getDefaultImageModel,
+  getImageModelOptions,
+  getImageProviderSettings,
+  providerLabel,
+  saveImageProviderSettings,
+} from "../../services/imageGenerationService";
 import type { Project } from "../../services/storageService";
 import "./AssetPanel.css";
 
@@ -33,16 +40,36 @@ function assetName(asset: GeneratedAsset): string {
   return asset.kind === "character" ? ref.characterName || asset.name : ref.sceneHeading || asset.name;
 }
 
+function isKnownModel(provider: AssetProvider, model: string): boolean {
+  return getImageModelOptions(provider).some((option) => option.id === model);
+}
+
 export default function AssetPanel({ project, assets, onAssetsChange }: AssetPanelProps) {
   const [provider, setProvider] = useState<AssetProvider>("gemini-nano-banana");
   const [sourceKind, setSourceKind] = useState<SourceKind>("scene_set");
   const [selectedKey, setSelectedKey] = useState("0");
   const [userPrompt, setUserPrompt] = useState("");
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [selectedModel, setSelectedModel] = useState(getDefaultImageModel("gemini-nano-banana"));
+  const [customModel, setCustomModel] = useState("");
+  const [settingsMessage, setSettingsMessage] = useState("");
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
   const characters = useMemo(() => extractCharacters(project.content), [project.content]);
   const shots = useMemo(() => extractShotLines(project.content), [project.content]);
   const scriptHash = useMemo(() => simpleScriptHash(project.content), [project.content]);
+  const modelOptions = useMemo(() => getImageModelOptions(provider), [provider]);
+  const effectiveModel = selectedModel === "custom" ? customModel.trim() || getDefaultImageModel(provider) : selectedModel;
+  const hasStoredKey = Boolean(getImageProviderSettings(provider).apiKey?.trim());
+
+  useEffect(() => {
+    const settings = getImageProviderSettings(provider);
+    const model = settings.selectedModel || getDefaultImageModel(provider);
+    setApiKeyDraft(settings.apiKey || "");
+    setSelectedModel(isKnownModel(provider, model) ? model : "custom");
+    setCustomModel(isKnownModel(provider, model) ? "" : model);
+    setSettingsMessage("");
+  }, [provider]);
 
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
@@ -68,6 +95,20 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
 
   const refreshAssets = () => onAssetsChange(AssetService.getAssets(project.id));
 
+  const handleSaveProviderSettings = () => {
+    saveImageProviderSettings(provider, {
+      apiKey: apiKeyDraft.trim(),
+      selectedModel: effectiveModel,
+    });
+    setSettingsMessage(`${providerLabel(provider)} settings saved locally.`);
+  };
+
+  const handleClearProviderKey = () => {
+    clearImageProviderApiKey(provider);
+    setApiKeyDraft("");
+    setSettingsMessage(`${providerLabel(provider)} API key cleared.`);
+  };
+
   const handleStageAsset = () => {
     if (!selected || !prompt.trim()) return;
     const now = Date.now();
@@ -80,7 +121,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       projectId: project.id,
       kind,
       provider,
-      model: getDefaultImageModel(provider),
+      model: effectiveModel,
       name:
         sourceKind === "character"
           ? character.name
@@ -146,14 +187,54 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         </div>
       </div>
 
-      <label>
-        Provider
-        <select value={provider} onChange={(event) => setProvider(event.target.value as AssetProvider)}>
-          {providerOptions().map((item) => (
-            <option key={item} value={item}>{providerLabel(item)}</option>
-          ))}
-        </select>
-      </label>
+      <section className="asset-settings-box">
+        <h3>Provider Settings</h3>
+        <p className="asset-muted">
+          Keys and model choices are saved locally in this LightWriter app profile. They are not exported in packages.
+        </p>
+        <label>
+          Provider
+          <select value={provider} onChange={(event) => setProvider(event.target.value as AssetProvider)}>
+            {providerOptions().map((item) => (
+              <option key={item} value={item}>{providerLabel(item)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          API key
+          <input
+            type="password"
+            value={apiKeyDraft}
+            onChange={(event) => setApiKeyDraft(event.target.value)}
+            placeholder={hasStoredKey ? "Stored locally" : `Paste ${providerLabel(provider)} API key`}
+          />
+        </label>
+        <label>
+          Image model
+          <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+            {modelOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+            <option value="custom">Custom model ID...</option>
+          </select>
+        </label>
+        {selectedModel === "custom" && (
+          <label>
+            Custom model ID
+            <input
+              value={customModel}
+              onChange={(event) => setCustomModel(event.target.value)}
+              placeholder="provider-specific-model-id"
+            />
+          </label>
+        )}
+        <p className="asset-muted">Selected model: {effectiveModel}</p>
+        <div className="asset-settings-actions">
+          <button onClick={handleSaveProviderSettings}>Save Settings</button>
+          <button onClick={handleClearProviderKey}>Clear Key</button>
+        </div>
+        {settingsMessage && <p className="asset-status">{settingsMessage}</p>}
+      </section>
 
       <label>
         Asset source
@@ -216,6 +297,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
             <div>
               <strong>{assetName(asset)}</strong>
               <span>{asset.kind} · {providerLabel(asset.provider)}</span>
+              <span>{asset.model}</span>
               {asset.metadata.script2ScreenShotKey && <em>{asset.metadata.script2ScreenShotKey}</em>}
             </div>
             <button onClick={() => handleDelete(asset.id)}>Delete</button>
