@@ -16,6 +16,7 @@ import ElementBar, {
   stripForcePrefix,
 } from "./components/Editor/ElementBar";
 import KBPanel from "./components/KnowledgeBase/KBPanel";
+import AssetPanel from "./components/Assets/AssetPanel";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import { useFountainParser } from "./hooks/useFountainParser";
 import { exportFountain, exportFdx, exportPdf } from "./services/fountainExporter";
@@ -25,6 +26,8 @@ import {
 } from "./services/storageService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./services/knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./services/styleProfile";
+import { AssetService } from "./services/assetService";
+import type { GeneratedAsset } from "./types/assets";
 import type { ComputedBeat } from "./frameworks/utils";
 
 const SAMPLE_FOUNTAIN = `Title: My Screenplay
@@ -112,11 +115,15 @@ export default function App() {
   const [cardAiDescs, setCardAiDescs] = useState<Record<number, string>>({});
   const [cardAiEnabled, setCardAiEnabled] = useState(false);
   const [showKB, setShowKB] = useState(false);
+  const [showAssets, setShowAssets] = useState(false);
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(() =>
     KnowledgeBaseService.getKB(loadOrCreateInitialProject().id),
   );
   const [styleProfile, setStyleProfile] = useState<StyleProfile | null>(() =>
     StyleProfileService.getProfile(loadOrCreateInitialProject().id),
+  );
+  const [assets, setAssets] = useState<GeneratedAsset[]>(() =>
+    AssetService.getAssets(loadOrCreateInitialProject().id),
   );
   const [cursorBeats, setCursorBeats] = useState<ComputedBeat[]>([]);
   const [cursorLine, setCursorLine] = useState(0);
@@ -337,6 +344,9 @@ export default function App() {
     });
     StorageService.setActiveProjectId(loaded.id);
     setProject(loaded);
+    setKnowledgeBase(KnowledgeBaseService.getKB(loaded.id));
+    setStyleProfile(StyleProfileService.getProfile(loaded.id));
+    setAssets(AssetService.getAssets(loaded.id));
     setEditorKey((k) => k + 1); // Force editor remount with new content
     setShowProjectMenu(false);
   }, []);
@@ -350,6 +360,9 @@ export default function App() {
     const newProj = StorageService.createProject(name, content || "", 120);
     StorageService.setActiveProjectId(newProj.id);
     setProject(newProj);
+    setKnowledgeBase(KnowledgeBaseService.getKB(newProj.id));
+    setStyleProfile(StyleProfileService.getProfile(newProj.id));
+    setAssets(AssetService.getAssets(newProj.id));
     setEditorKey((k) => k + 1);
     setShowProjectMenu(false);
   }, []);
@@ -369,6 +382,8 @@ export default function App() {
           onToggleSuggestions={() => setShowSuggestions(!showSuggestions)}
           showKB={showKB}
           onToggleKB={() => setShowKB(!showKB)}
+          showAssets={showAssets}
+          onToggleAssets={() => setShowAssets(!showAssets)}
           onExport={handleExportFountain}
           onExportFdx={handleExportFdx}
           onExportPdf={handleExportPdf}
@@ -453,6 +468,13 @@ export default function App() {
               onStyleChange={setStyleProfile}
               scriptContent={project.content}
               projectId={project.id}
+            />
+          )}
+          {activeView === "editor" && showAssets && (
+            <AssetPanel
+              project={project}
+              assets={assets}
+              onAssetsChange={setAssets}
             />
           )}
           {activeView === "editor" && (

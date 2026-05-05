@@ -1,0 +1,132 @@
+.asset-panel {
+  width: 360px;
+  max-width: 42vw;
+  padding: 16px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 12, 18, 0.94);
+  color: #f5f0e8;
+  overflow-y: auto;
+}
+
+.asset-panel h2,
+.asset-panel h3,
+.asset-panel p {
+  margin: 0;
+}
+
+.asset-panel-header {
+  margin-bottom: 16px;
+}
+
+.asset-panel-header p,
+.asset-empty {
+  color: #b7ad9f;
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.asset-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: #d9c8ad;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.asset-panel select,
+.asset-panel textarea {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  color: #f5f0e8;
+  padding: 8px;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.asset-panel textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.asset-panel .asset-prompt {
+  min-height: 170px;
+  color: #f7e8c8;
+}
+
+.asset-primary,
+.asset-export-row button,
+.asset-card button {
+  background: #f97316;
+  border: none;
+  border-radius: 999px;
+  color: #150b05;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.asset-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.asset-export-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+
+.asset-export-row button {
+  background: rgba(249, 115, 22, 0.18);
+  color: #ffd7aa;
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  font-size: 12px;
+}
+
+.asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.asset-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.asset-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.asset-card strong,
+.asset-card span,
+.asset-card em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-card span,
+.asset-card em {
+  color: #b7ad9f;
+  font-size: 12px;
+}
+
+.asset-card button {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f5f0e8;
+}
