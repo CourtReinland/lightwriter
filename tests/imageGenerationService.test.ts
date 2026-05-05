@@ -5,6 +5,7 @@ import {
   getImageModelOptions,
   getImageProviderSettings,
   hasImageProviderApiKey,
+  listGeminiImageModels,
   saveImageProviderSettings,
 } from "../src/services/imageGenerationService";
 
@@ -64,5 +65,52 @@ describe("imageGenerationService provider settings", () => {
     expect(getImageProviderSettings("gemini-nano-banana").selectedModel).toBe(
       getDefaultImageModel("gemini-nano-banana"),
     );
+  });
+
+  it("polls Gemini directly and maps image-capable model IDs into selectable options", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [
+          {
+            name: "models/gemini-2.5-flash-image",
+            displayName: "Gemini Flash 2.5",
+            description: "standard nano banana image generation",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/gemini-3.1-flash-image",
+            displayName: "Gemini Flash 3.1",
+            description: "nano banana 2 image generation",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/gemini-3-pro-image",
+            displayName: "Gemini 3 Pro",
+            description: "Nano banana 2 pro quality image model",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/text-embedding-004",
+            displayName: "Text Embedding 004",
+            supportedGenerationMethods: ["embedContent"],
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listGeminiImageModels("gemini-key");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://generativelanguage.googleapis.com/v1beta/models?key=gemini-key",
+    );
+    expect(models.slice(0, 3).map((model) => model.id)).toEqual([
+      "gemini-2.5-flash-image",
+      "gemini-3.1-flash-image",
+      "gemini-3-pro-image",
+    ]);
+    expect(models.map((model) => model.id)).toContain("gemini-2.5-flash-image-preview");
+    expect(models[1].label).toContain("Gemini Flash 3.1");
   });
 });

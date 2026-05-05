@@ -17,6 +17,7 @@ import {
   getDefaultImageModel,
   getImageModelOptions,
   getImageProviderSettings,
+  listGeminiImageModels,
   providerLabel,
   saveImageProviderSettings,
 } from "../../services/imageGenerationService";
@@ -40,8 +41,8 @@ function assetName(asset: GeneratedAsset): string {
   return asset.kind === "character" ? ref.characterName || asset.name : ref.sceneHeading || asset.name;
 }
 
-function isKnownModel(provider: AssetProvider, model: string): boolean {
-  return getImageModelOptions(provider).some((option) => option.id === model);
+function isKnownModel(modelOptions: { id: string }[], model: string): boolean {
+  return modelOptions.some((option) => option.id === model);
 }
 
 export default function AssetPanel({ project, assets, onAssetsChange }: AssetPanelProps) {
@@ -52,22 +53,25 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [selectedModel, setSelectedModel] = useState(getDefaultImageModel("gemini-nano-banana"));
   const [customModel, setCustomModel] = useState("");
+  const [modelOptions, setModelOptions] = useState(() => getImageModelOptions("gemini-nano-banana"));
+  const [isPollingModels, setIsPollingModels] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
   const characters = useMemo(() => extractCharacters(project.content), [project.content]);
   const shots = useMemo(() => extractShotLines(project.content), [project.content]);
   const scriptHash = useMemo(() => simpleScriptHash(project.content), [project.content]);
-  const modelOptions = useMemo(() => getImageModelOptions(provider), [provider]);
   const effectiveModel = selectedModel === "custom" ? customModel.trim() || getDefaultImageModel(provider) : selectedModel;
   const hasStoredKey = Boolean(getImageProviderSettings(provider).apiKey?.trim());
 
   useEffect(() => {
     const settings = getImageProviderSettings(provider);
+    const options = getImageModelOptions(provider);
     const model = settings.selectedModel || getDefaultImageModel(provider);
+    setModelOptions(options);
     setApiKeyDraft(settings.apiKey || "");
-    setSelectedModel(isKnownModel(provider, model) ? model : "custom");
-    setCustomModel(isKnownModel(provider, model) ? "" : model);
+    setSelectedModel(isKnownModel(options, model) ? model : "custom");
+    setCustomModel(isKnownModel(options, model) ? "" : model);
     setSettingsMessage("");
   }, [provider]);
 
@@ -101,6 +105,30 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       selectedModel: effectiveModel,
     });
     setSettingsMessage(`${providerLabel(provider)} settings saved locally.`);
+  };
+
+  const handlePollGeminiModels = async () => {
+    if (provider !== "gemini-nano-banana") return;
+    const apiKey = apiKeyDraft.trim() || getImageProviderSettings(provider).apiKey || "";
+    if (!apiKey.trim()) {
+      setSettingsMessage("Paste and save a Gemini API key before polling live models.");
+      return;
+    }
+    setIsPollingModels(true);
+    setSettingsMessage("Polling Gemini for available image models...");
+    try {
+      const options = await listGeminiImageModels(apiKey);
+      setModelOptions(options);
+      if (!isKnownModel(options, effectiveModel)) {
+        setSelectedModel(options[0]?.id || getDefaultImageModel(provider));
+        setCustomModel("");
+      }
+      setSettingsMessage(`Loaded ${options.length} Gemini image model options from the API.`);
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Gemini model polling failed.");
+    } finally {
+      setIsPollingModels(false);
+    }
   };
 
   const handleClearProviderKey = () => {
@@ -231,6 +259,11 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         <p className="asset-muted">Selected model: {effectiveModel}</p>
         <div className="asset-settings-actions">
           <button onClick={handleSaveProviderSettings}>Save Settings</button>
+          {provider === "gemini-nano-banana" && (
+            <button onClick={handlePollGeminiModels} disabled={isPollingModels}>
+              {isPollingModels ? "Polling..." : "Poll Gemini Models"}
+            </button>
+          )}
           <button onClick={handleClearProviderKey}>Clear Key</button>
         </div>
         {settingsMessage && <p className="asset-status">{settingsMessage}</p>}

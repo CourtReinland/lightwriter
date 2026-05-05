@@ -40,8 +40,18 @@ const MODEL_OPTIONS: Record<AssetProvider, ImageModelOption[]> = {
   "gemini-nano-banana": [
     {
       id: "gemini-2.5-flash-image",
-      label: "Gemini 2.5 Flash Image / Nano Banana",
-      description: "Default fast image model target for scene sets and characters.",
+      label: "Gemini Flash 2.5 / Nano Banana",
+      description: "Standard Nano Banana image model target for scene sets and characters.",
+    },
+    {
+      id: "gemini-3.1-flash-image",
+      label: "Gemini Flash 3.1 / Nano Banana 2",
+      description: "Nano Banana 2 flash image model target when available on the configured Gemini account.",
+    },
+    {
+      id: "gemini-3-pro-image",
+      label: "Gemini 3 Pro / Nano Banana 2",
+      description: "Higher quality Nano Banana 2 / Gemini Pro image model target when available.",
     },
     {
       id: "gemini-2.5-flash-image-preview",
@@ -96,6 +106,53 @@ export function providerLabel(provider: AssetProvider): string {
 
 export function getImageModelOptions(provider: AssetProvider): ImageModelOption[] {
   return MODEL_OPTIONS[provider];
+}
+
+function normalizeGeminiModelName(name: string): string {
+  return name.replace(/^models\//, "");
+}
+
+function isGeminiImageModel(model: { name?: string; displayName?: string; description?: string; supportedGenerationMethods?: string[] }): boolean {
+  const haystack = `${model.name || ""} ${model.displayName || ""} ${model.description || ""}`.toLowerCase();
+  return (
+    Boolean(model.supportedGenerationMethods?.includes("generateContent")) &&
+    (haystack.includes("image") || haystack.includes("nano banana")) &&
+    !haystack.includes("embedding")
+  );
+}
+
+export async function listGeminiImageModels(apiKey: string): Promise<ImageModelOption[]> {
+  const key = apiKey.trim();
+  if (!key) return getImageModelOptions("gemini-nano-banana");
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
+  if (!response.ok) {
+    throw new Error(`Gemini model polling failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as {
+    models?: Array<{
+      name?: string;
+      displayName?: string;
+      description?: string;
+      supportedGenerationMethods?: string[];
+    }>;
+  };
+
+  const dynamicModels = (data.models || [])
+    .filter((model) => model.name && isGeminiImageModel(model))
+    .map((model) => ({
+      id: normalizeGeminiModelName(model.name || ""),
+      label: model.displayName || normalizeGeminiModelName(model.name || ""),
+      description: model.description || "Gemini API image-capable model returned by the live models endpoint.",
+    }));
+
+  const byId = new Map<string, ImageModelOption>();
+  for (const option of dynamicModels) byId.set(option.id, option);
+  for (const option of getImageModelOptions("gemini-nano-banana")) {
+    if (!byId.has(option.id)) byId.set(option.id, option);
+  }
+  return Array.from(byId.values());
 }
 
 export function getDefaultImageModel(provider: AssetProvider): string {
