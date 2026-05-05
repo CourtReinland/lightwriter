@@ -156,8 +156,11 @@ describe("imageGenerationService provider settings", () => {
     );
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.contents[0].parts).toEqual([
+      {
+        text: expect.stringContaining("STYLE REFERENCE ONLY"),
+      },
+      { inlineData: { mimeType: "image/png", data: "c3R5bGU=" } },
       { text: "Children's cartoon living room, soft daylight, cozy couch, playful set dressing.\nAspect ratio: 16:9." },
-      { inline_data: { mime_type: "image/png", data: "c3R5bGU=" } },
     ]);
     expect(result).toMatchObject({ mimeType: "image/png", imageDataUrl: "data:image/png;base64,aW1hZ2U=" });
 

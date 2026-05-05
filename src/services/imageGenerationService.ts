@@ -248,13 +248,16 @@ async function generateGeminiImageAsset(request: ImageGenerationRequest): Promis
   const apiKey = settings.apiKey?.trim();
   if (!apiKey) throw new Error("Save a Gemini API key before generating images.");
   const model = request.model || settings.selectedModel || getDefaultImageModel("gemini-nano-banana");
-  const parts: Array<Record<string, unknown>> = [
-    { text: `${request.prompt}${request.aspectRatio ? `\nAspect ratio: ${request.aspectRatio}.` : ""}` },
-  ];
+  const parts: Array<Record<string, unknown>> = [];
   const referencePayload = request.styleReference?.dataUrl ? dataUrlPayload(request.styleReference.dataUrl) : null;
   if (referencePayload) {
-    parts.push({ inline_data: { mime_type: request.styleReference?.mimeType || referencePayload.mimeType, data: referencePayload.data } });
+    parts.push({
+      text:
+        "Create a new image from the final scene prompt below. The attached image is a STYLE REFERENCE ONLY: use only its color palette, texture, lighting mood, and lens feel. Do not copy its subject, background, objects, layout, composition, characters, scenery, or location.",
+    });
+    parts.push({ inlineData: { mimeType: request.styleReference?.mimeType || referencePayload.mimeType, data: referencePayload.data } });
   }
+  parts.push({ text: `${request.prompt}${request.aspectRatio ? `\nAspect ratio: ${request.aspectRatio}.` : ""}` });
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,

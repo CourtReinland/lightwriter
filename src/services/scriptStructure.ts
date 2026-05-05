@@ -100,27 +100,27 @@ function inferredBackgroundResult(scene: ScriptSceneRef, fullScriptContent?: str
   const base = `${tonePrefix} ${location || "screenplay location"}${timePhrase}`.replace(/\s+/g, " ").trim();
 
   if (primaryTone === "children's cartoon") {
-    return `${base}, bright playful home interior, cozy furniture, rounded cartoon shapes, colorful storybook props, soft daylight, cheerful production design, clean background set plate, 16:9.`;
+    return `${base}, empty background, bright playful home interior, cozy couch and furniture, rounded cartoon shapes, colorful storybook props, soft daylight, cheerful production design, 16:9.`;
   }
   if (primaryTone === "gothic romance") {
-    return `${base}, candlelit architecture, moody period set dressing, aged textures, deep shadows, atmospheric fog, ornate props, dramatic cinematic background plate, 16:9.`;
+    return `${base}, empty background, candlelit architecture, moody period set dressing, aged textures, deep shadows, atmospheric fog, ornate props, dramatic cinematic palette, 16:9.`;
   }
   if (primaryTone === "romantic drama") {
-    return `${base}, warm practical lighting, intimate set dressing, soft color palette, lived-in props, cinematic interior atmosphere, clean background set plate, 16:9.`;
+    return `${base}, empty background, warm practical lighting, intimate set dressing, soft color palette, lived-in props, cinematic interior atmosphere, 16:9.`;
   }
   if (primaryTone === "science fiction") {
-    return `${base}, futuristic architecture, controlled light panels, advanced props, sleek surfaces, atmospheric depth, cinematic background set plate, 16:9.`;
+    return `${base}, empty background, futuristic architecture, controlled light panels, advanced props, sleek surfaces, atmospheric depth, 16:9.`;
   }
   if (primaryTone === "fantasy") {
-    return `${base}, enchanted architecture, textured handmade props, atmospheric lighting, magical environment detail, cinematic background set plate, 16:9.`;
+    return `${base}, empty background, enchanted architecture, textured handmade props, atmospheric lighting, magical environment detail, 16:9.`;
   }
   if (primaryTone === "crime thriller") {
-    return `${base}, tense practical lighting, noir shadows, gritty set dressing, suspenseful atmosphere, cinematic background set plate, 16:9.`;
+    return `${base}, empty background, tense practical lighting, noir shadows, gritty set dressing, suspenseful atmosphere, 16:9.`;
   }
   if (primaryTone === "grounded contemporary drama") {
-    return `${base}, realistic modern set dressing, natural light, believable props, lived-in surfaces, cinematic background set plate, 16:9.`;
+    return `${base}, empty background, realistic modern set dressing, natural light, believable props, lived-in surfaces, 16:9.`;
   }
-  return `${base}, architecture, props, set dressing, lighting, atmosphere, color palette, texture, era cues, clean cinematic background set plate, 16:9.`;
+  return `${base}, empty background, architecture, props, set dressing, lighting, atmosphere, color palette, texture, era cues, cinematic production design, 16:9.`;
 }
 
 function backgroundDetailOrInference(scene: ScriptSceneRef, fullScriptContent?: string): string {
@@ -272,14 +272,12 @@ export function buildAssetPrompt(input:
 ): string {
   if (input.kind === "scene_set") {
     const base = [
-      `Cinematic empty scene background/set plate for ${input.scene.heading}.`,
+      `Empty scene background for ${input.scene.heading}.`,
       backgroundDetailOrInference(input.scene, input.fullScriptContent),
-      "Architecture, props, set dressing, landscape/weather if present, lighting, atmosphere, color, texture, era, genre style, production design concept art, practical set detail, 16:9 frame.",
-      "No people, bodies, portraits, dialogue text, subtitles, logos, watermarks, UI, or readable writing.",
       input.styleReference
-        ? `Script-level style reference: ${input.styleReference.name}, matching palette, texture, lens mood, and visual continuity.`
+        ? `Match the style reference palette, texture, lighting, and lens mood; do not copy its objects or composition.`
         : "",
-      input.userPrompt ? `User direction: ${input.userPrompt}` : "",
+      input.userPrompt ? input.userPrompt : "",
     ];
     return base.filter(Boolean).join("\n");
   }

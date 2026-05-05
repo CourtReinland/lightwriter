@@ -61,7 +61,7 @@ MAYA (20s, elegant, dangerous) watches the skyline.
     const character = extractCharacters(script)[0];
 
     expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("INT. COFFEE SHOP - DAY");
-    expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("Cinematic empty scene background");
+    expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("Empty scene background");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("ALEX");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("30s, restless eyes");
   });
@@ -143,7 +143,7 @@ Wind moves through bright paper decorations. Rain taps a toy umbrella. Lightning
       styleReference: { name: "gothic-board.png", mimeType: "image/png", dataUrl: "data:image/png;base64,abc" },
     });
 
-    expect(prompt).toContain("Script-level style reference");
-    expect(prompt).toContain("gothic-board.png");
+    expect(prompt).toContain("Match the style reference palette");
+    expect(prompt).not.toContain("gothic-board.png");
   });
 });
