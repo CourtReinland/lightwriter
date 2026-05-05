@@ -224,3 +224,18 @@
   background: rgba(255, 255, 255, 0.12);
   color: #f5f0e8;
 }
+
+.asset-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.asset-file-path {
+  color: #ffd7aa;
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: normal;
+  word-break: break-all;
+}

@@ -27,12 +27,10 @@ describe("imageGenerationService provider settings", () => {
     vi.spyOn(Date, "now").mockReturnValue(777);
   });
 
-  it("offers multiple selectable model IDs per image provider", () => {
-    expect(getImageModelOptions("gemini-nano-banana").map((option) => option.id)).toContain(
-      "gemini-2.5-flash-image",
-    );
-    expect(getImageModelOptions("gemini-nano-banana").length).toBeGreaterThan(1);
-    expect(getImageModelOptions("grok-imagine").map((option) => option.id)).toContain("grok-imagine-latest");
+  it("starts with no provider-populated model IDs before live polling", () => {
+    expect(getImageModelOptions("gemini-nano-banana")).toEqual([]);
+    expect(getImageModelOptions("grok-imagine")).toEqual([]);
+    expect(getDefaultImageModel("gemini-nano-banana")).toBe("");
   });
 
   it("saves API keys and selected models locally per provider", () => {
@@ -112,7 +110,7 @@ describe("imageGenerationService provider settings", () => {
       "gemini-3.1-flash-image",
       "gemini-3-pro-image",
     ]);
-    expect(models.map((model) => model.id)).toContain("gemini-2.5-flash-image-preview");
+    expect(models.map((model) => model.id)).not.toContain("gemini-2.5-flash-image-preview");
     expect(models[1].label).toContain("Gemini Flash 3.1");
   });
 

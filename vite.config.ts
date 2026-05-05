@@ -19,6 +19,17 @@ export default defineConfig({
           },
         },
       },
+      preload: {
+        input: "electron/preload.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron",
+            rollupOptions: {
+              external: ["electron"],
+            },
+          },
+        },
+      },
     }),
   ],
 });

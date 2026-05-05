@@ -16,13 +16,14 @@ import {
   buildGeneratedAssetFromResult,
   clearImageProviderApiKey,
   generateImageAsset,
-  getDefaultImageModel,
   getImageModelOptions,
   getImageProviderSettings,
   listGeminiImageModels,
   providerLabel,
   saveImageProviderSettings,
+  type ImageGenerationRequest,
 } from "../../services/imageGenerationService";
+import { downloadImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
 import type { Project } from "../../services/storageService";
 import { StyleReferenceService, type ScriptStyleReference } from "../../services/styleReferenceService";
 import "./AssetPanel.css";
@@ -54,7 +55,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [selectedKey, setSelectedKey] = useState("0");
   const [userPrompt, setUserPrompt] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
-  const [selectedModel, setSelectedModel] = useState(getDefaultImageModel("gemini-nano-banana"));
+  const [selectedModel, setSelectedModel] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [modelOptions, setModelOptions] = useState(() => getImageModelOptions("gemini-nano-banana"));
   const [isPollingModels, setIsPollingModels] = useState(false);
@@ -67,17 +68,17 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const characters = useMemo(() => extractCharacters(project.content), [project.content]);
   const shots = useMemo(() => extractShotLines(project.content), [project.content]);
   const scriptHash = useMemo(() => simpleScriptHash(project.content), [project.content]);
-  const effectiveModel = selectedModel === "custom" ? customModel.trim() || getDefaultImageModel(provider) : selectedModel;
+  const effectiveModel = selectedModel === "custom" ? customModel.trim() : selectedModel;
   const hasStoredKey = Boolean(getImageProviderSettings(provider).apiKey?.trim());
 
   useEffect(() => {
     const settings = getImageProviderSettings(provider);
     const options = getImageModelOptions(provider);
-    const model = settings.selectedModel || getDefaultImageModel(provider);
+    const model = settings.selectedModel || "";
     setModelOptions(options);
     setApiKeyDraft(settings.apiKey || "");
-    setSelectedModel(isKnownModel(options, model) ? model : "custom");
-    setCustomModel(isKnownModel(options, model) ? "" : model);
+    setSelectedModel(model && isKnownModel(options, model) ? model : model ? "custom" : "");
+    setCustomModel(model && isKnownModel(options, model) ? "" : model);
     setSettingsMessage("");
   }, [provider]);
 
@@ -142,7 +143,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       const options = await listGeminiImageModels(apiKey);
       setModelOptions(options);
       if (!isKnownModel(options, effectiveModel)) {
-        setSelectedModel(options[0]?.id || getDefaultImageModel(provider));
+        setSelectedModel(options[0]?.id || "");
         setCustomModel("");
       }
       setSettingsMessage(`Loaded ${options.length} Gemini image model options from the API.`);
@@ -183,12 +184,12 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     setSettingsMessage("Script style reference cleared.");
   };
 
-  const buildCurrentAssetRequest = () => {
-    if (!selected || !prompt.trim()) return null;
+  const buildAssetRequestForChoice = (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef, promptText: string): ImageGenerationRequest | null => {
+    if (!choice || !promptText.trim()) return null;
     const kind: AssetKind = sourceKind === "shot" ? "shot" : sourceKind;
-    const scene = selected as ScriptSceneRef;
-    const character = selected as ScriptCharacterRef;
-    const shot = selected as ScriptShotRef;
+    const scene = choice as ScriptSceneRef;
+    const character = choice as ScriptCharacterRef;
+    const shot = choice as ScriptShotRef;
     return {
       projectId: project.id,
       kind,
@@ -200,7 +201,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
           : sourceKind === "shot"
             ? shot.shotKey
             : scene.heading,
-      prompt,
+      prompt: promptText,
       scriptRef:
         sourceKind === "character"
           ? { scriptHash, characterName: character.name, contentExcerpt: character.evidence.join("\n") }
@@ -226,6 +227,35 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     };
   };
 
+  const buildPromptForChoice = (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef): string => {
+    if (sourceKind === "character") {
+      return buildAssetPrompt({ kind: "character", character: choice as ScriptCharacterRef, userPrompt });
+    }
+    if (sourceKind === "shot") {
+      const shot = choice as ScriptShotRef;
+      return [
+        `Generate a cinematic start-frame image for shot ${shot.shotKey} in ${shot.sceneHeading}.`,
+        `Shot direction: ${shot.text}`,
+        "Style: production still, cinematic lighting, coherent with the script world, 16:9 frame.",
+        userPrompt ? `User direction: ${userPrompt}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    return buildAssetPrompt({
+      kind: "scene_set",
+      scene: choice as ScriptSceneRef,
+      fullScriptContent: project.content,
+      styleReference,
+      userPrompt,
+    });
+  };
+
+  const buildCurrentAssetRequest = () => {
+    if (!selected) return null;
+    return buildAssetRequestForChoice(selected as ScriptSceneRef | ScriptCharacterRef | ScriptShotRef, prompt);
+  };
+
   const handleStageAsset = () => {
     const request = buildCurrentAssetRequest();
     if (!request) return;
@@ -247,32 +277,75 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     setSettingsMessage("Prompt metadata staged locally. Use Generate Image to call the provider.");
   };
 
+  const saveGeneratedAssetFromRequest = async (request: ImageGenerationRequest): Promise<GeneratedAsset> => {
+    const result = await generateImageAsset(request);
+    const filePath = await persistGeneratedImageFile({
+      projectId: request.projectId,
+      name: request.name,
+      mimeType: result.mimeType,
+      dataUrl: result.imageDataUrl,
+    });
+    const generated = buildGeneratedAssetFromResult(request, { ...result, filePath: filePath || result.filePath });
+    return AssetService.addAsset(project.id, {
+      ...generated,
+      metadata: {
+        ...generated.metadata,
+        script2ScreenShotKey:
+          request.kind === "shot"
+            ? request.scriptRef.shotLine
+              ? request.name
+              : undefined
+            : request.kind === "scene_set"
+              ? `s${request.scriptRef.sceneIndex}_sh0`
+              : undefined,
+        styleReferenceName: styleReference?.name,
+        hasStyleReference: Boolean(styleReference),
+      },
+    });
+  };
+
   const handleGenerateAsset = async () => {
     const request = buildCurrentAssetRequest();
     if (!request) return;
+    if (!request.model?.trim()) {
+      setSettingsMessage("Poll Gemini models or enter a custom model ID before generating.");
+      return;
+    }
     setIsGenerating(true);
     setSettingsMessage(`Generating image with ${providerLabel(provider)}...`);
     try {
-      const result = await generateImageAsset(request);
-      const generated = buildGeneratedAssetFromResult(request, result);
-      const asset = AssetService.addAsset(project.id, {
-        ...generated,
-        metadata: {
-          ...generated.metadata,
-          script2ScreenShotKey:
-            sourceKind === "shot"
-              ? (selected as ScriptShotRef).shotKey
-              : sourceKind === "scene_set"
-                ? `s${(selected as ScriptSceneRef).sceneIndex}_sh0`
-                : undefined,
-          styleReferenceName: styleReference?.name,
-          hasStyleReference: Boolean(styleReference),
-        },
-      });
+      const asset = await saveGeneratedAssetFromRequest(request);
       onAssetsChange([...assets, asset]);
-      setSettingsMessage("Image generated and saved to Project Assets.");
+      setSettingsMessage(asset.filePath ? `Image generated and saved: ${asset.filePath}` : "Image generated and saved to Project Assets. Use Download Image to save a file.");
     } catch (error) {
       setSettingsMessage(error instanceof Error ? error.message : "Image generation failed.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateAll = async () => {
+    if (choices.length === 0) return;
+    if (!effectiveModel.trim()) {
+      setSettingsMessage("Poll Gemini models or enter a custom model ID before generating all.");
+      return;
+    }
+    setIsGenerating(true);
+    setSettingsMessage(`Generating ${choices.length} ${sourceKind} asset${choices.length === 1 ? "" : "s"}...`);
+    const generatedAssets: GeneratedAsset[] = [];
+    try {
+      for (const choice of choices as Array<ScriptSceneRef | ScriptCharacterRef | ScriptShotRef>) {
+        const request = buildAssetRequestForChoice(choice, buildPromptForChoice(choice));
+        if (!request) continue;
+        const asset = await saveGeneratedAssetFromRequest(request);
+        generatedAssets.push(asset);
+        setSettingsMessage(`Generated ${generatedAssets.length}/${choices.length}: ${asset.name}`);
+      }
+      onAssetsChange([...assets, ...generatedAssets]);
+      setSettingsMessage(`Generate All complete: ${generatedAssets.length} image${generatedAssets.length === 1 ? "" : "s"} saved.`);
+    } catch (error) {
+      onAssetsChange([...assets, ...generatedAssets]);
+      setSettingsMessage(error instanceof Error ? `Generate All stopped after ${generatedAssets.length}: ${error.message}` : "Generate All failed.");
     } finally {
       setIsGenerating(false);
     }
@@ -327,6 +400,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         <label>
           Image model
           <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+            <option value="">Poll models first...</option>
             {modelOptions.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
@@ -343,7 +417,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
             />
           </label>
         )}
-        <p className="asset-muted">Selected model: {effectiveModel}</p>
+        <p className="asset-muted">Selected model: {effectiveModel || "none yet — poll Gemini models or enter a custom model ID"}</p>
         <div className="asset-settings-actions">
           <button onClick={handleSaveProviderSettings}>Save Settings</button>
           {provider === "gemini-nano-banana" && (
@@ -425,6 +499,9 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating}>
           {isGenerating ? "Generating..." : "Generate Image"}
         </button>
+        <button className="asset-primary" onClick={handleGenerateAll} disabled={choices.length === 0 || isGenerating}>
+          Generate All
+        </button>
         <button onClick={handleStageAsset} disabled={!selected || isGenerating}>
           Stage Prompt Only
         </button>
@@ -446,8 +523,12 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
               <span>{asset.kind} · {providerLabel(asset.provider)}</span>
               <span>{asset.model}</span>
               {asset.metadata.script2ScreenShotKey && <em>{asset.metadata.script2ScreenShotKey}</em>}
+              {asset.filePath ? <code className="asset-file-path">{asset.filePath}</code> : asset.imageDataUrl && <code className="asset-file-path">Stored in LightWriter app data; use Download Image for a copy.</code>}
             </div>
-            <button onClick={() => handleDelete(asset.id)}>Delete</button>
+            <div className="asset-card-actions">
+              {asset.imageDataUrl && <button onClick={() => downloadImageDataUrl({ name: asset.name, mimeType: asset.mimeType, dataUrl: asset.imageDataUrl })}>Download Image</button>}
+              <button onClick={() => handleDelete(asset.id)}>Delete</button>
+            </div>
           </div>
         ))}
       </div>

@@ -38,50 +38,13 @@ export interface ImageModelOption {
 const SETTINGS_KEY = "lw-image-provider-settings";
 
 const MODEL_OPTIONS: Record<AssetProvider, ImageModelOption[]> = {
-  "gemini-nano-banana": [
-    {
-      id: "gemini-2.5-flash-image",
-      label: "Gemini Flash 2.5 / Nano Banana",
-      description: "Standard Nano Banana image model target for scene sets and characters.",
-    },
-    {
-      id: "gemini-3.1-flash-image",
-      label: "Gemini Flash 3.1 / Nano Banana 2",
-      description: "Nano Banana 2 flash image model target when available on the configured Gemini account.",
-    },
-    {
-      id: "gemini-3-pro-image",
-      label: "Gemini 3 Pro / Nano Banana 2",
-      description: "Higher quality Nano Banana 2 / Gemini Pro image model target when available.",
-    },
-    {
-      id: "gemini-2.5-flash-image-preview",
-      label: "Gemini 2.5 Flash Image Preview",
-      description: "Preview model name option for Google image-generation accounts that expose it.",
-    },
-    {
-      id: "gemini-2.0-flash-preview-image-generation",
-      label: "Gemini 2.0 Flash Preview Image Generation",
-      description: "Fallback image-generation preview model name used by some Gemini API setups.",
-    },
-  ],
-  "grok-imagine": [
-    {
-      id: "grok-imagine-latest",
-      label: "Grok Imagine Latest",
-      description: "Default Grok Imagine target for fast creative image generation.",
-    },
-    {
-      id: "grok-2-image-1212",
-      label: "Grok 2 Image 1212",
-      description: "xAI image model name option for accounts exposing the image generation API.",
-    },
-  ],
+  "gemini-nano-banana": [],
+  "grok-imagine": [],
 };
 
 const DEFAULT_MODELS: Record<AssetProvider, string> = {
-  "gemini-nano-banana": MODEL_OPTIONS["gemini-nano-banana"][0].id,
-  "grok-imagine": MODEL_OPTIONS["grok-imagine"][0].id,
+  "gemini-nano-banana": "",
+  "grok-imagine": "",
 };
 
 function readAllSettings(): Partial<Record<AssetProvider, ImageProviderSettings>> {
@@ -124,7 +87,7 @@ function isGeminiImageModel(model: { name?: string; displayName?: string; descri
 
 export async function listGeminiImageModels(apiKey: string): Promise<ImageModelOption[]> {
   const key = apiKey.trim();
-  if (!key) return getImageModelOptions("gemini-nano-banana");
+  if (!key) return [];
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
   if (!response.ok) {
@@ -148,12 +111,7 @@ export async function listGeminiImageModels(apiKey: string): Promise<ImageModelO
       description: model.description || "Gemini API image-capable model returned by the live models endpoint.",
     }));
 
-  const byId = new Map<string, ImageModelOption>();
-  for (const option of dynamicModels) byId.set(option.id, option);
-  for (const option of getImageModelOptions("gemini-nano-banana")) {
-    if (!byId.has(option.id)) byId.set(option.id, option);
-  }
-  return Array.from(byId.values());
+  return dynamicModels;
 }
 
 export function getDefaultImageModel(provider: AssetProvider): string {
@@ -248,6 +206,7 @@ async function generateGeminiImageAsset(request: ImageGenerationRequest): Promis
   const apiKey = settings.apiKey?.trim();
   if (!apiKey) throw new Error("Save a Gemini API key before generating images.");
   const model = request.model || settings.selectedModel || getDefaultImageModel("gemini-nano-banana");
+  if (!model.trim()) throw new Error("Select a Gemini image model first. Use Poll Gemini Models or enter a custom model ID.");
   const parts: Array<Record<string, unknown>> = [];
   const referencePayload = request.styleReference?.dataUrl ? dataUrlPayload(request.styleReference.dataUrl) : null;
   if (referencePayload) {
