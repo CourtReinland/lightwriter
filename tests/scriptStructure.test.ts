@@ -89,6 +89,49 @@ A lonely wind moves through dead grass. Ancient stones vanish into fog.
     expect(prompt.toLowerCase()).not.toContain("face");
   });
 
+  it("strips title-case character names, person actions, and readable cover text from editable scene prompts", () => {
+    const cartoonScript = `Title: Playful Kids Cartoon
+
+INT. LIVING ROOM, HOME, DAY
+
+Aliyah sits on the couch reading a novel. Aliyah has a very melodramatic expression. Aliyah starts crying, with very exaggerated sniffling. Aliyah sighs. The book cover reads "Caribbean Romance".
+
+EXT. BACKYARD - DAY
+
+Wind moves through bright paper decorations while rain taps a toy umbrella.
+`;
+    const scene = extractScriptScenes(cartoonScript)[0];
+    const prompt = buildAssetPrompt({ kind: "scene_set", scene, fullScriptContent: cartoonScript });
+    const lowerPrompt = prompt.toLowerCase();
+
+    expect(prompt).toContain("INT. LIVING ROOM, HOME, DAY");
+    expect(prompt).toContain("Infer background details from the overall script context");
+    expect(lowerPrompt).toContain("children's cartoon");
+    expect(prompt).not.toContain("Aliyah");
+    expect(lowerPrompt).not.toContain("sits on the couch");
+    expect(lowerPrompt).not.toContain("melodramatic expression");
+    expect(lowerPrompt).not.toContain("starts crying");
+    expect(lowerPrompt).not.toContain("sniffling");
+    expect(lowerPrompt).not.toContain("sighs");
+    expect(lowerPrompt).not.toContain("caribbean romance");
+    expect(lowerPrompt).not.toContain("book cover reads");
+  });
+
+  it("keeps environmental actions like wind and rain in editable scene prompts", () => {
+    const weatherScript = `Title: Stormy Animation
+
+EXT. BACKYARD - DAY
+
+Wind moves through bright paper decorations. Rain taps a toy umbrella. Lightning flashes over a painted fence.
+`;
+    const scene = extractScriptScenes(weatherScript)[0];
+    const prompt = buildAssetPrompt({ kind: "scene_set", scene, fullScriptContent: weatherScript });
+
+    expect(prompt).toContain("Wind moves through bright paper decorations");
+    expect(prompt).toContain("Rain taps a toy umbrella");
+    expect(prompt).toContain("Lightning flashes over a painted fence");
+  });
+
   it("adds a script-level style reference note to scene prompts when provided", () => {
     const scene = extractScriptScenes(script)[0];
     const prompt = buildAssetPrompt({

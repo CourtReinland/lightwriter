@@ -33,11 +33,28 @@ const CHARACTER_CUE_RE = /^@?([A-Z][A-Z0-9 '\-.]{1,40})(?:\s*\(([^)]+)\))?$/;
 const DESCRIPTION_WITH_NAME_RE = /\b([A-Z][A-Z0-9 '\-.]{1,30})\s*\(([^)]+)\)/g;
 const PAREN_CHARACTER_DETAIL_RE = /\b[A-Z][A-Z0-9 '\-.]{1,30}\s*\([^)]+\)/g;
 const TRANSITION_RE = /^(CUT TO:|FADE OUT\.?|FADE IN:?|DISSOLVE TO:)$/i;
+const HUMAN_ACTION_SUBJECT_RE = /\b(?:he|she|they|we|i|you|man|woman|boy|girl|child|kid|teen|mother|father|mom|dad|person|people|[A-Z][a-z]+)\b\s+(?:sits?|sat|stands?|stood|walks?|runs?|moves?|goes?|turns?|looks?|watches?|waits?|reads?|writes?|holds?|takes?|puts?|starts?|begins?|cries|crying|sobs?|sniffles?|sniffling|sighs?|smiles?|frowns?|laughs?|speaks?|says?|whispers?|shouts?|enters?|exits?|has|had|is|are|was|were)\b/i;
+const READABLE_TEXT_RE = /\b(?:book cover|cover|sign|poster|screen|letter|note|page|label|logo)\s+(?:reads?|says?|states?|shows?)\b/i;
+const ENVIRONMENTAL_SUBJECT_RE = /\b(?:wind|rain|lightning|thunder|storm|snow|fog|mist|smoke|dust|leaves|grass|waves|water|fire|flames|shadows?|sunlight|moonlight|neon|lamps?|candles?|curtains?|doors?|windows?)\b/i;
 
-function cleanBackgroundDescription(text: string): string {
+function sentenceFragments(text: string): string[] {
   return text
     .replace(PAREN_CHARACTER_DETAIL_RE, "")
-    .replace(/\b[A-Z][A-Z0-9 '\-.]{1,30}\b\s+(?:enters|exits|walks|runs|sits|stands|waits|watches|looks|turns|speaks|whispers|shouts)\b[^.]*\.?/g, "")
+    .split(/(?<=[.!?])\s+/)
+    .map((fragment) => fragment.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function isPersonActionSentence(sentence: string): boolean {
+  if (READABLE_TEXT_RE.test(sentence)) return true;
+  if (ENVIRONMENTAL_SUBJECT_RE.test(sentence)) return false;
+  return HUMAN_ACTION_SUBJECT_RE.test(sentence);
+}
+
+function cleanBackgroundDescription(text: string): string {
+  return sentenceFragments(text)
+    .filter((sentence) => !isPersonActionSentence(sentence))
+    .join(" ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -45,6 +62,7 @@ function cleanBackgroundDescription(text: string): string {
 function inferScriptTone(content = ""): string {
   const lower = content.toLowerCase();
   const signals: string[] = [];
+  if (/children|kids?|cartoon|animated|animation|playful|toy|storybook|exaggerated|sniffling|melodramatic/.test(lower)) signals.push("children's cartoon");
   if (/gothic|manor|moor|fog|ancient|haunted|storm|candle|shadow/.test(lower)) signals.push("gothic romance");
   if (/love|romance|kiss|heart|desire|wedding|rose/.test(lower)) signals.push("romantic drama");
   if (/spaceship|planet|android|alien|neon|cyber/.test(lower)) signals.push("science fiction");
