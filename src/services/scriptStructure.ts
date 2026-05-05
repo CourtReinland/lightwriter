@@ -31,6 +31,35 @@ const SCENE_HEADING_RE = /^(INT\.|EXT\.|EST\.|INT\.\/EXT\.|I\/E\.)\s+(.+?)(?:\s+
 const FORCED_SHOT_RE = /^!!\s*(.+)$/;
 const CHARACTER_CUE_RE = /^@?([A-Z][A-Z0-9 '\-.]{1,40})(?:\s*\(([^)]+)\))?$/;
 const DESCRIPTION_WITH_NAME_RE = /\b([A-Z][A-Z0-9 '\-.]{1,30})\s*\(([^)]+)\)/g;
+const PAREN_CHARACTER_DETAIL_RE = /\b[A-Z][A-Z0-9 '\-.]{1,30}\s*\([^)]+\)/g;
+const TRANSITION_RE = /^(CUT TO:|FADE OUT\.?|FADE IN:?|DISSOLVE TO:)$/i;
+
+function cleanBackgroundDescription(text: string): string {
+  return text
+    .replace(PAREN_CHARACTER_DETAIL_RE, "")
+    .replace(/\b[A-Z][A-Z0-9 '\-.]{1,30}\b\s+(?:enters|exits|walks|runs|sits|stands|waits|watches|looks|turns|speaks|whispers|shouts)\b[^.]*\.?/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inferScriptTone(content = ""): string {
+  const lower = content.toLowerCase();
+  const signals: string[] = [];
+  if (/gothic|manor|moor|fog|ancient|haunted|storm|candle|shadow/.test(lower)) signals.push("gothic romance");
+  if (/love|romance|kiss|heart|desire|wedding|rose/.test(lower)) signals.push("romantic drama");
+  if (/spaceship|planet|android|alien|neon|cyber/.test(lower)) signals.push("science fiction");
+  if (/magic|kingdom|dragon|witch|prophecy|enchanted/.test(lower)) signals.push("fantasy");
+  if (/murder|detective|crime|noir|blood|gun/.test(lower)) signals.push("crime thriller");
+  if (/school|cafe|apartment|city street|office/.test(lower)) signals.push("grounded contemporary drama");
+  if (signals.length === 0) return "cinematic screenplay tone inferred from genre, setting, pacing, and recurring imagery";
+  return Array.from(new Set(signals)).join(", ");
+}
+
+function backgroundDetailOrInference(scene: ScriptSceneRef, fullScriptContent?: string): string {
+  const detail = cleanBackgroundDescription(scene.description);
+  if (detail) return `Background-only scene details: ${detail}`;
+  return `Infer background details from the overall script context: ${inferScriptTone(fullScriptContent)}. Use what usually belongs in ${scene.location || scene.heading} at ${scene.timeOfDay || "the indicated time"}: architecture, weather, props, lighting, texture, color palette, era cues, and set dressing.`;
+}
 
 function linesOf(content: string): string[] {
   return content.replace(/\r\n/g, "\n").split("\n");
@@ -67,9 +96,22 @@ export function extractScriptScenes(content: string): ScriptSceneRef[] {
     const next = starts[sceneIndex + 1];
     const endLine = next ? next.lineIndex : lines.length - 1;
     const bodyLines = lines.slice(start.lineIndex + 1, endLine + 1);
+    let insideDialogue = false;
     const description = bodyLines
       .map((line) => line.trim())
-      .filter((line) => line && !FORCED_SHOT_RE.test(line) && !CHARACTER_CUE_RE.test(line))
+      .filter((line) => {
+        if (!line) {
+          insideDialogue = false;
+          return false;
+        }
+        if (FORCED_SHOT_RE.test(line) || TRANSITION_RE.test(line)) return false;
+        if (CHARACTER_CUE_RE.test(line)) {
+          insideDialogue = true;
+          return false;
+        }
+        if (insideDialogue) return false;
+        return true;
+      })
       .slice(0, 4)
       .join(" ");
 
@@ -151,15 +193,25 @@ export function extractCharacters(content: string): ScriptCharacterRef[] {
 }
 
 export function buildAssetPrompt(input:
-  | { kind: Extract<AssetKind, "scene_set">; scene: ScriptSceneRef; userPrompt?: string }
+  | {
+      kind: Extract<AssetKind, "scene_set">;
+      scene: ScriptSceneRef;
+      userPrompt?: string;
+      fullScriptContent?: string;
+      styleReference?: { name: string; mimeType: string; dataUrl: string } | null;
+    }
   | { kind: Extract<AssetKind, "character">; character: ScriptCharacterRef; userPrompt?: string },
 ): string {
   if (input.kind === "scene_set") {
     const base = [
       `Generate a cinematic scene background / set image for Hollywood screenplay heading: ${input.scene.heading}.`,
-      input.scene.description ? `Scene description: ${input.scene.description}` : "",
-      "No text, no subtitles, no characters unless explicitly required by the scene description.",
+      backgroundDetailOrInference(input.scene, input.fullScriptContent),
+      "Only background/set/environment content: architecture, props, signage-free set dressing, landscape, weather, lighting, atmosphere, color, texture, era, and genre style.",
+      "Exclude people, bodies, portraits, dialogue text, subtitles, logos, watermarks, UI, or readable writing.",
       "Style: production design concept art, cinematic lighting, practical set detail, 16:9 frame.",
+      input.styleReference
+        ? `Use the attached script-level style reference image (${input.styleReference.name}) for art direction, palette, texture, lens mood, and overall visual continuity.`
+        : "",
       input.userPrompt ? `User direction: ${input.userPrompt}` : "",
     ];
     return base.filter(Boolean).join("\n");

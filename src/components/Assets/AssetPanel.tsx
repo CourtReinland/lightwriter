@@ -22,6 +22,7 @@ import {
   saveImageProviderSettings,
 } from "../../services/imageGenerationService";
 import type { Project } from "../../services/storageService";
+import { StyleReferenceService, type ScriptStyleReference } from "../../services/styleReferenceService";
 import "./AssetPanel.css";
 
 interface AssetPanelProps {
@@ -55,6 +56,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [customModel, setCustomModel] = useState("");
   const [modelOptions, setModelOptions] = useState(() => getImageModelOptions("gemini-nano-banana"));
   const [isPollingModels, setIsPollingModels] = useState(false);
+  const [styleReference, setStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id));
   const [settingsMessage, setSettingsMessage] = useState("");
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
@@ -75,6 +77,10 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     setSettingsMessage("");
   }, [provider]);
 
+  useEffect(() => {
+    setStyleReference(StyleReferenceService.get(project.id));
+  }, [project.id]);
+
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
 
@@ -94,8 +100,14 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         .filter(Boolean)
         .join("\n");
     }
-    return buildAssetPrompt({ kind: "scene_set", scene: selected as ScriptSceneRef, userPrompt });
-  }, [selected, sourceKind, userPrompt]);
+    return buildAssetPrompt({
+      kind: "scene_set",
+      scene: selected as ScriptSceneRef,
+      fullScriptContent: project.content,
+      styleReference,
+      userPrompt,
+    });
+  }, [selected, sourceKind, userPrompt, project.content, styleReference]);
 
   const refreshAssets = () => onAssetsChange(AssetService.getAssets(project.id));
 
@@ -135,6 +147,30 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     clearImageProviderApiKey(provider);
     setApiKeyDraft("");
     setSettingsMessage(`${providerLabel(provider)} API key cleared.`);
+  };
+
+  const handleStyleReferenceChange = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setSettingsMessage("Style reference must be an image file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      if (!dataUrl) return;
+      const saved = StyleReferenceService.save(project.id, { name: file.name, mimeType: file.type, dataUrl });
+      setStyleReference(saved);
+      setSettingsMessage(`Script style reference saved: ${file.name}`);
+    };
+    reader.onerror = () => setSettingsMessage("Could not read style reference image.");
+    reader.readAsDataURL(file);
+  };
+
+  const handleClearStyleReference = () => {
+    StyleReferenceService.clear(project.id);
+    setStyleReference(null);
+    setSettingsMessage("Script style reference cleared.");
   };
 
   const handleStageAsset = () => {
@@ -186,6 +222,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         script2ScreenShotKey:
           sourceKind === "shot" ? shot.shotKey : sourceKind === "scene_set" ? `s${scene.sceneIndex}_sh0` : undefined,
         handoffStatus: "local",
+        styleReferenceName: styleReference?.name,
+        hasStyleReference: Boolean(styleReference),
       },
     });
     onAssetsChange([...assets, asset]);
@@ -307,6 +345,27 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
           placeholder="Add visual style, era, camera/lens, palette, wardrobe, exclusions..."
         />
       </label>
+
+      <section className="asset-settings-box asset-style-reference-box">
+        <h3>Script Style Reference</h3>
+        <p className="asset-muted">
+          Optional look reference for the whole script. Scene prompts will ask providers to use it for palette, texture, mood, and continuity.
+        </p>
+        <label>
+          Reference image
+          <input type="file" accept="image/*" onChange={(event) => handleStyleReferenceChange(event.target.files?.[0])} />
+        </label>
+        {styleReference && (
+          <div className="asset-style-reference-preview">
+            <img src={styleReference.dataUrl} alt="Script style reference" />
+            <div>
+              <strong>{styleReference.name}</strong>
+              <span>{styleReference.mimeType}</span>
+              <button onClick={handleClearStyleReference}>Clear Reference</button>
+            </div>
+          </div>
+        )}
+      </section>
 
       <label>
         Editable generated prompt

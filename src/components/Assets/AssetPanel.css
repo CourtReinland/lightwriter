@@ -91,7 +91,8 @@
 .asset-primary,
 .asset-export-row button,
 .asset-card button,
-.asset-settings-actions button {
+.asset-settings-actions button,
+.asset-style-reference-preview button {
   background: #f97316;
   border: none;
   border-radius: 999px;
@@ -118,7 +119,8 @@
 }
 
 .asset-settings-actions button,
-.asset-export-row button {
+.asset-export-row button,
+.asset-style-reference-preview button {
   background: rgba(249, 115, 22, 0.18);
   color: #ffd7aa;
   border: 1px solid rgba(249, 115, 22, 0.4);
@@ -129,6 +131,39 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.asset-style-reference-preview {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.asset-style-reference-preview img {
+  width: 76px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.asset-style-reference-preview div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.asset-style-reference-preview strong,
+.asset-style-reference-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-style-reference-preview span {
+  color: #b7ad9f;
+  font-size: 12px;
 }
 
 .asset-card {

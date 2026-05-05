@@ -65,4 +65,40 @@ MAYA (20s, elegant, dangerous) watches the skyline.
     expect(buildAssetPrompt({ kind: "character", character })).toContain("ALEX");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("30s, restless eyes");
   });
+
+  it("removes character mentions from scene background prompts and infers missing set detail from whole-script tone", () => {
+    const sparseScript = `Title: Gothic Romance
+
+INT. MANOR HALL - NIGHT
+
+ISABELLA
+Do not open that door.
+
+EXT. MOOR - DAWN
+
+A lonely wind moves through dead grass. Ancient stones vanish into fog.
+`;
+    const scene = extractScriptScenes(sparseScript)[0];
+    const prompt = buildAssetPrompt({ kind: "scene_set", scene, fullScriptContent: sparseScript });
+
+    expect(prompt).toContain("INT. MANOR HALL - NIGHT");
+    expect(prompt).toContain("Infer background details from the overall script context");
+    expect(prompt).toContain("gothic romance");
+    expect(prompt).not.toContain("ISABELLA");
+    expect(prompt.toLowerCase()).not.toContain("character");
+    expect(prompt.toLowerCase()).not.toContain("face");
+  });
+
+  it("adds a script-level style reference note to scene prompts when provided", () => {
+    const scene = extractScriptScenes(script)[0];
+    const prompt = buildAssetPrompt({
+      kind: "scene_set",
+      scene,
+      fullScriptContent: script,
+      styleReference: { name: "gothic-board.png", mimeType: "image/png", dataUrl: "data:image/png;base64,abc" },
+    });
+
+    expect(prompt).toContain("Use the attached script-level style reference image");
+    expect(prompt).toContain("gothic-board.png");
+  });
 });
