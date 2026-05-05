@@ -89,6 +89,7 @@
 }
 
 .asset-primary,
+.asset-generation-actions button,
 .asset-export-row button,
 .asset-card button,
 .asset-settings-actions button,
@@ -103,15 +104,28 @@
   padding: 8px 12px;
 }
 
-.asset-primary:disabled {
+.asset-primary:disabled,
+.asset-generation-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
 .asset-settings-actions,
+.asset-generation-actions,
 .asset-export-row {
   display: flex;
   gap: 8px;
+}
+
+.asset-generation-actions {
+  margin: 0 0 12px;
+}
+
+.asset-generation-actions button:not(.asset-primary) {
+  background: rgba(249, 115, 22, 0.18);
+  color: #ffd7aa;
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  font-size: 12px;
 }
 
 .asset-export-row {
@@ -173,6 +187,15 @@
   padding: 10px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.asset-card-preview {
+  width: 84px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
 }
 
 .asset-card div {

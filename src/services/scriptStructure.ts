@@ -73,10 +73,60 @@ function inferScriptTone(content = ""): string {
   return Array.from(new Set(signals)).join(", ");
 }
 
+function titleCaseSignal(signal: string): string {
+  return signal
+    .split(/\s+/)
+    .map((word) => (word ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word))
+    .join(" ");
+}
+
+function compactLocation(scene: ScriptSceneRef): string {
+  return (scene.location || scene.heading)
+    .replace(/\b(INT\.|EXT\.|EST\.|INT\.\/EXT\.|I\/E\.)\b/gi, "")
+    .replace(/\s+-\s+[A-Z0-9 .]+$/i, "")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function inferredBackgroundResult(scene: ScriptSceneRef, fullScriptContent?: string): string {
+  const tone = inferScriptTone(fullScriptContent);
+  const primaryTone = tone.split(",")[0].trim();
+  const location = compactLocation(scene);
+  const time = (scene.timeOfDay || "").trim().toLowerCase();
+  const tonePrefix = primaryTone ? titleCaseSignal(primaryTone) : "Cinematic";
+  const timePhrase = time ? ` at ${time}` : "";
+  const base = `${tonePrefix} ${location || "screenplay location"}${timePhrase}`.replace(/\s+/g, " ").trim();
+
+  if (primaryTone === "children's cartoon") {
+    return `${base}, bright playful home interior, cozy furniture, rounded cartoon shapes, colorful storybook props, soft daylight, cheerful production design, clean background set plate, 16:9.`;
+  }
+  if (primaryTone === "gothic romance") {
+    return `${base}, candlelit architecture, moody period set dressing, aged textures, deep shadows, atmospheric fog, ornate props, dramatic cinematic background plate, 16:9.`;
+  }
+  if (primaryTone === "romantic drama") {
+    return `${base}, warm practical lighting, intimate set dressing, soft color palette, lived-in props, cinematic interior atmosphere, clean background set plate, 16:9.`;
+  }
+  if (primaryTone === "science fiction") {
+    return `${base}, futuristic architecture, controlled light panels, advanced props, sleek surfaces, atmospheric depth, cinematic background set plate, 16:9.`;
+  }
+  if (primaryTone === "fantasy") {
+    return `${base}, enchanted architecture, textured handmade props, atmospheric lighting, magical environment detail, cinematic background set plate, 16:9.`;
+  }
+  if (primaryTone === "crime thriller") {
+    return `${base}, tense practical lighting, noir shadows, gritty set dressing, suspenseful atmosphere, cinematic background set plate, 16:9.`;
+  }
+  if (primaryTone === "grounded contemporary drama") {
+    return `${base}, realistic modern set dressing, natural light, believable props, lived-in surfaces, cinematic background set plate, 16:9.`;
+  }
+  return `${base}, architecture, props, set dressing, lighting, atmosphere, color palette, texture, era cues, clean cinematic background set plate, 16:9.`;
+}
+
 function backgroundDetailOrInference(scene: ScriptSceneRef, fullScriptContent?: string): string {
   const detail = cleanBackgroundDescription(scene.description);
-  if (detail) return `Background-only scene details: ${detail}`;
-  return `Infer background details from the overall script context: ${inferScriptTone(fullScriptContent)}. Use what usually belongs in ${scene.location || scene.heading} at ${scene.timeOfDay || "the indicated time"}: architecture, weather, props, lighting, texture, color palette, era cues, and set dressing.`;
+  if (detail) return `Scene background: ${detail}`;
+  return inferredBackgroundResult(scene, fullScriptContent);
 }
 
 function linesOf(content: string): string[] {
@@ -222,13 +272,12 @@ export function buildAssetPrompt(input:
 ): string {
   if (input.kind === "scene_set") {
     const base = [
-      `Generate a cinematic scene background / set image for Hollywood screenplay heading: ${input.scene.heading}.`,
+      `Cinematic empty scene background/set plate for ${input.scene.heading}.`,
       backgroundDetailOrInference(input.scene, input.fullScriptContent),
-      "Only background/set/environment content: architecture, props, signage-free set dressing, landscape, weather, lighting, atmosphere, color, texture, era, and genre style.",
-      "Exclude people, bodies, portraits, dialogue text, subtitles, logos, watermarks, UI, or readable writing.",
-      "Style: production design concept art, cinematic lighting, practical set detail, 16:9 frame.",
+      "Architecture, props, set dressing, landscape/weather if present, lighting, atmosphere, color, texture, era, genre style, production design concept art, practical set detail, 16:9 frame.",
+      "No people, bodies, portraits, dialogue text, subtitles, logos, watermarks, UI, or readable writing.",
       input.styleReference
-        ? `Use the attached script-level style reference image (${input.styleReference.name}) for art direction, palette, texture, lens mood, and overall visual continuity.`
+        ? `Script-level style reference: ${input.styleReference.name}, matching palette, texture, lens mood, and visual continuity.`
         : "",
       input.userPrompt ? `User direction: ${input.userPrompt}` : "",
     ];

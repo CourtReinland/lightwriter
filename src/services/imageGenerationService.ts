@@ -11,6 +11,7 @@ export interface ImageGenerationRequest {
   scriptRef: GeneratedAsset["scriptRef"];
   aspectRatio?: string;
   stylePreset?: string;
+  styleReference?: { name: string; mimeType: string; dataUrl: string } | null;
 }
 
 export interface ImageGenerationResult {
@@ -223,8 +224,60 @@ export function buildGeneratedAssetFromResult(
   };
 }
 
-export async function generateImageAsset(_request: ImageGenerationRequest): Promise<ImageGenerationResult> {
-  throw new Error(
-    "Image generation provider calls are not wired yet. This interface is ready for Gemini/Nano Banana and Grok Imagine adapters.",
+function dataUrlPayload(dataUrl: string): { mimeType: string; data: string } | null {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+function geminiInlineImagePart(data: unknown): { mimeType: string; data: string } | null {
+  const candidates = (data as { candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }> }).candidates || [];
+  for (const candidate of candidates) {
+    for (const part of candidate.content?.parts || []) {
+      const inlineData = (part.inlineData || part.inline_data) as { mimeType?: string; mime_type?: string; data?: string } | undefined;
+      if (inlineData?.data) {
+        return { mimeType: inlineData.mimeType || inlineData.mime_type || "image/png", data: inlineData.data };
+      }
+    }
+  }
+  return null;
+}
+
+async function generateGeminiImageAsset(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
+  const settings = getImageProviderSettings("gemini-nano-banana");
+  const apiKey = settings.apiKey?.trim();
+  if (!apiKey) throw new Error("Save a Gemini API key before generating images.");
+  const model = request.model || settings.selectedModel || getDefaultImageModel("gemini-nano-banana");
+  const parts: Array<Record<string, unknown>> = [
+    { text: `${request.prompt}${request.aspectRatio ? `\nAspect ratio: ${request.aspectRatio}.` : ""}` },
+  ];
+  const referencePayload = request.styleReference?.dataUrl ? dataUrlPayload(request.styleReference.dataUrl) : null;
+  if (referencePayload) {
+    parts.push({ inline_data: { mime_type: request.styleReference?.mimeType || referencePayload.mimeType, data: referencePayload.data } });
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
+      }),
+    },
   );
+  if (!response.ok) throw new Error(`Gemini image generation failed: ${response.status} ${response.statusText}`);
+  const data = await response.json();
+  const inlineImage = geminiInlineImagePart(data);
+  if (!inlineImage) throw new Error("Gemini did not return an inline image payload.");
+  return {
+    mimeType: inlineImage.mimeType,
+    imageDataUrl: `data:${inlineImage.mimeType};base64,${inlineImage.data}`,
+  };
+}
+
+export async function generateImageAsset(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
+  if (request.provider === "gemini-nano-banana") return generateGeminiImageAsset(request);
+  throw new Error("Grok Imagine generation is not wired yet. Use Gemini / Nano Banana generation or stage the prompt metadata for now.");
 }

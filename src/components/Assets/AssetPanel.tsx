@@ -13,7 +13,9 @@ import {
 } from "../../services/scriptStructure";
 import { buildLightWriterPackage, buildScript2ScreenManifest, exportJsonDownload } from "../../services/assetManifestExporter";
 import {
+  buildGeneratedAssetFromResult,
   clearImageProviderApiKey,
+  generateImageAsset,
   getDefaultImageModel,
   getImageModelOptions,
   getImageProviderSettings,
@@ -58,6 +60,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [isPollingModels, setIsPollingModels] = useState(false);
   const [styleReference, setStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id));
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [promptOverride, setPromptOverride] = useState("");
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
   const characters = useMemo(() => extractCharacters(project.content), [project.content]);
@@ -84,7 +88,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
 
-  const prompt = useMemo(() => {
+  const autoPrompt = useMemo(() => {
     if (!selected) return "";
     if (sourceKind === "character") {
       return buildAssetPrompt({ kind: "character", character: selected as ScriptCharacterRef, userPrompt });
@@ -108,6 +112,12 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       userPrompt,
     });
   }, [selected, sourceKind, userPrompt, project.content, styleReference]);
+
+  useEffect(() => {
+    setPromptOverride(autoPrompt);
+  }, [autoPrompt]);
+
+  const prompt = promptOverride;
 
   const refreshAssets = () => onAssetsChange(AssetService.getAssets(project.id));
 
@@ -173,15 +183,13 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     setSettingsMessage("Script style reference cleared.");
   };
 
-  const handleStageAsset = () => {
-    if (!selected || !prompt.trim()) return;
-    const now = Date.now();
+  const buildCurrentAssetRequest = () => {
+    if (!selected || !prompt.trim()) return null;
     const kind: AssetKind = sourceKind === "shot" ? "shot" : sourceKind;
     const scene = selected as ScriptSceneRef;
     const character = selected as ScriptCharacterRef;
     const shot = selected as ScriptShotRef;
-    const asset = AssetService.addAsset(project.id, {
-      id: "",
+    return {
       projectId: project.id,
       kind,
       provider,
@@ -193,9 +201,6 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
             ? shot.shotKey
             : scene.heading,
       prompt,
-      mimeType: "image/png",
-      createdAt: now,
-      updatedAt: now,
       scriptRef:
         sourceKind === "character"
           ? { scriptHash, characterName: character.name, contentExcerpt: character.evidence.join("\n") }
@@ -216,17 +221,61 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
                 sceneEndLine: scene.endLine,
                 contentExcerpt: scene.description,
               },
+      aspectRatio: sourceKind === "character" ? "2:3" : "16:9",
+      styleReference,
+    };
+  };
+
+  const handleStageAsset = () => {
+    const request = buildCurrentAssetRequest();
+    if (!request) return;
+    const asset = AssetService.addAsset(project.id, {
+      ...buildGeneratedAssetFromResult(request, { mimeType: "image/png" }),
       metadata: {
-        promptVersion: 1,
-        aspectRatio: sourceKind === "character" ? "2:3" : "16:9",
+        ...buildGeneratedAssetFromResult(request, { mimeType: "image/png" }).metadata,
         script2ScreenShotKey:
-          sourceKind === "shot" ? shot.shotKey : sourceKind === "scene_set" ? `s${scene.sceneIndex}_sh0` : undefined,
-        handoffStatus: "local",
+          sourceKind === "shot"
+            ? (selected as ScriptShotRef).shotKey
+            : sourceKind === "scene_set"
+              ? `s${(selected as ScriptSceneRef).sceneIndex}_sh0`
+              : undefined,
         styleReferenceName: styleReference?.name,
         hasStyleReference: Boolean(styleReference),
       },
     });
     onAssetsChange([...assets, asset]);
+    setSettingsMessage("Prompt metadata staged locally. Use Generate Image to call the provider.");
+  };
+
+  const handleGenerateAsset = async () => {
+    const request = buildCurrentAssetRequest();
+    if (!request) return;
+    setIsGenerating(true);
+    setSettingsMessage(`Generating image with ${providerLabel(provider)}...`);
+    try {
+      const result = await generateImageAsset(request);
+      const generated = buildGeneratedAssetFromResult(request, result);
+      const asset = AssetService.addAsset(project.id, {
+        ...generated,
+        metadata: {
+          ...generated.metadata,
+          script2ScreenShotKey:
+            sourceKind === "shot"
+              ? (selected as ScriptShotRef).shotKey
+              : sourceKind === "scene_set"
+                ? `s${(selected as ScriptSceneRef).sceneIndex}_sh0`
+                : undefined,
+          styleReferenceName: styleReference?.name,
+          hasStyleReference: Boolean(styleReference),
+        },
+      });
+      onAssetsChange([...assets, asset]);
+      setSettingsMessage("Image generated and saved to Project Assets.");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Image generation failed.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleDelete = (assetId: string) => {
@@ -369,12 +418,17 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
 
       <label>
         Editable generated prompt
-        <textarea className="asset-prompt" value={prompt} readOnly />
+        <textarea className="asset-prompt" value={prompt} onChange={(event) => setPromptOverride(event.target.value)} />
       </label>
 
-      <button className="asset-primary" onClick={handleStageAsset} disabled={!selected}>
-        Stage Asset Metadata
-      </button>
+      <div className="asset-generation-actions">
+        <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating}>
+          {isGenerating ? "Generating..." : "Generate Image"}
+        </button>
+        <button onClick={handleStageAsset} disabled={!selected || isGenerating}>
+          Stage Prompt Only
+        </button>
+      </div>
 
       <div className="asset-export-row">
         <button onClick={handleExportLightWriterPackage}>Export LW Package</button>
@@ -386,6 +440,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         {assets.length === 0 && <p className="asset-empty">No generated/staged assets yet.</p>}
         {assets.map((asset) => (
           <div className="asset-card" key={asset.id}>
+            {asset.imageDataUrl && <img className="asset-card-preview" src={asset.imageDataUrl} alt={asset.name} />}
             <div>
               <strong>{assetName(asset)}</strong>
               <span>{asset.kind} · {providerLabel(asset.provider)}</span>

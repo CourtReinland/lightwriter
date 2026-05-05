@@ -61,7 +61,7 @@ MAYA (20s, elegant, dangerous) watches the skyline.
     const character = extractCharacters(script)[0];
 
     expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("INT. COFFEE SHOP - DAY");
-    expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("cinematic scene background");
+    expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("Cinematic empty scene background");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("ALEX");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("30s, restless eyes");
   });
@@ -82,8 +82,9 @@ A lonely wind moves through dead grass. Ancient stones vanish into fog.
     const prompt = buildAssetPrompt({ kind: "scene_set", scene, fullScriptContent: sparseScript });
 
     expect(prompt).toContain("INT. MANOR HALL - NIGHT");
-    expect(prompt).toContain("Infer background details from the overall script context");
-    expect(prompt).toContain("gothic romance");
+    expect(prompt).not.toContain("Infer background details from the overall script context");
+    expect(prompt).not.toContain("Use what usually belongs");
+    expect(prompt.toLowerCase()).toContain("gothic romance manor hall at night");
     expect(prompt).not.toContain("ISABELLA");
     expect(prompt.toLowerCase()).not.toContain("character");
     expect(prompt.toLowerCase()).not.toContain("face");
@@ -105,8 +106,9 @@ Wind moves through bright paper decorations while rain taps a toy umbrella.
     const lowerPrompt = prompt.toLowerCase();
 
     expect(prompt).toContain("INT. LIVING ROOM, HOME, DAY");
-    expect(prompt).toContain("Infer background details from the overall script context");
-    expect(lowerPrompt).toContain("children's cartoon");
+    expect(prompt).not.toContain("Infer background details from the overall script context");
+    expect(prompt).not.toContain("Use what usually belongs");
+    expect(lowerPrompt).toContain("children's cartoon living room");
     expect(prompt).not.toContain("Aliyah");
     expect(lowerPrompt).not.toContain("sits on the couch");
     expect(lowerPrompt).not.toContain("melodramatic expression");
@@ -141,7 +143,7 @@ Wind moves through bright paper decorations. Rain taps a toy umbrella. Lightning
       styleReference: { name: "gothic-board.png", mimeType: "image/png", dataUrl: "data:image/png;base64,abc" },
     });
 
-    expect(prompt).toContain("Use the attached script-level style reference image");
+    expect(prompt).toContain("Script-level style reference");
     expect(prompt).toContain("gothic-board.png");
   });
 });
