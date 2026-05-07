@@ -1,4 +1,5 @@
 import { GrokService } from "./grokService";
+import { getImageProviderSettings } from "./imageGenerationService";
 import { buildAssetPrompt, extractCharacters, type ScriptCharacterRef, type ScriptSceneRef, type ScriptShotRef } from "./scriptStructure";
 
 export type LlmPromptKind = "scene_set" | "character" | "shot";
@@ -139,8 +140,8 @@ Hard rules:
 }
 
 export async function generateReviewedAssetPrompt(request: LlmAssetPromptRequest): Promise<string> {
-  const apiKey = GrokService.getStoredApiKey();
-  if (!apiKey?.trim()) throw new Error("Set your Grok API key before generating LLM prompts.");
+  const apiKey = GrokService.getStoredApiKey() || getImageProviderSettings("grok-imagine").apiKey;
+  if (!apiKey?.trim()) throw new Error("Set a Grok API key before generating LLM prompts.");
 
   const service = new GrokService(apiKey);
   const characterNames = characterNamesFromScript(request.fullScriptContent);
