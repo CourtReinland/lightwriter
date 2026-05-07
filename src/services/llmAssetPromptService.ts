@@ -139,11 +139,7 @@ Hard rules:
 - Output one polished comma-separated visual prompt under 70 words.`;
 }
 
-export async function generateReviewedAssetPrompt(request: LlmAssetPromptRequest): Promise<string> {
-  const apiKey = GrokService.getStoredApiKey() || getImageProviderSettings("grok-imagine").apiKey;
-  if (!apiKey?.trim()) throw new Error("Set a Grok API key before generating LLM prompts.");
-
-  const service = new GrokService(apiKey);
+async function generateReviewedAssetPromptWithService(request: LlmAssetPromptRequest, service: GrokService): Promise<string> {
   const characterNames = characterNamesFromScript(request.fullScriptContent);
   const seed = deterministicSeed(request);
   const draft = await service.complete(
@@ -173,4 +169,23 @@ export async function generateReviewedAssetPrompt(request: LlmAssetPromptRequest
   );
 
   return extractTextOnly(reviewed);
+}
+
+function promptService(): GrokService {
+  const apiKey = GrokService.getStoredApiKey() || getImageProviderSettings("grok-imagine").apiKey;
+  if (!apiKey?.trim()) throw new Error("Set a Grok API key before generating LLM prompts.");
+  return new GrokService(apiKey);
+}
+
+export async function generateReviewedAssetPrompt(request: LlmAssetPromptRequest): Promise<string> {
+  return generateReviewedAssetPromptWithService(request, promptService());
+}
+
+export async function generateReviewedAssetPrompts(requests: LlmAssetPromptRequest[]): Promise<string[]> {
+  const service = promptService();
+  const prompts: string[] = [];
+  for (const request of requests) {
+    prompts.push(await generateReviewedAssetPromptWithService(request, service));
+  }
+  return prompts;
 }

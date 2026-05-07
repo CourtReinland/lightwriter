@@ -23,7 +23,7 @@ import {
   type ImageGenerationRequest,
 } from "../../services/imageGenerationService";
 import { downloadImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
-import { generateReviewedAssetPrompt } from "../../services/llmAssetPromptService";
+import { generateReviewedAssetPrompt, generateReviewedAssetPrompts } from "../../services/llmAssetPromptService";
 import type { Project } from "../../services/storageService";
 import { StyleReferenceService, type ScriptStyleReference } from "../../services/styleReferenceService";
 import "./AssetPanel.css";
@@ -203,16 +203,18 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     };
   };
 
+  const buildPromptRequestForChoice = (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef) => ({
+    kind: sourceKind,
+    scene: sourceKind === "scene_set" ? (choice as ScriptSceneRef) : undefined,
+    character: sourceKind === "character" ? (choice as ScriptCharacterRef) : undefined,
+    shot: sourceKind === "shot" ? (choice as ScriptShotRef) : undefined,
+    fullScriptContent: project.content,
+    styleReference,
+    userPrompt,
+  });
+
   const buildPromptForChoice = async (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef): Promise<string> => {
-    return generateReviewedAssetPrompt({
-      kind: sourceKind,
-      scene: sourceKind === "scene_set" ? (choice as ScriptSceneRef) : undefined,
-      character: sourceKind === "character" ? (choice as ScriptCharacterRef) : undefined,
-      shot: sourceKind === "shot" ? (choice as ScriptShotRef) : undefined,
-      fullScriptContent: project.content,
-      styleReference,
-      userPrompt,
-    });
+    return generateReviewedAssetPrompt(buildPromptRequestForChoice(choice));
   };
 
   const handleGenerateLlmPrompt = async () => {
@@ -225,6 +227,46 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       setSettingsMessage("LLM prompt drafted and reviewed. You can edit it before generating.");
     } catch (error) {
       setSettingsMessage(error instanceof Error ? error.message : "LLM prompt generation failed.");
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
+  };
+
+  const handleGenerateAllPrompts = async () => {
+    if (choices.length === 0) return;
+    setIsGeneratingPrompt(true);
+    setSettingsMessage(`Generating and reviewing ${choices.length} ${sourceKind} prompt${choices.length === 1 ? "" : "s"}...`);
+    try {
+      const typedChoices = choices as Array<ScriptSceneRef | ScriptCharacterRef | ScriptShotRef>;
+      const prompts = await generateReviewedAssetPrompts(typedChoices.map(buildPromptRequestForChoice));
+      const stagedAssets = prompts
+        .map((finalPrompt, index) => {
+          const request = buildAssetRequestForChoice(typedChoices[index], finalPrompt);
+          if (!request) return null;
+          const generated = buildGeneratedAssetFromResult(request, { mimeType: "image/png" });
+          return AssetService.addAsset(project.id, {
+            ...generated,
+            metadata: {
+              ...generated.metadata,
+              script2ScreenShotKey:
+                request.kind === "shot"
+                  ? request.scriptRef.shotLine
+                    ? request.name
+                    : undefined
+                  : request.kind === "scene_set"
+                    ? `s${request.scriptRef.sceneIndex}_sh0`
+                    : undefined,
+              styleReferenceName: styleReference?.name,
+              hasStyleReference: Boolean(styleReference),
+            },
+          });
+        })
+        .filter((asset): asset is GeneratedAsset => Boolean(asset));
+      if (prompts[Number(selectedKey)]) setPromptOverride(prompts[Number(selectedKey)]);
+      onAssetsChange([...assets, ...stagedAssets]);
+      setSettingsMessage(`Generate All Prompts complete: ${stagedAssets.length} reviewed prompt${stagedAssets.length === 1 ? "" : "s"} staged.`);
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? `Generate All Prompts failed: ${error.message}` : "Generate All Prompts failed.");
     } finally {
       setIsGeneratingPrompt(false);
     }
@@ -489,6 +531,9 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       <div className="asset-generation-actions">
         <button onClick={handleGenerateLlmPrompt} disabled={!selected || isGeneratingPrompt || isGenerating}>
           {isGeneratingPrompt ? "Reviewing Prompt..." : "Generate/Review Prompt"}
+        </button>
+        <button onClick={handleGenerateAllPrompts} disabled={choices.length === 0 || isGeneratingPrompt || isGenerating}>
+          Generate All Prompts
         </button>
         <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
           {isGenerating ? "Generating..." : "Generate Image"}

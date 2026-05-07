@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateReviewedAssetPrompt, promptViolations } from "../src/services/llmAssetPromptService";
+import { generateReviewedAssetPrompt, generateReviewedAssetPrompts, promptViolations } from "../src/services/llmAssetPromptService";
 import type { ScriptSceneRef } from "../src/services/scriptStructure";
 
 function makeLocalStorage() {
@@ -74,6 +74,36 @@ describe("llmAssetPromptService", () => {
     expect(prompt).toBe(
       "cozy children's cartoon living room interior, soft daylight, rounded furniture, colorful storybook props, warm playful palette, gentle lens softness",
     );
+  });
+
+  it("generates reviewed prompts for every selected script reference without generating images", async () => {
+    const secondScene: ScriptSceneRef = {
+      ...scene,
+      sceneIndex: 1,
+      heading: "EXT. BACKYARD, HOME, NIGHT",
+      locationType: "EXT.",
+      location: "BACKYARD, HOME",
+      timeOfDay: "NIGHT",
+      description: "Rain rattles the patio umbrella while Aliyah watches from the doorway.",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "draft one" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "cozy cartoon living room, soft daylight, rounded furniture" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "draft two" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "rainy suburban backyard, patio umbrella, night lighting, wet grass" } }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const prompts = await generateReviewedAssetPrompts([
+      { kind: "scene_set", scene, fullScriptContent: `Title\n${scene.heading}\n${scene.description}` },
+      { kind: "scene_set", scene: secondScene, fullScriptContent: `Title\n${secondScene.heading}\n${secondScene.description}` },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(prompts).toEqual([
+      "cozy cartoon living room, soft daylight, rounded furniture",
+      "rainy suburban backyard, patio umbrella, night lighting, wet grass",
+    ]);
   });
 
   it("detects instruction text, placeholders, scene headings, and leaked character names", () => {
