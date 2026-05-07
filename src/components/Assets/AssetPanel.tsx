@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { GeneratedAsset, AssetProvider, AssetKind } from "../../types/assets";
 import { AssetService } from "../../services/assetService";
 import {
-  buildAssetPrompt,
   extractCharacters,
   extractScriptScenes,
   extractShotLines,
@@ -24,6 +23,7 @@ import {
   type ImageGenerationRequest,
 } from "../../services/imageGenerationService";
 import { downloadImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { generateReviewedAssetPrompt } from "../../services/llmAssetPromptService";
 import type { Project } from "../../services/storageService";
 import { StyleReferenceService, type ScriptStyleReference } from "../../services/styleReferenceService";
 import "./AssetPanel.css";
@@ -62,6 +62,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [styleReference, setStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id));
   const [settingsMessage, setSettingsMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptOverride, setPromptOverride] = useState("");
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
@@ -89,34 +90,9 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
 
-  const autoPrompt = useMemo(() => {
-    if (!selected) return "";
-    if (sourceKind === "character") {
-      return buildAssetPrompt({ kind: "character", character: selected as ScriptCharacterRef, userPrompt });
-    }
-    if (sourceKind === "shot") {
-      const shot = selected as ScriptShotRef;
-      return [
-        `Generate a cinematic start-frame image for shot ${shot.shotKey} in ${shot.sceneHeading}.`,
-        `Shot direction: ${shot.text}`,
-        "Style: production still, cinematic lighting, coherent with the script world, 16:9 frame.",
-        userPrompt ? `User direction: ${userPrompt}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-    }
-    return buildAssetPrompt({
-      kind: "scene_set",
-      scene: selected as ScriptSceneRef,
-      fullScriptContent: project.content,
-      styleReference,
-      userPrompt,
-    });
-  }, [selected, sourceKind, userPrompt, project.content, styleReference]);
-
   useEffect(() => {
-    setPromptOverride(autoPrompt);
-  }, [autoPrompt]);
+    setPromptOverride("");
+  }, [selectedKey, sourceKind, userPrompt, project.content, styleReference]);
 
   const prompt = promptOverride;
 
@@ -227,28 +203,31 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     };
   };
 
-  const buildPromptForChoice = (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef): string => {
-    if (sourceKind === "character") {
-      return buildAssetPrompt({ kind: "character", character: choice as ScriptCharacterRef, userPrompt });
-    }
-    if (sourceKind === "shot") {
-      const shot = choice as ScriptShotRef;
-      return [
-        `Generate a cinematic start-frame image for shot ${shot.shotKey} in ${shot.sceneHeading}.`,
-        `Shot direction: ${shot.text}`,
-        "Style: production still, cinematic lighting, coherent with the script world, 16:9 frame.",
-        userPrompt ? `User direction: ${userPrompt}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-    }
-    return buildAssetPrompt({
-      kind: "scene_set",
-      scene: choice as ScriptSceneRef,
+  const buildPromptForChoice = async (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef): Promise<string> => {
+    return generateReviewedAssetPrompt({
+      kind: sourceKind,
+      scene: sourceKind === "scene_set" ? (choice as ScriptSceneRef) : undefined,
+      character: sourceKind === "character" ? (choice as ScriptCharacterRef) : undefined,
+      shot: sourceKind === "shot" ? (choice as ScriptShotRef) : undefined,
       fullScriptContent: project.content,
       styleReference,
       userPrompt,
     });
+  };
+
+  const handleGenerateLlmPrompt = async () => {
+    if (!selected) return;
+    setIsGeneratingPrompt(true);
+    setSettingsMessage("LLM prompt pass 1 drafting, pass 2 reviewing against LightWriter rules...");
+    try {
+      const nextPrompt = await buildPromptForChoice(selected as ScriptSceneRef | ScriptCharacterRef | ScriptShotRef);
+      setPromptOverride(nextPrompt);
+      setSettingsMessage("LLM prompt drafted and reviewed. You can edit it before generating.");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "LLM prompt generation failed.");
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
   };
 
   const buildCurrentAssetRequest = () => {
@@ -258,7 +237,10 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
 
   const handleStageAsset = () => {
     const request = buildCurrentAssetRequest();
-    if (!request) return;
+    if (!request) {
+      setSettingsMessage("Generate or write a reviewed prompt before staging metadata.");
+      return;
+    }
     const asset = AssetService.addAsset(project.id, {
       ...buildGeneratedAssetFromResult(request, { mimeType: "image/png" }),
       metadata: {
@@ -305,15 +287,18 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   };
 
   const handleGenerateAsset = async () => {
-    const request = buildCurrentAssetRequest();
-    if (!request) return;
-    if (!request.model?.trim()) {
+    if (!selected) return;
+    if (!effectiveModel.trim()) {
       setSettingsMessage("Poll Gemini models or enter a custom model ID before generating.");
       return;
     }
     setIsGenerating(true);
-    setSettingsMessage(`Generating image with ${providerLabel(provider)}...`);
+    setSettingsMessage(prompt.trim() ? `Generating image with ${providerLabel(provider)}...` : "No prompt yet: running LLM draft + LLM rule review first...");
     try {
+      const finalPrompt = prompt.trim() || (await buildPromptForChoice(selected as ScriptSceneRef | ScriptCharacterRef | ScriptShotRef));
+      if (!prompt.trim()) setPromptOverride(finalPrompt);
+      const request = buildAssetRequestForChoice(selected as ScriptSceneRef | ScriptCharacterRef | ScriptShotRef, finalPrompt);
+      if (!request) return;
       const asset = await saveGeneratedAssetFromRequest(request);
       onAssetsChange([...assets, asset]);
       setSettingsMessage(asset.filePath ? `Image generated and saved: ${asset.filePath}` : "Image generated and saved to Project Assets. Use Download Image to save a file.");
@@ -335,7 +320,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     const generatedAssets: GeneratedAsset[] = [];
     try {
       for (const choice of choices as Array<ScriptSceneRef | ScriptCharacterRef | ScriptShotRef>) {
-        const request = buildAssetRequestForChoice(choice, buildPromptForChoice(choice));
+        const finalPrompt = await buildPromptForChoice(choice);
+        const request = buildAssetRequestForChoice(choice, finalPrompt);
         if (!request) continue;
         const asset = await saveGeneratedAssetFromRequest(request);
         generatedAssets.push(asset);
@@ -492,17 +478,25 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
 
       <label>
         Editable generated prompt
-        <textarea className="asset-prompt" value={prompt} onChange={(event) => setPromptOverride(event.target.value)} />
+        <textarea
+          className="asset-prompt"
+          value={prompt}
+          onChange={(event) => setPromptOverride(event.target.value)}
+          placeholder="Click Generate/Review Prompt to run the two-step LLM prompt builder, or write your final provider prompt here."
+        />
       </label>
 
       <div className="asset-generation-actions">
-        <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating}>
+        <button onClick={handleGenerateLlmPrompt} disabled={!selected || isGeneratingPrompt || isGenerating}>
+          {isGeneratingPrompt ? "Reviewing Prompt..." : "Generate/Review Prompt"}
+        </button>
+        <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
           {isGenerating ? "Generating..." : "Generate Image"}
         </button>
-        <button className="asset-primary" onClick={handleGenerateAll} disabled={choices.length === 0 || isGenerating}>
+        <button className="asset-primary" onClick={handleGenerateAll} disabled={choices.length === 0 || isGenerating || isGeneratingPrompt}>
           Generate All
         </button>
-        <button onClick={handleStageAsset} disabled={!selected || isGenerating}>
+        <button onClick={handleStageAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
           Stage Prompt Only
         </button>
       </div>
