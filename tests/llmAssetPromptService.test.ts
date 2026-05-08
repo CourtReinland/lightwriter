@@ -106,6 +106,39 @@ describe("llmAssetPromptService", () => {
     ]);
   });
 
+  it("reports progress as reviewed prompts are generated sequentially", async () => {
+    const secondScene: ScriptSceneRef = {
+      ...scene,
+      sceneIndex: 1,
+      heading: "EXT. BACKYARD, HOME, NIGHT",
+      locationType: "EXT.",
+      location: "BACKYARD, HOME",
+      timeOfDay: "NIGHT",
+      description: "Rain rattles the patio umbrella while Aliyah watches from the doorway.",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "draft one" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "cozy cartoon living room, soft daylight, rounded furniture" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "draft two" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "rainy suburban backyard, patio umbrella, night lighting, wet grass" } }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onProgress = vi.fn();
+
+    await generateReviewedAssetPrompts(
+      [
+        { kind: "scene_set", scene, fullScriptContent: `Title\n${scene.heading}\n${scene.description}` },
+        { kind: "scene_set", scene: secondScene, fullScriptContent: `Title\n${secondScene.heading}\n${secondScene.description}` },
+      ],
+      onProgress,
+    );
+
+    expect(onProgress).toHaveBeenCalledWith({ index: 0, total: 2, phase: "start", label: scene.heading });
+    expect(onProgress).toHaveBeenCalledWith({ index: 0, total: 2, phase: "complete", label: scene.heading });
+    expect(onProgress).toHaveBeenCalledWith({ index: 1, total: 2, phase: "start", label: secondScene.heading });
+    expect(onProgress).toHaveBeenCalledWith({ index: 1, total: 2, phase: "complete", label: secondScene.heading });
+  });
+
   it("detects instruction text, placeholders, scene headings, and leaked character names", () => {
     const violations = promptViolations(
       "Empty scene background for INT. LIVING ROOM, HOME, DAY. Aliyah, description goes here, no characters, do not copy style reference.",

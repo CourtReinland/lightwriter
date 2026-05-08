@@ -238,7 +238,13 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     setSettingsMessage(`Generating and reviewing ${choices.length} ${sourceKind} prompt${choices.length === 1 ? "" : "s"}...`);
     try {
       const typedChoices = choices as Array<ScriptSceneRef | ScriptCharacterRef | ScriptShotRef>;
-      const prompts = await generateReviewedAssetPrompts(typedChoices.map(buildPromptRequestForChoice));
+      const prompts = await generateReviewedAssetPrompts(
+        typedChoices.map(buildPromptRequestForChoice),
+        ({ index, total, phase, label }) => {
+          const step = phase === "start" ? "reviewing" : "finished";
+          setSettingsMessage(`Prompt ${index + 1}/${total} ${step}: ${label}`);
+        },
+      );
       const stagedAssets = prompts
         .map((finalPrompt, index) => {
           const request = buildAssetRequestForChoice(typedChoices[index], finalPrompt);
@@ -362,9 +368,11 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     const generatedAssets: GeneratedAsset[] = [];
     try {
       for (const choice of choices as Array<ScriptSceneRef | ScriptCharacterRef | ScriptShotRef>) {
+        setSettingsMessage(`Prompt ${generatedAssets.length + 1}/${choices.length} reviewing before image generation...`);
         const finalPrompt = await buildPromptForChoice(choice);
         const request = buildAssetRequestForChoice(choice, finalPrompt);
         if (!request) continue;
+        setSettingsMessage(`Image ${generatedAssets.length + 1}/${choices.length} generating: ${request.name}`);
         const asset = await saveGeneratedAssetFromRequest(request);
         generatedAssets.push(asset);
         setSettingsMessage(`Generated ${generatedAssets.length}/${choices.length}: ${asset.name}`);

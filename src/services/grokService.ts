@@ -33,6 +33,25 @@ const SYSTEM_PROMPT = `You are a professional screenwriting assistant. You write
 
 CRITICAL RULE: Return ONLY the screenplay text itself. No explanations, no commentary, no preamble, no "Here is the improved version:", no "I've made the following changes:", no notes after the text. Your entire response must be valid Fountain screenplay content that can be directly inserted into a script. Do not wrap the text in code blocks or markdown formatting.`;
 
+const DEFAULT_GROK_TIMEOUT_MS = 90_000;
+
+type GrokCompleteOptions = { temperature?: number; maxTokens?: number; timeoutMs?: number };
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_GROK_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Grok API timed out after ${timeoutMs}ms. Check your network/API key or try a smaller batch.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export class GrokService {
   private apiKey: string;
   private model = "grok-3-mini-fast";
@@ -57,7 +76,7 @@ export class GrokService {
       ? `Context:\n---\n${surroundingContext}\n---\n\nRewrite this:\n---\n${selectedText}\n---`
       : `Rewrite this:\n---\n${selectedText}\n---`;
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -91,9 +110,9 @@ export class GrokService {
   async complete(
     systemPrompt: string,
     userMessage: string,
-    options?: { temperature?: number; maxTokens?: number },
+    options?: GrokCompleteOptions,
   ): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -108,7 +127,7 @@ export class GrokService {
         temperature: options?.temperature ?? 0.8,
         max_tokens: options?.maxTokens ?? 2048,
       }),
-    });
+    }, options?.timeoutMs);
 
     if (!response.ok) {
       const err = await response.text();

@@ -14,6 +14,13 @@ export interface LlmAssetPromptRequest {
   styleReference?: { name: string; mimeType: string; dataUrl: string } | null;
 }
 
+export interface LlmAssetPromptProgress {
+  index: number;
+  total: number;
+  phase: "start" | "complete";
+  label: string;
+}
+
 const INSTRUCTION_RE = /\b(?:empty scene background for|generate |create |make |do not|don't|no characters?|no people|avoid|must|should|style reference|match the style reference|copy its|shot direction|user direction|script description|use screenplay context|return only|prompt|aspect ratio)\b/i;
 const PLACEHOLDER_RE = /\b(?:description goes here|placeholder|tbd|to be determined|insert|fill in|n\/a)\b/i;
 const SCENE_HEADING_RE = /(?:^|\s)(?:INT\.|EXT\.|EST\.|INT\.\/EXT\.|I\/E\.)\s+/i;
@@ -181,11 +188,25 @@ export async function generateReviewedAssetPrompt(request: LlmAssetPromptRequest
   return generateReviewedAssetPromptWithService(request, promptService());
 }
 
-export async function generateReviewedAssetPrompts(requests: LlmAssetPromptRequest[]): Promise<string[]> {
+function promptLabel(request: LlmAssetPromptRequest): string {
+  if (request.kind === "scene_set" && request.scene) return request.scene.heading;
+  if (request.kind === "shot" && request.shot) return request.shot.shotKey;
+  if (request.kind === "character" && request.character) return request.character.name;
+  return request.kind;
+}
+
+export async function generateReviewedAssetPrompts(
+  requests: LlmAssetPromptRequest[],
+  onProgress?: (progress: LlmAssetPromptProgress) => void,
+): Promise<string[]> {
   const service = promptService();
   const prompts: string[] = [];
-  for (const request of requests) {
+  for (let index = 0; index < requests.length; index += 1) {
+    const request = requests[index];
+    const label = promptLabel(request);
+    onProgress?.({ index, total: requests.length, phase: "start", label });
     prompts.push(await generateReviewedAssetPromptWithService(request, service));
+    onProgress?.({ index, total: requests.length, phase: "complete", label });
   }
   return prompts;
 }
