@@ -395,12 +395,18 @@ function parseCeltxHtml(html: string): string {
 // Extracts text page-by-page, attempts to reconstruct screenplay structure
 // by analyzing vertical positioning of text items.
 
+export function resolvePdfWorkerSrc(pageHref = globalThis.location?.href): string {
+  if (!pageHref) return "pdf.worker.min.mjs";
+  return new URL("pdf.worker.min.mjs", pageHref).toString();
+}
+
 export async function importPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   // Dynamic import to avoid loading pdf.js unless needed
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Use the worker from public/ (copied from node_modules/pdfjs-dist/build/)
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  // Resolve relative to the current page. A leading slash becomes file:///pdf.worker.min.mjs
+  // in packaged Electron, which makes pdf.js fail to fetch its fake worker module.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = resolvePdfWorkerSrc();
 
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const allLines: string[] = [];
