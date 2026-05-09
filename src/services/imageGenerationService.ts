@@ -47,6 +47,25 @@ const DEFAULT_MODELS: Record<AssetProvider, string> = {
   "grok-imagine": "",
 };
 
+function dedupeModelOptions(options: ImageModelOption[]): ImageModelOption[] {
+  const seen = new Set<string>();
+  const deduped: ImageModelOption[] = [];
+  for (const option of options) {
+    const id = option.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    deduped.push({ ...option, id });
+  }
+  return deduped;
+}
+
+function setImageModelOptions(provider: AssetProvider, options: ImageModelOption[]): ImageModelOption[] {
+  const deduped = dedupeModelOptions(options);
+  MODEL_OPTIONS[provider] = deduped;
+  DEFAULT_MODELS[provider] = deduped[0]?.id || "";
+  return deduped;
+}
+
 function readAllSettings(): Partial<Record<AssetProvider, ImageProviderSettings>> {
   if (typeof localStorage === "undefined") return {};
   const raw = localStorage.getItem(SETTINGS_KEY);
@@ -111,7 +130,51 @@ export async function listGeminiImageModels(apiKey: string): Promise<ImageModelO
       description: model.description || "Gemini API image-capable model returned by the live models endpoint.",
     }));
 
-  return dynamicModels;
+  return setImageModelOptions("gemini-nano-banana", dynamicModels);
+}
+
+function normalizeGrokModelName(name: string): string {
+  return name.replace(/^models\//, "");
+}
+
+function isGrokImageModel(model: { id?: string; name?: string; displayName?: string; description?: string }): boolean {
+  const haystack = `${model.id || ""} ${model.name || ""} ${model.displayName || ""} ${model.description || ""}`.toLowerCase();
+  return (haystack.includes("image") || haystack.includes("imagine")) && !haystack.includes("embedding");
+}
+
+export async function listGrokImageModels(apiKey: string): Promise<ImageModelOption[]> {
+  const key = apiKey.trim();
+  if (!key) return [];
+
+  const response = await fetch("https://api.x.ai/v1/models", {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Grok model polling failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as {
+    data?: Array<{ id?: string; name?: string; displayName?: string; description?: string }>;
+    models?: Array<{ id?: string; name?: string; displayName?: string; description?: string }>;
+  };
+  const models = data.data || data.models || [];
+  const dynamicModels = models
+    .filter(isGrokImageModel)
+    .map((model) => {
+      const id = normalizeGrokModelName(model.id || model.name || "");
+      return {
+        id,
+        label: model.displayName || id,
+        description: model.description || "Grok image-capable model returned by the live models endpoint.",
+      };
+    });
+
+  return setImageModelOptions("grok-imagine", dynamicModels);
+}
+
+export async function listImageModelsForProvider(provider: AssetProvider, apiKey: string): Promise<ImageModelOption[]> {
+  if (provider === "gemini-nano-banana") return listGeminiImageModels(apiKey);
+  return listGrokImageModels(apiKey);
 }
 
 export function getDefaultImageModel(provider: AssetProvider): string {
@@ -135,7 +198,7 @@ export function saveImageProviderSettings(provider: AssetProvider, updates: Part
     ...current,
     ...updates,
     provider,
-    selectedModel: updates.selectedModel || current.selectedModel || getDefaultImageModel(provider),
+    selectedModel: updates.selectedModel !== undefined ? updates.selectedModel : current.selectedModel || getDefaultImageModel(provider),
     updatedAt: Date.now(),
   };
   all[provider] = next;
@@ -204,9 +267,9 @@ function geminiInlineImagePart(data: unknown): { mimeType: string; data: string 
 async function generateGeminiImageAsset(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
   const settings = getImageProviderSettings("gemini-nano-banana");
   const apiKey = settings.apiKey?.trim();
-  if (!apiKey) throw new Error("Save a Gemini API key before generating images.");
+  if (!apiKey) throw new Error("Add a Gemini API key before generating images.");
   const model = request.model || settings.selectedModel || getDefaultImageModel("gemini-nano-banana");
-  if (!model.trim()) throw new Error("Select a Gemini image model first. Use Poll Gemini Models or enter a custom model ID.");
+  if (!model.trim()) throw new Error("Choose a Gemini image model before generating.");
   const parts: Array<Record<string, unknown>> = [];
   const referencePayload = request.styleReference?.dataUrl ? dataUrlPayload(request.styleReference.dataUrl) : null;
   if (referencePayload) {

@@ -8,6 +8,8 @@ import {
   getImageProviderSettings,
   hasImageProviderApiKey,
   listGeminiImageModels,
+  listGrokImageModels,
+  listImageModelsForProvider,
   saveImageProviderSettings,
 } from "../src/services/imageGenerationService";
 
@@ -61,13 +63,19 @@ describe("imageGenerationService provider settings", () => {
     expect(getImageProviderSettings("gemini-nano-banana").selectedModel).toBe("custom-gemini-image-model");
   });
 
-  it("falls back to default model when no settings are stored", () => {
-    expect(getImageProviderSettings("gemini-nano-banana").selectedModel).toBe(
-      getDefaultImageModel("gemini-nano-banana"),
-    );
+  it("lets autosave replace an old selected model with an empty model while preserving keys", () => {
+    saveImageProviderSettings("gemini-nano-banana", {
+      apiKey: "gemini-key",
+      selectedModel: "old-custom-model",
+    });
+
+    saveImageProviderSettings("gemini-nano-banana", { selectedModel: "" });
+
+    expect(getImageProviderSettings("gemini-nano-banana").apiKey).toBe("gemini-key");
+    expect(getImageProviderSettings("gemini-nano-banana").selectedModel).toBe("");
   });
 
-  it("polls Gemini directly and maps image-capable model IDs into selectable options", async () => {
+  it("polls Gemini directly and maps image-capable model IDs into deduped selectable options", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -76,6 +84,12 @@ describe("imageGenerationService provider settings", () => {
             name: "models/gemini-2.5-flash-image",
             displayName: "Gemini Flash 2.5",
             description: "standard nano banana image generation",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "gemini-2.5-flash-image",
+            displayName: "Gemini Flash 2.5 Duplicate",
+            description: "duplicate ID from provider response",
             supportedGenerationMethods: ["generateContent"],
           },
           {
@@ -105,13 +119,44 @@ describe("imageGenerationService provider settings", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://generativelanguage.googleapis.com/v1beta/models?key=gemini-key",
     );
-    expect(models.slice(0, 3).map((model) => model.id)).toEqual([
+    expect(models.map((model) => model.id)).toEqual([
       "gemini-2.5-flash-image",
       "gemini-3.1-flash-image",
       "gemini-3-pro-image",
     ]);
     expect(models.map((model) => model.id)).not.toContain("gemini-2.5-flash-image-preview");
     expect(models[1].label).toContain("Gemini Flash 3.1");
+  });
+
+  it("polls Grok directly and maps image-capable model IDs into deduped selectable options", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "grok-2-image", description: "Grok image generation" },
+          { id: "models/grok-2-image", description: "Duplicate Grok image generation" },
+          { id: "grok-3-mini-fast", description: "Text completion" },
+          { id: "grok-imagine-latest", description: "Imagine image model" },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listGrokImageModels("xai-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.x.ai/v1/models", {
+      headers: { Authorization: "Bearer xai-key" },
+    });
+    expect(models.map((model) => model.id)).toEqual(["grok-2-image", "grok-imagine-latest"]);
+  });
+
+  it("polls the requested provider through the shared model polling helper", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ id: "grok-imagine-latest" }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listImageModelsForProvider("grok-imagine", "xai-key");
+
+    expect(models.map((model) => model.id)).toEqual(["grok-imagine-latest"]);
   });
 
   it("generates a Gemini image asset from the saved API key and returned inline image", async () => {

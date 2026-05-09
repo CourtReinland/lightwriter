@@ -13,11 +13,10 @@ import {
 import { buildLightWriterPackage, buildScript2ScreenManifest, exportJsonDownload } from "../../services/assetManifestExporter";
 import {
   buildGeneratedAssetFromResult,
-  clearImageProviderApiKey,
   generateImageAsset,
   getImageModelOptions,
   getImageProviderSettings,
-  listGeminiImageModels,
+  listImageModelsForProvider,
   providerLabel,
   saveImageProviderSettings,
   type ImageGenerationRequest,
@@ -57,7 +56,6 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [userPrompt, setUserPrompt] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
-  const [customModel, setCustomModel] = useState("");
   const [modelOptions, setModelOptions] = useState(() => getImageModelOptions("gemini-nano-banana"));
   const [isPollingModels, setIsPollingModels] = useState(false);
   const [styleReference, setStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id));
@@ -72,19 +70,81 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const characters = useMemo(() => extractCharacters(project.content), [project.content]);
   const shots = useMemo(() => extractShotLines(project.content), [project.content]);
   const scriptHash = useMemo(() => simpleScriptHash(project.content), [project.content]);
-  const effectiveModel = selectedModel === "custom" ? customModel.trim() : selectedModel;
-  const hasStoredKey = Boolean(getImageProviderSettings(provider).apiKey?.trim());
+  const effectiveModel = selectedModel;
+  const [settingsReadyProvider, setSettingsReadyProvider] = useState<AssetProvider | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    providerOptions().forEach((item) => {
+      const apiKey = getImageProviderSettings(item).apiKey?.trim();
+      if (!apiKey) return;
+      listImageModelsForProvider(item, apiKey)
+        .then((options) => {
+          if (cancelled || item !== provider) return;
+          setModelOptions(options);
+          setSelectedModel((current) => (isKnownModel(options, current) ? current : options[0]?.id || ""));
+        })
+        .catch(() => {
+          // Silent boot preload: the visible provider effect surfaces current-provider failures.
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setSettingsReadyProvider(null);
     const settings = getImageProviderSettings(provider);
     const options = getImageModelOptions(provider);
-    const model = settings.selectedModel || "";
+    const model = settings.selectedModel || options[0]?.id || "";
     setModelOptions(options);
     setApiKeyDraft(settings.apiKey || "");
-    setSelectedModel(model && isKnownModel(options, model) ? model : model ? "custom" : "");
-    setCustomModel(model && isKnownModel(options, model) ? "" : model);
+    setSelectedModel(model && isKnownModel(options, model) ? model : options[0]?.id || "");
     setSettingsMessage("");
+    setSettingsReadyProvider(provider);
   }, [provider]);
+
+  useEffect(() => {
+    if (settingsReadyProvider !== provider) return;
+    saveImageProviderSettings(provider, {
+      apiKey: apiKeyDraft.trim(),
+      selectedModel: effectiveModel,
+    });
+  }, [provider, apiKeyDraft, effectiveModel, settingsReadyProvider]);
+
+  useEffect(() => {
+    if (settingsReadyProvider !== provider) return;
+    const apiKey = apiKeyDraft.trim();
+    if (!apiKey) {
+      const options = getImageModelOptions(provider);
+      setModelOptions(options);
+      setSelectedModel((current) => (isKnownModel(options, current) ? current : options[0]?.id || ""));
+      return;
+    }
+
+    let cancelled = false;
+    setIsPollingModels(true);
+    setSettingsMessage(`Loading ${providerLabel(provider)} models...`);
+    listImageModelsForProvider(provider, apiKey)
+      .then((options) => {
+        if (cancelled) return;
+        setModelOptions(options);
+        setSelectedModel((current) => (isKnownModel(options, current) ? current : options[0]?.id || ""));
+        setSettingsMessage(options.length ? `${providerLabel(provider)} models loaded.` : `No image models found for ${providerLabel(provider)}.`);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSettingsMessage(error instanceof Error ? error.message : `${providerLabel(provider)} model loading failed.`);
+      })
+      .finally(() => {
+        if (!cancelled) setIsPollingModels(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, apiKeyDraft, settingsReadyProvider]);
 
   useEffect(() => {
     setStyleReference(StyleReferenceService.get(project.id));
@@ -128,44 +188,6 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const prompt = promptOverride;
 
   const refreshAssets = () => onAssetsChange(AssetService.getAssets(project.id));
-
-  const handleSaveProviderSettings = () => {
-    saveImageProviderSettings(provider, {
-      apiKey: apiKeyDraft.trim(),
-      selectedModel: effectiveModel,
-    });
-    setSettingsMessage(`${providerLabel(provider)} settings saved locally.`);
-  };
-
-  const handlePollGeminiModels = async () => {
-    if (provider !== "gemini-nano-banana") return;
-    const apiKey = apiKeyDraft.trim() || getImageProviderSettings(provider).apiKey || "";
-    if (!apiKey.trim()) {
-      setSettingsMessage("Paste and save a Gemini API key before polling live models.");
-      return;
-    }
-    setIsPollingModels(true);
-    setSettingsMessage("Polling Gemini for available image models...");
-    try {
-      const options = await listGeminiImageModels(apiKey);
-      setModelOptions(options);
-      if (!isKnownModel(options, effectiveModel)) {
-        setSelectedModel(options[0]?.id || "");
-        setCustomModel("");
-      }
-      setSettingsMessage(`Loaded ${options.length} Gemini image model options from the API.`);
-    } catch (error) {
-      setSettingsMessage(error instanceof Error ? error.message : "Gemini model polling failed.");
-    } finally {
-      setIsPollingModels(false);
-    }
-  };
-
-  const handleClearProviderKey = () => {
-    clearImageProviderApiKey(provider);
-    setApiKeyDraft("");
-    setSettingsMessage(`${providerLabel(provider)} API key cleared.`);
-  };
 
   const handleStyleReferenceChange = (file: File | undefined) => {
     if (!file) return;
@@ -355,7 +377,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const handleGenerateAsset = async () => {
     if (!selected) return;
     if (!effectiveModel.trim()) {
-      setSettingsMessage("Poll Gemini models or enter a custom model ID before generating.");
+      setSettingsMessage("Choose an image model before generating.");
       return;
     }
     setIsGenerating(true);
@@ -378,7 +400,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const handleGenerateAll = async () => {
     if (choices.length === 0) return;
     if (!effectiveModel.trim()) {
-      setSettingsMessage("Poll Gemini models or enter a custom model ID before generating all.");
+      setSettingsMessage("Choose an image model before generating all.");
       return;
     }
     setIsGenerating(true);
@@ -430,9 +452,12 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       </div>
 
       <section className="asset-settings-box">
-        <h3>Provider Settings</h3>
+        <div className="asset-settings-heading">
+          <h3>Provider Settings</h3>
+          <span>{isPollingModels ? "Syncing models..." : "Auto-saved"}</span>
+        </div>
         <p className="asset-muted">
-          Keys and model choices are saved locally in this LightWriter app profile. They are not exported in packages.
+          Keys, model choices, and live model lists are saved locally in this LightWriter app profile.
         </p>
         <label>
           Provider
@@ -448,39 +473,19 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
             type="password"
             value={apiKeyDraft}
             onChange={(event) => setApiKeyDraft(event.target.value)}
-            placeholder={hasStoredKey ? "Stored locally" : `Paste ${providerLabel(provider)} API key`}
+            placeholder={`Paste ${providerLabel(provider)} API key`}
           />
         </label>
         <label>
           Image model
-          <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-            <option value="">Poll models first...</option>
+          <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={isPollingModels && modelOptions.length === 0}>
+            <option value="">{isPollingModels ? "Loading models..." : "No models loaded yet"}</option>
             {modelOptions.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
-            <option value="custom">Custom model ID...</option>
           </select>
         </label>
-        {selectedModel === "custom" && (
-          <label>
-            Custom model ID
-            <input
-              value={customModel}
-              onChange={(event) => setCustomModel(event.target.value)}
-              placeholder="provider-specific-model-id"
-            />
-          </label>
-        )}
-        <p className="asset-muted">Selected model: {effectiveModel || "none yet — poll Gemini models or enter a custom model ID"}</p>
-        <div className="asset-settings-actions">
-          <button onClick={handleSaveProviderSettings}>Save Settings</button>
-          {provider === "gemini-nano-banana" && (
-            <button onClick={handlePollGeminiModels} disabled={isPollingModels}>
-              {isPollingModels ? "Polling..." : "Poll Gemini Models"}
-            </button>
-          )}
-          <button onClick={handleClearProviderKey}>Clear Key</button>
-        </div>
+        <p className="asset-muted">Selected model: {effectiveModel || "none yet"}</p>
         {settingsMessage && <p className="asset-status">{settingsMessage}</p>}
       </section>
 

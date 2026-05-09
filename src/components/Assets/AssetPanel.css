@@ -59,6 +59,20 @@
   margin-bottom: 4px;
 }
 
+.asset-settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.asset-settings-heading span {
+  color: #ffd7aa;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .asset-panel select,
 .asset-panel textarea,
 .asset-panel input {
