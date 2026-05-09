@@ -58,6 +58,52 @@ describe("AssetService", () => {
     expect(stored[0].metadata.script2ScreenShotKey).toBe("s0_sh0");
   });
 
+  it("does not persist large image data URLs once an Electron file path exists", () => {
+    const hugeImageDataUrl = `data:image/png;base64,${"a".repeat(1_000_000)}`;
+
+    const added = AssetService.addAsset(
+      "project-1",
+      asset({
+        id: "",
+        imageDataUrl: hugeImageDataUrl,
+        filePath: "/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png",
+      }),
+    );
+
+    expect(added.imageDataUrl).toBe(hugeImageDataUrl);
+
+    const setItemCalls = (localStorage.setItem as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const savedPayload = setItemCalls[setItemCalls.length - 1][1] as string;
+    expect(savedPayload.length).toBeLessThan(10_000);
+    expect(savedPayload).not.toContain(hugeImageDataUrl);
+    const storedAsset = AssetService.getAssets("project-1")[0];
+    expect(storedAsset.filePath).toBe("/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png");
+    expect("imageDataUrl" in storedAsset).toBe(false);
+  });
+
+  it("migrates previously bloated file-backed localStorage assets on read", () => {
+    const hugeImageDataUrl = `data:image/png;base64,${"a".repeat(1_000_000)}`;
+    localStorage.setItem(
+      "lw-assets-project-1",
+      JSON.stringify([
+        asset({
+          imageDataUrl: hugeImageDataUrl,
+          filePath: "/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png",
+        }),
+      ]),
+    );
+    (localStorage.setItem as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    const storedAsset = AssetService.getAssets("project-1")[0];
+
+    expect(storedAsset.filePath).toBe("/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png");
+    expect("imageDataUrl" in storedAsset).toBe(false);
+    const setItemCalls = (localStorage.setItem as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const migratedPayload = setItemCalls[setItemCalls.length - 1][1] as string;
+    expect(migratedPayload.length).toBeLessThan(10_000);
+    expect(migratedPayload).not.toContain(hugeImageDataUrl);
+  });
+
   it("adds, updates, deletes, and filters assets without crossing project boundaries", () => {
     const sceneAsset = AssetService.addAsset("project-1", asset({ id: "", name: "Coffee Shop" }));
     const characterAsset = AssetService.addAsset(

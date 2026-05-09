@@ -22,7 +22,8 @@ import {
   saveImageProviderSettings,
   type ImageGenerationRequest,
 } from "../../services/imageGenerationService";
-import { downloadImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { mergeReviewedPromptDrafts, promptDraftKey } from "../../services/assetPromptDraftService";
 import { generateReviewedAssetPrompt, generateReviewedAssetPrompts } from "../../services/llmAssetPromptService";
 import type { Project } from "../../services/storageService";
 import { StyleReferenceService, type ScriptStyleReference } from "../../services/styleReferenceService";
@@ -64,6 +65,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptOverride, setPromptOverride] = useState("");
+  const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
+  const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
   const characters = useMemo(() => extractCharacters(project.content), [project.content]);
@@ -89,10 +92,38 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
 
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
+  const selectedPromptDraftKey = promptDraftKey(sourceKind, selectedKey);
 
   useEffect(() => {
+    setPromptDrafts({});
     setPromptOverride("");
-  }, [selectedKey, sourceKind, userPrompt, project.content, styleReference]);
+  }, [project.id, project.content, sourceKind, userPrompt, styleReference]);
+
+  useEffect(() => {
+    setPromptOverride(promptDrafts[selectedPromptDraftKey] || "");
+  }, [promptDrafts, selectedPromptDraftKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const missingPreviewAssets = assets.filter((asset) => asset.filePath && !asset.imageDataUrl && !assetPreviewDataUrls[asset.id]);
+    if (missingPreviewAssets.length === 0) return;
+
+    missingPreviewAssets.forEach((asset) => {
+      loadPersistedImageDataUrl(asset.filePath)
+        .then((dataUrl) => {
+          if (!cancelled && dataUrl) {
+            setAssetPreviewDataUrls((current) => ({ ...current, [asset.id]: dataUrl }));
+          }
+        })
+        .catch(() => {
+          // Keep the asset card and file path visible even if thumbnail hydration fails.
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assets, assetPreviewDataUrls]);
 
   const prompt = promptOverride;
 
@@ -223,6 +254,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     setSettingsMessage("LLM prompt pass 1 drafting, pass 2 reviewing against LightWriter rules...");
     try {
       const nextPrompt = await buildPromptForChoice(selected as ScriptSceneRef | ScriptCharacterRef | ScriptShotRef);
+      setPromptDrafts((current) => ({ ...current, [selectedPromptDraftKey]: nextPrompt }));
       setPromptOverride(nextPrompt);
       setSettingsMessage("LLM prompt drafted and reviewed. You can edit it before generating.");
     } catch (error) {
@@ -240,37 +272,23 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       const typedChoices = choices as Array<ScriptSceneRef | ScriptCharacterRef | ScriptShotRef>;
       const prompts = await generateReviewedAssetPrompts(
         typedChoices.map(buildPromptRequestForChoice),
-        ({ index, total, phase, label }) => {
+        ({ index, total, phase, label, prompt: completedPrompt }) => {
           const step = phase === "start" ? "reviewing" : "finished";
           setSettingsMessage(`Prompt ${index + 1}/${total} ${step}: ${label}`);
+          if (phase === "complete" && completedPrompt) {
+            setPromptDrafts((current) => ({
+              ...current,
+              [promptDraftKey(sourceKind, index)]: completedPrompt,
+            }));
+            if (index === Number(selectedKey)) setPromptOverride(completedPrompt);
+          }
         },
       );
-      const stagedAssets = prompts
-        .map((finalPrompt, index) => {
-          const request = buildAssetRequestForChoice(typedChoices[index], finalPrompt);
-          if (!request) return null;
-          const generated = buildGeneratedAssetFromResult(request, { mimeType: "image/png" });
-          return AssetService.addAsset(project.id, {
-            ...generated,
-            metadata: {
-              ...generated.metadata,
-              script2ScreenShotKey:
-                request.kind === "shot"
-                  ? request.scriptRef.shotLine
-                    ? request.name
-                    : undefined
-                  : request.kind === "scene_set"
-                    ? `s${request.scriptRef.sceneIndex}_sh0`
-                    : undefined,
-              styleReferenceName: styleReference?.name,
-              hasStyleReference: Boolean(styleReference),
-            },
-          });
-        })
-        .filter((asset): asset is GeneratedAsset => Boolean(asset));
+      setPromptDrafts((current) => mergeReviewedPromptDrafts(current, sourceKind, prompts));
       if (prompts[Number(selectedKey)]) setPromptOverride(prompts[Number(selectedKey)]);
-      onAssetsChange([...assets, ...stagedAssets]);
-      setSettingsMessage(`Generate All Prompts complete: ${stagedAssets.length} reviewed prompt${stagedAssets.length === 1 ? "" : "s"} staged.`);
+      setSettingsMessage(
+        `Generate All Prompts complete: ${prompts.length} reviewed prompt${prompts.length === 1 ? "" : "s"} prepared. No Project Assets were created; use Stage Prompt Only, Generate Image, or Generate All when you want asset records.`,
+      );
     } catch (error) {
       setSettingsMessage(error instanceof Error ? `Generate All Prompts failed: ${error.message}` : "Generate All Prompts failed.");
     } finally {
@@ -531,7 +549,11 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         <textarea
           className="asset-prompt"
           value={prompt}
-          onChange={(event) => setPromptOverride(event.target.value)}
+          onChange={(event) => {
+            const nextPrompt = event.target.value;
+            setPromptOverride(nextPrompt);
+            setPromptDrafts((current) => ({ ...current, [selectedPromptDraftKey]: nextPrompt }));
+          }}
           placeholder="Click Generate/Review Prompt to run the two-step LLM prompt builder, or write your final provider prompt here."
         />
       </label>
@@ -562,22 +584,25 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       <div className="asset-list">
         <h3>Project Assets ({assets.length})</h3>
         {assets.length === 0 && <p className="asset-empty">No generated/staged assets yet.</p>}
-        {assets.map((asset) => (
+        {assets.map((asset) => {
+          const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+          return (
           <div className="asset-card" key={asset.id}>
-            {asset.imageDataUrl && <img className="asset-card-preview" src={asset.imageDataUrl} alt={asset.name} />}
+            {previewDataUrl && <img className="asset-card-preview" src={previewDataUrl} alt={asset.name} />}
             <div>
               <strong>{assetName(asset)}</strong>
               <span>{asset.kind} · {providerLabel(asset.provider)}</span>
               <span>{asset.model}</span>
               {asset.metadata.script2ScreenShotKey && <em>{asset.metadata.script2ScreenShotKey}</em>}
-              {asset.filePath ? <code className="asset-file-path">{asset.filePath}</code> : asset.imageDataUrl && <code className="asset-file-path">Stored in LightWriter app data; use Download Image for a copy.</code>}
+              {asset.filePath ? <code className="asset-file-path">{asset.filePath}</code> : previewDataUrl && <code className="asset-file-path">Stored in LightWriter app data; use Download Image for a copy.</code>}
             </div>
             <div className="asset-card-actions">
-              {asset.imageDataUrl && <button onClick={() => downloadImageDataUrl({ name: asset.name, mimeType: asset.mimeType, dataUrl: asset.imageDataUrl })}>Download Image</button>}
+              {previewDataUrl && <button onClick={() => downloadImageDataUrl({ name: asset.name, mimeType: asset.mimeType, dataUrl: previewDataUrl })}>Download Image</button>}
               <button onClick={() => handleDelete(asset.id)}>Delete</button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </aside>
   );

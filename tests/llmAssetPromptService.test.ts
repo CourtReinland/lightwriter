@@ -134,9 +134,21 @@ describe("llmAssetPromptService", () => {
     );
 
     expect(onProgress).toHaveBeenCalledWith({ index: 0, total: 2, phase: "start", label: scene.heading });
-    expect(onProgress).toHaveBeenCalledWith({ index: 0, total: 2, phase: "complete", label: scene.heading });
+    expect(onProgress).toHaveBeenCalledWith({
+      index: 0,
+      total: 2,
+      phase: "complete",
+      label: scene.heading,
+      prompt: "cozy cartoon living room, soft daylight, rounded furniture",
+    });
     expect(onProgress).toHaveBeenCalledWith({ index: 1, total: 2, phase: "start", label: secondScene.heading });
-    expect(onProgress).toHaveBeenCalledWith({ index: 1, total: 2, phase: "complete", label: secondScene.heading });
+    expect(onProgress).toHaveBeenCalledWith({
+      index: 1,
+      total: 2,
+      phase: "complete",
+      label: secondScene.heading,
+      prompt: "rainy suburban backyard, patio umbrella, night lighting, wet grass",
+    });
   });
 
   it("detects instruction text, placeholders, scene headings, and leaked character names", () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { assetDownloadFilename, downloadImageDataUrl, persistGeneratedImageFile } from "../src/services/imageAssetStorageService";
+import { assetDownloadFilename, downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageFile } from "../src/services/imageAssetStorageService";
 
 describe("imageAssetStorageService", () => {
   beforeEach(() => {
@@ -27,6 +27,18 @@ describe("imageAssetStorageService", () => {
       dataUrl: "data:image/png;base64,aW1hZ2U=",
     });
     expect(filePath).toBe("/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png");
+  });
+
+  it("loads persisted Electron image files back as data URLs for thumbnails", async () => {
+    const loadImageAsset = vi.fn().mockResolvedValue({ dataUrl: "data:image/png;base64,aW1hZ2U=" });
+    vi.stubGlobal("window", { lightwriterAssets: { loadImageAsset } });
+
+    const dataUrl = await loadPersistedImageDataUrl("/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png");
+
+    expect(loadImageAsset).toHaveBeenCalledWith({
+      filePath: "/Users/capricorn/Library/Application Support/lightwriter-app/assets/project-1/scene.png",
+    });
+    expect(dataUrl).toBe("data:image/png;base64,aW1hZ2U=");
   });
 
   it("falls back gracefully when no Electron bridge is available", async () => {

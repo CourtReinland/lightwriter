@@ -1,5 +1,6 @@
 export interface LightWriterAssetBridge {
   saveImageAsset?: (request: { projectId: string; assetId?: string; name: string; mimeType: string; dataUrl: string }) => Promise<{ filePath: string }>;
+  loadImageAsset?: (request: { filePath: string }) => Promise<{ dataUrl: string }>;
 }
 
 declare global {
@@ -42,6 +43,14 @@ export async function persistGeneratedImageFile(args: {
     dataUrl: args.dataUrl,
   });
   return result.filePath;
+}
+
+export async function loadPersistedImageDataUrl(filePath?: string): Promise<string | undefined> {
+  if (!filePath) return undefined;
+  const bridge = typeof window !== "undefined" ? window.lightwriterAssets : undefined;
+  if (!bridge?.loadImageAsset) return undefined;
+  const result = await bridge.loadImageAsset({ filePath });
+  return result.dataUrl;
 }
 
 export function downloadImageDataUrl(args: { name: string; mimeType: string; dataUrl?: string }): void {

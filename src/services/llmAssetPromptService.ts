@@ -19,6 +19,7 @@ export interface LlmAssetPromptProgress {
   total: number;
   phase: "start" | "complete";
   label: string;
+  prompt?: string;
 }
 
 const INSTRUCTION_RE = /\b(?:empty scene background for|generate |create |make |do not|don't|no characters?|no people|avoid|must|should|style reference|match the style reference|copy its|shot direction|user direction|script description|use screenplay context|return only|prompt|aspect ratio)\b/i;
@@ -205,8 +206,9 @@ export async function generateReviewedAssetPrompts(
     const request = requests[index];
     const label = promptLabel(request);
     onProgress?.({ index, total: requests.length, phase: "start", label });
-    prompts.push(await generateReviewedAssetPromptWithService(request, service));
-    onProgress?.({ index, total: requests.length, phase: "complete", label });
+    const prompt = await generateReviewedAssetPromptWithService(request, service);
+    prompts.push(prompt);
+    onProgress?.({ index, total: requests.length, phase: "complete", label, prompt });
   }
   return prompts;
 }

@@ -20,6 +20,28 @@ function extensionForMimeType(mimeType: string): string {
   return "png";
 }
 
+function mimeTypeForFilePath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  return "image/png";
+}
+
+function assetRootDir(): string {
+  return path.join(app.getPath("userData"), "assets");
+}
+
+function assertInsideAssetRoot(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  const root = path.resolve(assetRootDir());
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Asset image path is outside LightWriter's asset folder.");
+  }
+  return resolved;
+}
+
 function safePathSegment(value: string): string {
   return value
     .trim()
@@ -37,11 +59,18 @@ function registerAssetIpc() {
     const projectId = safePathSegment(request.projectId || "project");
     const assetId = request.assetId ? `${safePathSegment(request.assetId)}_` : `${Date.now().toString(36)}_`;
     const fileName = `${assetId}${safePathSegment(request.name || "lightwriter_asset")}.${extensionForMimeType(mimeType)}`;
-    const dir = path.join(app.getPath("userData"), "assets", projectId);
+    const dir = path.join(assetRootDir(), projectId);
     await fs.mkdir(dir, { recursive: true });
     const filePath = path.join(dir, fileName);
     await fs.writeFile(filePath, Buffer.from(match[2], "base64"));
     return { filePath };
+  });
+
+  ipcMain.handle("lightwriter:load-asset-image", async (_event, request: { filePath?: string }) => {
+    const filePath = assertInsideAssetRoot(request.filePath || "");
+    const bytes = await fs.readFile(filePath);
+    const mimeType = mimeTypeForFilePath(filePath);
+    return { dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}` };
   });
 }
 

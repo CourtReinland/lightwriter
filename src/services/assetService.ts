@@ -16,13 +16,44 @@ function safeParseAssets(data: string | null): GeneratedAsset[] {
   }
 }
 
+function assetForLocalStorage(asset: GeneratedAsset): GeneratedAsset {
+  if (!asset.filePath || !asset.imageDataUrl) return asset;
+  const { imageDataUrl: _imageDataUrl, ...metadataOnlyAsset } = asset;
+  return metadataOnlyAsset;
+}
+
+function assetsForLocalStorage(assets: GeneratedAsset[]): GeneratedAsset[] {
+  return assets.map(assetForLocalStorage);
+}
+
 export class AssetService {
   static getAssets(projectId: string): GeneratedAsset[] {
-    return safeParseAssets(localStorage.getItem(assetKey(projectId)));
+    const key = assetKey(projectId);
+    const rawAssets = localStorage.getItem(key);
+    const assets = safeParseAssets(rawAssets);
+    const metadataAssets = assetsForLocalStorage(assets);
+    const metadataPayload = JSON.stringify(metadataAssets);
+
+    if (rawAssets && metadataPayload !== rawAssets) {
+      try {
+        localStorage.setItem(key, metadataPayload);
+      } catch {
+        // Best-effort migration only. Return the compact in-memory assets so the UI can
+        // hydrate thumbnails from Electron file storage even if old LevelDB data is sticky.
+      }
+    }
+
+    return metadataAssets;
   }
 
   static saveAssets(projectId: string, assets: GeneratedAsset[]): void {
-    localStorage.setItem(assetKey(projectId), JSON.stringify(assets));
+    const metadataAssets = assetsForLocalStorage(assets);
+    try {
+      localStorage.setItem(assetKey(projectId), JSON.stringify(metadataAssets));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Project asset metadata could not be saved locally: ${message}`);
+    }
   }
 
   static addAsset(projectId: string, asset: GeneratedAsset): GeneratedAsset {
