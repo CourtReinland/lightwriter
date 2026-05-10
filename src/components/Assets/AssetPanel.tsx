@@ -25,7 +25,16 @@ import { downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageF
 import { mergeReviewedPromptDrafts, promptDraftKey } from "../../services/assetPromptDraftService";
 import { generateReviewedAssetPrompt, generateReviewedAssetPrompts } from "../../services/llmAssetPromptService";
 import type { Project } from "../../services/storageService";
-import { StyleReferenceService, type ScriptStyleReference } from "../../services/styleReferenceService";
+import { StyleReferenceService, type ScriptStyleReference, type StyleReferenceScope } from "../../services/styleReferenceService";
+import {
+  getTextAiProviderSettings,
+  getTextAiSettings,
+  saveTextAiProviderSettings,
+  saveTextAiSettings,
+  textAiProviderLabel,
+  textAiProviderOptions,
+  type TextAiProvider,
+} from "../../services/textAiSettingsService";
 import "./AssetPanel.css";
 
 interface AssetPanelProps {
@@ -35,6 +44,7 @@ interface AssetPanelProps {
 }
 
 type SourceKind = "scene_set" | "character" | "shot";
+type AssetSubTab = "settings" | "characters" | "scenes";
 
 function providerOptions(): AssetProvider[] {
   return ["gemini-nano-banana", "grok-imagine"];
@@ -50,6 +60,7 @@ function isKnownModel(modelOptions: { id: string }[], model: string): boolean {
 }
 
 export default function AssetPanel({ project, assets, onAssetsChange }: AssetPanelProps) {
+  const [activeTab, setActiveTab] = useState<AssetSubTab>("settings");
   const [provider, setProvider] = useState<AssetProvider>("gemini-nano-banana");
   const [sourceKind, setSourceKind] = useState<SourceKind>("scene_set");
   const [selectedKey, setSelectedKey] = useState("0");
@@ -58,7 +69,14 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [selectedModel, setSelectedModel] = useState("");
   const [modelOptions, setModelOptions] = useState(() => getImageModelOptions("gemini-nano-banana"));
   const [isPollingModels, setIsPollingModels] = useState(false);
-  const [styleReference, setStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id));
+  const [sceneStyleReference, setSceneStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id, "scene"));
+  const [characterStyleReference, setCharacterStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id, "character"));
+  const [textAiProvider, setTextAiProvider] = useState<TextAiProvider>(() => getTextAiSettings().selectedProvider);
+  const [textAiKeyDrafts, setTextAiKeyDrafts] = useState<Record<TextAiProvider, string>>(() => ({
+    grok: getTextAiProviderSettings("grok").apiKey,
+    openai: getTextAiProviderSettings("openai").apiKey,
+    claude: getTextAiProviderSettings("claude").apiKey,
+  }));
   const [settingsMessage, setSettingsMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
@@ -71,6 +89,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const shots = useMemo(() => extractShotLines(project.content), [project.content]);
   const scriptHash = useMemo(() => simpleScriptHash(project.content), [project.content]);
   const effectiveModel = selectedModel;
+  const styleReference = sourceKind === "character" ? characterStyleReference : sceneStyleReference;
   const [settingsReadyProvider, setSettingsReadyProvider] = useState<AssetProvider | null>(null);
 
   useEffect(() => {
@@ -147,8 +166,30 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   }, [provider, apiKeyDraft, settingsReadyProvider]);
 
   useEffect(() => {
-    setStyleReference(StyleReferenceService.get(project.id));
+    setSceneStyleReference(StyleReferenceService.get(project.id, "scene"));
+    setCharacterStyleReference(StyleReferenceService.get(project.id, "character"));
   }, [project.id]);
+
+  useEffect(() => {
+    saveTextAiSettings({ selectedProvider: textAiProvider });
+  }, [textAiProvider]);
+
+  useEffect(() => {
+    textAiProviderOptions().forEach((item) => {
+      saveTextAiProviderSettings(item, { apiKey: textAiKeyDrafts[item].trim() });
+    });
+  }, [textAiKeyDrafts]);
+
+  useEffect(() => {
+    if (activeTab === "characters" && sourceKind !== "character") {
+      setSourceKind("character");
+      setSelectedKey("0");
+    }
+    if (activeTab === "scenes" && sourceKind === "character") {
+      setSourceKind("scene_set");
+      setSelectedKey("0");
+    }
+  }, [activeTab, sourceKind]);
 
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
@@ -189,7 +230,7 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
 
   const refreshAssets = () => onAssetsChange(AssetService.getAssets(project.id));
 
-  const handleStyleReferenceChange = (file: File | undefined) => {
+  const handleStyleReferenceChange = (scope: StyleReferenceScope, file: File | undefined) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setSettingsMessage("Style reference must be an image file.");
@@ -199,18 +240,20 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
     reader.onload = () => {
       const dataUrl = String(reader.result || "");
       if (!dataUrl) return;
-      const saved = StyleReferenceService.save(project.id, { name: file.name, mimeType: file.type, dataUrl });
-      setStyleReference(saved);
-      setSettingsMessage(`Script style reference saved: ${file.name}`);
+      const saved = StyleReferenceService.save(project.id, { scope, name: file.name, mimeType: file.type, dataUrl });
+      if (scope === "character") setCharacterStyleReference(saved);
+      else setSceneStyleReference(saved);
+      setSettingsMessage(`${scope === "character" ? "Character" : "Scene"} style reference saved: ${file.name}`);
     };
     reader.onerror = () => setSettingsMessage("Could not read style reference image.");
     reader.readAsDataURL(file);
   };
 
-  const handleClearStyleReference = () => {
-    StyleReferenceService.clear(project.id);
-    setStyleReference(null);
-    setSettingsMessage("Script style reference cleared.");
+  const handleClearStyleReference = (scope: StyleReferenceScope) => {
+    StyleReferenceService.clear(project.id, scope);
+    if (scope === "character") setCharacterStyleReference(null);
+    else setSceneStyleReference(null);
+    setSettingsMessage(`${scope === "character" ? "Character" : "Scene"} style reference cleared.`);
   };
 
   const buildAssetRequestForChoice = (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef, promptText: string): ImageGenerationRequest | null => {
@@ -451,142 +494,191 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         </div>
       </div>
 
-      <section className="asset-settings-box">
-        <div className="asset-settings-heading">
-          <h3>Provider Settings</h3>
-          <span>{isPollingModels ? "Syncing models..." : "Auto-saved"}</span>
-        </div>
-        <p className="asset-muted">
-          Keys, model choices, and live model lists are saved locally in this LightWriter app profile.
-        </p>
-        <label>
-          Provider
-          <select value={provider} onChange={(event) => setProvider(event.target.value as AssetProvider)}>
-            {providerOptions().map((item) => (
-              <option key={item} value={item}>{providerLabel(item)}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          API key
-          <input
-            type="password"
-            value={apiKeyDraft}
-            onChange={(event) => setApiKeyDraft(event.target.value)}
-            placeholder={`Paste ${providerLabel(provider)} API key`}
-          />
-        </label>
-        <label>
-          Image model
-          <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={isPollingModels && modelOptions.length === 0}>
-            <option value="">{isPollingModels ? "Loading models..." : "No models loaded yet"}</option>
-            {modelOptions.map((option) => (
-              <option key={option.id} value={option.id}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <p className="asset-muted">Selected model: {effectiveModel || "none yet"}</p>
-        {settingsMessage && <p className="asset-status">{settingsMessage}</p>}
-      </section>
+      <div className="asset-subtabs" role="tablist" aria-label="Asset workspace sections">
+        {(["settings", "characters", "scenes"] as AssetSubTab[]).map((tab) => (
+          <button
+            key={tab}
+            className={activeTab === tab ? "active" : ""}
+            onClick={() => setActiveTab(tab)}
+            role="tab"
+            aria-selected={activeTab === tab}
+          >
+            {tab === "settings" ? "Settings" : tab === "characters" ? "Characters" : "Scenes"}
+          </button>
+        ))}
+      </div>
 
-      <label>
-        Asset source
-        <select
-          value={sourceKind}
-          onChange={(event) => {
-            setSourceKind(event.target.value as SourceKind);
-            setSelectedKey("0");
-          }}
-        >
-          <option value="scene_set">Scene set from headings</option>
-          <option value="character">Character from script</option>
-          <option value="shot">Shot start frame</option>
-        </select>
-      </label>
-
-      <label>
-        Script reference
-        <select value={selectedKey} onChange={(event) => setSelectedKey(event.target.value)}>
-          {choices.map((choice, index) => (
-            <option key={index} value={String(index)}>
-              {sourceKind === "character"
-                ? (choice as ScriptCharacterRef).name
-                : sourceKind === "shot"
-                  ? `${(choice as ScriptShotRef).shotKey} ${(choice as ScriptShotRef).text}`
-                  : (choice as ScriptSceneRef).heading}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label>
-        User prompt additions
-        <textarea
-          value={userPrompt}
-          onChange={(event) => setUserPrompt(event.target.value)}
-          placeholder="Add visual style, era, camera/lens, palette, wardrobe, exclusions..."
-        />
-      </label>
-
-      <section className="asset-settings-box asset-style-reference-box">
-        <h3>Script Style Reference</h3>
-        <p className="asset-muted">
-          Optional look reference for the whole script. Scene prompts will ask providers to use it for palette, texture, mood, and continuity.
-        </p>
-        <label>
-          Reference image
-          <input type="file" accept="image/*" onChange={(event) => handleStyleReferenceChange(event.target.files?.[0])} />
-        </label>
-        {styleReference && (
-          <div className="asset-style-reference-preview">
-            <img src={styleReference.dataUrl} alt="Script style reference" />
-            <div>
-              <strong>{styleReference.name}</strong>
-              <span>{styleReference.mimeType}</span>
-              <button onClick={handleClearStyleReference}>Clear Reference</button>
+      {activeTab === "settings" && (
+        <div className="asset-tab-pane">
+          <section className="asset-settings-box">
+            <div className="asset-settings-heading">
+              <h3>Writing AI / Parser</h3>
+              <span>Auto-saved</span>
             </div>
+            <p className="asset-muted">Global provider for AI script parsing, prompt drafting, and text-generation tools across LightWriter.</p>
+            <label>
+              Provider
+              <select value={textAiProvider} onChange={(event) => setTextAiProvider(event.target.value as TextAiProvider)}>
+                {textAiProviderOptions().map((item) => (
+                  <option key={item} value={item}>{textAiProviderLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            {textAiProviderOptions().map((item) => (
+              <label key={item}>
+                {textAiProviderLabel(item)} API key
+                <input
+                  type="password"
+                  value={textAiKeyDrafts[item]}
+                  onChange={(event) => setTextAiKeyDrafts((current) => ({ ...current, [item]: event.target.value }))}
+                  placeholder={`Paste ${textAiProviderLabel(item)} API key`}
+                />
+              </label>
+            ))}
+          </section>
+
+          <section className="asset-settings-box">
+            <div className="asset-settings-heading">
+              <h3>Graphical Assets</h3>
+              <span>{isPollingModels ? "Syncing models..." : "Auto-saved"}</span>
+            </div>
+            <p className="asset-muted">Image-generation provider for character portraits, scene backgrounds, and shot frames.</p>
+            <label>
+              Provider
+              <select value={provider} onChange={(event) => setProvider(event.target.value as AssetProvider)}>
+                {providerOptions().map((item) => (
+                  <option key={item} value={item}>{providerLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              API key
+              <input
+                type="password"
+                value={apiKeyDraft}
+                onChange={(event) => setApiKeyDraft(event.target.value)}
+                placeholder={`Paste ${providerLabel(provider)} API key`}
+              />
+            </label>
+            <label>
+              Image model
+              <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={isPollingModels && modelOptions.length === 0}>
+                <option value="">{isPollingModels ? "Loading models..." : "No models loaded yet"}</option>
+                {modelOptions.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <p className="asset-muted">Selected model: {effectiveModel || "none yet"}</p>
+            {settingsMessage && <p className="asset-status">{settingsMessage}</p>}
+          </section>
+        </div>
+      )}
+
+      {activeTab !== "settings" && (
+        <div className="asset-tab-pane">
+          {activeTab === "scenes" && (
+            <label>
+              Scene asset type
+              <select
+                value={sourceKind === "character" ? "scene_set" : sourceKind}
+                onChange={(event) => {
+                  setSourceKind(event.target.value as SourceKind);
+                  setSelectedKey("0");
+                }}
+              >
+                <option value="scene_set">Scene set from headings</option>
+                <option value="shot">Shot start frame</option>
+              </select>
+            </label>
+          )}
+
+          <label>
+            {activeTab === "characters" ? "Character" : "Script reference"}
+            <select value={selectedKey} onChange={(event) => setSelectedKey(event.target.value)}>
+              {choices.map((choice, index) => (
+                <option key={index} value={String(index)}>
+                  {sourceKind === "character"
+                    ? (choice as ScriptCharacterRef).name
+                    : sourceKind === "shot"
+                      ? `${(choice as ScriptShotRef).shotKey} ${(choice as ScriptShotRef).text}`
+                      : (choice as ScriptSceneRef).heading}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            User prompt additions
+            <textarea
+              value={userPrompt}
+              onChange={(event) => setUserPrompt(event.target.value)}
+              placeholder="Add visual style, era, camera/lens, palette, wardrobe, exclusions..."
+            />
+          </label>
+
+          <section className="asset-settings-box asset-style-reference-box">
+            <h3>{activeTab === "characters" ? "Character Style Reference" : "Scene Style Reference"}</h3>
+            <p className="asset-muted">
+              Optional look reference for {activeTab === "characters" ? "character design continuity, wardrobe, palette, and rendering style." : "scene palette, texture, mood, and continuity."}
+            </p>
+            <label>
+              Reference image
+              <input type="file" accept="image/*" onChange={(event) => handleStyleReferenceChange(activeTab === "characters" ? "character" : "scene", event.target.files?.[0])} />
+            </label>
+            {styleReference && (
+              <div className="asset-style-reference-preview">
+                <img src={styleReference.dataUrl} alt={`${activeTab} style reference`} />
+                <div>
+                  <strong>{styleReference.name}</strong>
+                  <span>{styleReference.mimeType}</span>
+                  <button onClick={() => handleClearStyleReference(activeTab === "characters" ? "character" : "scene")}>Clear Reference</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <label>
+            Editable generated prompt
+            <textarea
+              className="asset-prompt"
+              value={prompt}
+              onChange={(event) => {
+                const nextPrompt = event.target.value;
+                setPromptOverride(nextPrompt);
+                setPromptDrafts((current) => ({ ...current, [selectedPromptDraftKey]: nextPrompt }));
+              }}
+              placeholder="Click Generate/Review Prompt to run the two-step LLM prompt builder, or write your final provider prompt here."
+            />
+          </label>
+
+          <div className="asset-generation-actions">
+            <button onClick={handleGenerateLlmPrompt} disabled={!selected || isGeneratingPrompt || isGenerating}>
+              {isGeneratingPrompt ? "Reviewing Prompt..." : "Generate/Review Prompt"}
+            </button>
+            <button onClick={handleGenerateAllPrompts} disabled={choices.length === 0 || isGeneratingPrompt || isGenerating}>
+              Generate All Prompts
+            </button>
+            <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
+              {isGenerating ? "Generating..." : "Generate Image"}
+            </button>
+            <button className="asset-primary" onClick={handleGenerateAll} disabled={choices.length === 0 || isGenerating || isGeneratingPrompt}>
+              Generate All
+            </button>
+            <button onClick={handleStageAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
+              Stage Prompt Only
+            </button>
           </div>
-        )}
-      </section>
 
-      <label>
-        Editable generated prompt
-        <textarea
-          className="asset-prompt"
-          value={prompt}
-          onChange={(event) => {
-            const nextPrompt = event.target.value;
-            setPromptOverride(nextPrompt);
-            setPromptDrafts((current) => ({ ...current, [selectedPromptDraftKey]: nextPrompt }));
-          }}
-          placeholder="Click Generate/Review Prompt to run the two-step LLM prompt builder, or write your final provider prompt here."
-        />
-      </label>
+          <div className="asset-export-row">
+            <button onClick={handleExportLightWriterPackage}>Export LW Package</button>
+            <button onClick={handleExportScript2ScreenManifest}>Export STS Manifest</button>
+          </div>
+        </div>
+      )}
 
-      <div className="asset-generation-actions">
-        <button onClick={handleGenerateLlmPrompt} disabled={!selected || isGeneratingPrompt || isGenerating}>
-          {isGeneratingPrompt ? "Reviewing Prompt..." : "Generate/Review Prompt"}
-        </button>
-        <button onClick={handleGenerateAllPrompts} disabled={choices.length === 0 || isGeneratingPrompt || isGenerating}>
-          Generate All Prompts
-        </button>
-        <button className="asset-primary" onClick={handleGenerateAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
-          {isGenerating ? "Generating..." : "Generate Image"}
-        </button>
-        <button className="asset-primary" onClick={handleGenerateAll} disabled={choices.length === 0 || isGenerating || isGeneratingPrompt}>
-          Generate All
-        </button>
-        <button onClick={handleStageAsset} disabled={!selected || isGenerating || isGeneratingPrompt}>
-          Stage Prompt Only
-        </button>
-      </div>
-
-      <div className="asset-export-row">
-        <button onClick={handleExportLightWriterPackage}>Export LW Package</button>
-        <button onClick={handleExportScript2ScreenManifest}>Export STS Manifest</button>
-      </div>
-
-      <div className="asset-list">
+      {activeTab !== "settings" && (
+        <div className="asset-list">
         <h3>Project Assets ({assets.length})</h3>
         {assets.length === 0 && <p className="asset-empty">No generated/staged assets yet.</p>}
         {assets.map((asset) => {
@@ -608,7 +700,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
           </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </aside>
   );
 }

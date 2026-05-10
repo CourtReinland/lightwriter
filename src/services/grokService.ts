@@ -1,3 +1,5 @@
+import { getTextAiProviderSettings, saveTextAiProviderSettings } from "./textAiSettingsService";
+
 export type SuggestionMode =
   | "improve_dialogue"
   | "expand_scene"
@@ -140,15 +142,15 @@ export class GrokService {
   }
 
   static getStoredApiKey(): string | null {
-    return localStorage.getItem("lw-grok-api-key");
+    return getTextAiProviderSettings("grok").apiKey || null;
   }
 
   static setStoredApiKey(key: string): void {
-    localStorage.setItem("lw-grok-api-key", key);
+    saveTextAiProviderSettings("grok", { apiKey: key });
   }
 
   static clearStoredApiKey(): void {
-    localStorage.removeItem("lw-grok-api-key");
+    saveTextAiProviderSettings("grok", { apiKey: "" });
   }
 }
 

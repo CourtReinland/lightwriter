@@ -1,4 +1,4 @@
-import { GrokService } from "./grokService";
+import { TextAiService } from "./textAiService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import type { ComputedBeat } from "../frameworks/utils";
@@ -292,7 +292,7 @@ export async function generate(
 ): Promise<string> {
   const { system, user, temperature, maxTokens } = buildPrompt(ctx);
 
-  const service = new GrokService(apiKey);
+  const service = new TextAiService();
   return service.complete(system, user, { temperature, maxTokens });
 }
 

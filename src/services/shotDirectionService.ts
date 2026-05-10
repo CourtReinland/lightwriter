@@ -1,4 +1,4 @@
-import { GrokService } from "./grokService";
+import { TextAiService } from "./textAiService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 
 export interface ShotSceneBlock {
@@ -121,7 +121,7 @@ export async function rewriteScriptWithShotDirections(
   const { preamble, scenes } = extractShotScenes(content);
   if (scenes.length === 0) return content;
 
-  const service = new GrokService(apiKey);
+  const service = new TextAiService();
   const rewrittenScenes: string[] = [];
 
   for (let i = 0; i < scenes.length; i++) {

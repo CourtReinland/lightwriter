@@ -1,5 +1,4 @@
-import { GrokService } from "./grokService";
-import { getImageProviderSettings } from "./imageGenerationService";
+import { TextAiService } from "./textAiService";
 import { buildAssetPrompt, extractCharacters, type ScriptCharacterRef, type ScriptSceneRef, type ScriptShotRef } from "./scriptStructure";
 
 export type LlmPromptKind = "scene_set" | "character" | "shot";
@@ -147,7 +146,7 @@ Hard rules:
 - Output one polished comma-separated visual prompt under 70 words.`;
 }
 
-async function generateReviewedAssetPromptWithService(request: LlmAssetPromptRequest, service: GrokService): Promise<string> {
+async function generateReviewedAssetPromptWithService(request: LlmAssetPromptRequest, service: TextAiService): Promise<string> {
   const characterNames = characterNamesFromScript(request.fullScriptContent);
   const seed = deterministicSeed(request);
   const draft = await service.complete(
@@ -179,10 +178,8 @@ async function generateReviewedAssetPromptWithService(request: LlmAssetPromptReq
   return extractTextOnly(reviewed);
 }
 
-function promptService(): GrokService {
-  const apiKey = GrokService.getStoredApiKey() || getImageProviderSettings("grok-imagine").apiKey;
-  if (!apiKey?.trim()) throw new Error("Set a Grok API key before generating LLM prompts.");
-  return new GrokService(apiKey);
+function promptService(): TextAiService {
+  return new TextAiService();
 }
 
 export async function generateReviewedAssetPrompt(request: LlmAssetPromptRequest): Promise<string> {

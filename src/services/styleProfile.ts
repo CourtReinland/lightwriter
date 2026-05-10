@@ -1,3 +1,5 @@
+import { TextAiService } from "./textAiService";
+
 // ── Style Profile Types ──
 
 export interface StyleProfile {
@@ -50,18 +52,7 @@ export class StyleProfileService {
   ): Promise<StyleProfile> {
     const truncated = sampleText.length > 20000 ? sampleText.slice(0, 20000) : sampleText;
 
-    const response = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "grok-3-mini-fast",
-        messages: [
-          {
-            role: "system",
-            content: `You are a writing style analyst. Analyze the writing sample and return ONLY a valid JSON object:
+    const system = `You are a writing style analyst. Analyze the writing sample and return ONLY a valid JSON object:
 {
   "avgSentenceLength": number,
   "sentenceLengthVariance": "low"|"medium"|"high",
@@ -72,21 +63,13 @@ export class StyleProfileService {
   "dialogueToActionRatio": "dialogue-heavy"|"balanced"|"action-heavy"|"minimal dialogue",
   "rawAnalysis": "A 2-3 sentence description of the writer's distinctive style characteristics, voice, and tendencies"
 }
-Return ONLY JSON. No markdown. No explanation.`,
-          },
-          {
-            role: "user",
-            content: `Analyze the writing style of this text:\n\n${truncated}`,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 1024,
-      }),
-    });
+Return ONLY JSON. No markdown. No explanation.`;
 
-    if (!response.ok) throw new Error(`Style analysis failed: ${response.status}`);
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content ?? "";
+    const text = await new TextAiService().complete(
+      system,
+      `Analyze the writing style of this text:\n\n${truncated}`,
+      { temperature: 0.3, maxTokens: 1024 },
+    );
 
     try {
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();

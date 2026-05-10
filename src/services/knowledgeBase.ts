@@ -1,3 +1,5 @@
+import { TextAiService } from "./textAiService";
+
 // ── Knowledge Base Types ──
 
 export interface KBCharacter {
@@ -198,39 +200,20 @@ export class KnowledgeBaseService {
   ): Promise<Partial<KnowledgeBase>> {
     const truncated = content.length > 50000 ? content.slice(0, 50000) : content;
 
-    const response = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "grok-3-mini-fast",
-        messages: [
-          {
-            role: "system",
-            content: `You are a screenplay analysis tool. Extract story elements from the screenplay and return ONLY a valid JSON object with this exact structure:
+    const system = `You are a screenplay analysis tool. Extract story elements from the screenplay and return ONLY a valid JSON object with this exact structure:
 {
   "characters": [{ "name": "string", "description": "string", "traits": ["string"], "voiceNotes": "string", "relationships": [{ "characterName": "string", "description": "string" }] }],
   "worldRules": [{ "category": "setting|magic|technology|time_period|other", "title": "string", "description": "string" }],
   "plotThreads": [{ "title": "string", "status": "unresolved|foreshadowed|resolved", "description": "string" }],
   "toneStyle": { "genre": "string", "mood": "string", "pacingNotes": "string" }
 }
-Return ONLY the JSON. No markdown. No explanation.`,
-          },
-          {
-            role: "user",
-            content: `Analyze this screenplay and extract all characters, world rules, plot threads, and tone:\n\n${truncated}`,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-    });
+Return ONLY the JSON. No markdown. No explanation.`;
 
-    if (!response.ok) throw new Error(`Scan failed: ${response.status}`);
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content ?? "";
+    const text = await new TextAiService().complete(
+      system,
+      `Analyze this screenplay and extract all characters, world rules, plot threads, and tone:\n\n${truncated}`,
+      { temperature: 0.3, maxTokens: 4096 },
+    );
 
     // Try to parse JSON from the response
     try {

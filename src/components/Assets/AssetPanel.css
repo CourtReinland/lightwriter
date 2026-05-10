@@ -59,6 +59,34 @@
   margin-bottom: 4px;
 }
 
+.asset-subtabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.asset-subtabs button {
+  border-radius: 10px;
+  background: transparent;
+  color: #f0d8c8;
+}
+
+.asset-subtabs button.active {
+  background: linear-gradient(135deg, #b46cff, #ff8a5c);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(180, 108, 255, 0.25);
+}
+
+.asset-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .asset-settings-heading {
   display: flex;
   align-items: center;
