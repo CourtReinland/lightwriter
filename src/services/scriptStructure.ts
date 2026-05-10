@@ -31,6 +31,7 @@ const SCENE_HEADING_RE = /^(INT\.|EXT\.|EST\.|INT\.\/EXT\.|I\/E\.)\s+(.+?)(?:\s+
 const FORCED_SHOT_RE = /^!!\s*(.+)$/;
 const CHARACTER_CUE_RE = /^@?([A-Z][A-Z0-9 '\-.]{1,40})(?:\s*\(([^)]+)\))?$/;
 const DESCRIPTION_WITH_NAME_RE = /\b([A-Z][A-Z0-9 '\-.]{1,30})\s*\(([^)]+)\)/g;
+const CAMERA_CUE_RE = /^(?:CU|MS|WS|ECU|OTS|POV|INSERT|ANGLE|TRACKING|DOLLY|PAN|TILT|WIDE SHOT|MEDIUM SHOT|CLOSE UP|CLOSE-UP|EXTREME CLOSE UP)\b/i;
 const PAREN_CHARACTER_DETAIL_RE = /\b[A-Z][A-Z0-9 '\-.]{1,30}\s*\([^)]+\)/g;
 const TRANSITION_RE = /^(CUT TO:|FADE OUT\.?|FADE IN:?|DISSOLVE TO:)$/i;
 const HUMAN_ACTION_SUBJECT_RE = /\b(?:he|she|they|we|i|you|man|woman|boy|girl|child|kid|teen|mother|father|mom|dad|person|people|[A-Z][a-z]+)\b\s+(?:sits?|sat|stands?|stood|walks?|runs?|moves?|goes?|turns?|looks?|watches?|waits?|reads?|writes?|holds?|takes?|puts?|starts?|begins?|cries|crying|sobs?|sniffles?|sniffling|sighs?|smiles?|frowns?|laughs?|speaks?|says?|whispers?|shouts?|enters?|exits?|has|had|is|are|was|were)\b/i;
@@ -227,6 +228,24 @@ export function extractShotLines(content: string): ScriptShotRef[] {
   return shots;
 }
 
+function isLikelyCharacterCue(lines: string[], index: number, cueName: string): boolean {
+  const trimmed = lines[index].trim();
+  const name = cueName.trim().toUpperCase();
+  if (["INT", "EXT", "EST", "CUT TO", "FADE OUT", "FADE IN", "DISSOLVE TO"].includes(name)) return false;
+  if (parseSceneHeading(trimmed) || FORCED_SHOT_RE.test(trimmed) || TRANSITION_RE.test(trimmed) || CAMERA_CUE_RE.test(trimmed)) return false;
+  if (name.length > 30) return false;
+
+  for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+    const next = lines[nextIndex].trim();
+    if (!next) continue;
+    if (parseSceneHeading(next) || FORCED_SHOT_RE.test(next) || TRANSITION_RE.test(next) || CAMERA_CUE_RE.test(next)) return false;
+    if (CHARACTER_CUE_RE.test(next)) return false;
+    return true;
+  }
+
+  return false;
+}
+
 export function extractCharacters(content: string): ScriptCharacterRef[] {
   const lines = linesOf(content);
   const byName = new Map<string, ScriptCharacterRef>();
@@ -248,7 +267,7 @@ export function extractCharacters(content: string): ScriptCharacterRef[] {
     const cue = trimmed.match(CHARACTER_CUE_RE);
     if (!cue) return;
     const name = cue[1].trim().toUpperCase();
-    if (["INT", "EXT", "EST", "CUT TO", "FADE OUT"].includes(name)) return;
+    if (!isLikelyCharacterCue(lines, index, name)) return;
     const description = cue[2]?.trim() || "";
     if (!byName.has(name)) {
       byName.set(name, { name, description, firstLine: index + 1, evidence: [trimmed] });

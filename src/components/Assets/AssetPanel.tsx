@@ -35,6 +35,7 @@ import {
   textAiProviderOptions,
   type TextAiProvider,
 } from "../../services/textAiSettingsService";
+import { parseCharactersWithTextAi } from "../../services/characterParserService";
 import "./AssetPanel.css";
 
 interface AssetPanelProps {
@@ -83,9 +84,13 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
   const [promptOverride, setPromptOverride] = useState("");
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
   const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
+  const [aiParsedCharacters, setAiParsedCharacters] = useState<ScriptCharacterRef[] | null>(null);
+  const [isParsingCharacters, setIsParsingCharacters] = useState(false);
+  const [characterParserMessage, setCharacterParserMessage] = useState("");
 
   const scenes = useMemo(() => extractScriptScenes(project.content), [project.content]);
-  const characters = useMemo(() => extractCharacters(project.content), [project.content]);
+  const deterministicCharacters = useMemo(() => extractCharacters(project.content), [project.content]);
+  const characters = aiParsedCharacters?.length ? aiParsedCharacters : deterministicCharacters;
   const shots = useMemo(() => extractShotLines(project.content), [project.content]);
   const scriptHash = useMemo(() => simpleScriptHash(project.content), [project.content]);
   const effectiveModel = selectedModel;
@@ -179,6 +184,56 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       saveTextAiProviderSettings(item, { apiKey: textAiKeyDrafts[item].trim() });
     });
   }, [textAiKeyDrafts]);
+
+  useEffect(() => {
+    setAiParsedCharacters(null);
+    setCharacterParserMessage("");
+  }, [project.id, project.content]);
+
+  useEffect(() => {
+    if (activeTab !== "characters") return;
+    const apiKey = textAiKeyDrafts[textAiProvider]?.trim();
+    if (!apiKey) {
+      setAiParsedCharacters(null);
+      setCharacterParserMessage(
+        deterministicCharacters.length
+          ? `Using local Fountain character cues (${deterministicCharacters.length}). Add a ${textAiProviderLabel(textAiProvider)} key in Settings for the LLM parser.`
+          : `No local character cues found. Add a ${textAiProviderLabel(textAiProvider)} key in Settings for the LLM parser.`,
+      );
+      return;
+    }
+
+    let cancelled = false;
+    setIsParsingCharacters(true);
+    setCharacterParserMessage(`Parsing characters with ${textAiProviderLabel(textAiProvider)}...`);
+    parseCharactersWithTextAi(project.content)
+      .then((parsed) => {
+        if (cancelled) return;
+        setAiParsedCharacters(parsed);
+        setSelectedKey("0");
+        setCharacterParserMessage(
+          parsed.length
+            ? `${textAiProviderLabel(textAiProvider)} parser found ${parsed.length} character${parsed.length === 1 ? "" : "s"}.`
+            : "LLM parser returned no characters; check the script text or parser key.",
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setAiParsedCharacters(null);
+        setCharacterParserMessage(
+          error instanceof Error
+            ? `LLM character parser failed: ${error.message}. Using local Fountain cues.`
+            : "LLM character parser failed. Using local Fountain cues.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setIsParsingCharacters(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, project.content, textAiProvider, textAiKeyDrafts, deterministicCharacters.length]);
 
   useEffect(() => {
     if (activeTab === "characters" && sourceKind !== "character") {
@@ -607,6 +662,11 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
               ))}
             </select>
           </label>
+          {activeTab === "characters" && (
+            <p className="asset-status">
+              {isParsingCharacters ? "LLM character parser running..." : characterParserMessage || `Using ${characters.length} parsed character${characters.length === 1 ? "" : "s"}.`}
+            </p>
+          )}
 
           <label>
             User prompt additions

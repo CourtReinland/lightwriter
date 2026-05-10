@@ -56,6 +56,32 @@ MAYA (20s, elegant, dangerous) watches the skyline.
     ]);
   });
 
+  it("does not treat shot directions, prop descriptions, or uppercase action fragments as character names", () => {
+    const shotHeavyScript = `INT. SCHOOL LIBRARY - NIGHT
+
+CU CLOSE UP A MYSTICAL BOOK,THE COVER IS OLD AND DUSTY, BUT
+GLOWS WITH A CERTAIN CHARACTER
+WS WIDE SHOT LIBRARY AISLES, PAN ACROSS
+AIDEN and ALIYAH walk the school library at night.
+
+ALIYAH
+Why are we here so late again?
+
+AIDEN
+I did my homework.
+
+CU CLOSE UP ALIYAH
+ALIYAH looks toward him disbelievingly.
+`;
+
+    const names = extractCharacters(shotHeavyScript).map((character) => character.name);
+
+    expect(names).toEqual(["ALIYAH", "AIDEN"]);
+    expect(names).not.toContain("GLOWS WITH A CERTAIN CHARACTER");
+    expect(names).not.toContain("CU CLOSE UP ALIYAH");
+    expect(names).not.toContain("WS WIDE SHOT LIBRARY AISLES, PAN ACROSS");
+  });
+
   it("builds editable Hollywood-style prompts for scene sets and character images", () => {
     const scene = extractScriptScenes(script)[0];
     const character = extractCharacters(script)[0];

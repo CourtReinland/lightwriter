@@ -1,10 +1,10 @@
 .asset-panel {
   width: 360px;
   max-width: 42vw;
-  padding: 16px;
-  border-left: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 12, 18, 0.94);
-  color: #f5f0e8;
+  padding: 10px 12px;
+  border-left: 1px solid #333;
+  background: #1a1a1a;
+  color: #ddd;
   overflow-y: auto;
   font-family: 'Courier Prime', 'Courier New', Courier, monospace;
 }
@@ -16,32 +16,46 @@
 }
 
 .asset-panel-header {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+}
+
+.asset-panel h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+}
+
+.asset-panel h3 {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #aaa;
 }
 
 .asset-panel-header p,
 .asset-empty,
 .asset-muted,
 .asset-status {
-  color: #b7ad9f;
-  font-size: 12px;
+  color: #777;
+  font-size: 10px;
   margin-top: 4px;
   line-height: 1.4;
 }
 
 .asset-status {
-  color: #ffd7aa;
+  color: #b98a5a;
 }
 
 .asset-settings-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 16px;
-  padding: 12px;
-  border: 1px solid rgba(249, 115, 22, 0.28);
-  border-radius: 10px;
-  background: rgba(249, 115, 22, 0.08);
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #202020;
 }
 
 .asset-panel label {
@@ -49,10 +63,10 @@
   flex-direction: column;
   gap: 6px;
   margin-bottom: 12px;
-  color: #d9c8ad;
-  font-size: 12px;
+  color: #888;
+  font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.5px;
 }
 
 .asset-settings-box label {
@@ -62,29 +76,36 @@
 .asset-subtabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  gap: 4px;
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #2a2a2a;
 }
 
 .asset-subtabs button {
-  border-radius: 10px;
-  background: transparent;
-  color: #f0d8c8;
+  font-family: inherit;
+  font-size: 9px;
+  padding: 4px 8px;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  color: #999;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
+.asset-subtabs button:hover:not(:disabled),
 .asset-subtabs button.active {
-  background: linear-gradient(135deg, #b46cff, #ff8a5c);
-  color: #fff;
-  box-shadow: 0 8px 24px rgba(180, 108, 255, 0.25);
+  background: #333;
+  color: #ddd;
+  border-color: #555;
 }
 
 .asset-tab-pane {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .asset-settings-heading {
@@ -95,29 +116,36 @@
 }
 
 .asset-settings-heading span {
-  color: #ffd7aa;
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  color: #777;
+  font-size: 8px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
 }
 
 .asset-panel select,
 .asset-panel textarea,
 .asset-panel input {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 8px;
-  color: #f5f0e8;
-  padding: 8px;
+  background: #222;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #ddd;
+  padding: 6px 8px;
   font-family: 'Courier Prime', 'Courier New', Courier, monospace;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: none;
   letter-spacing: normal;
 }
 
+.asset-panel select:focus,
+.asset-panel textarea:focus,
+.asset-panel input:focus {
+  outline: none;
+  border-color: #555;
+}
+
 .asset-panel input::placeholder,
 .asset-panel textarea::placeholder {
-  color: rgba(245, 240, 232, 0.42);
+  color: #555;
 }
 
 .asset-panel textarea {
@@ -127,7 +155,7 @@
 
 .asset-panel .asset-prompt {
   min-height: 170px;
-  color: #f7e8c8;
+  color: #ddd;
 }
 
 .asset-primary,
@@ -136,14 +164,23 @@
 .asset-card button,
 .asset-settings-actions button,
 .asset-style-reference-preview button {
-  background: #f97316;
-  border: none;
-  border-radius: 999px;
-  color: #150b05;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  color: #999;
   cursor: pointer;
   font-family: 'Courier Prime', 'Courier New', Courier, monospace;
   font-weight: 700;
-  padding: 8px 12px;
+  padding: 4px 8px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.asset-primary {
+  background: #3a2a1f;
+  border-color: #6f4b2b;
+  color: #d8a066;
 }
 
 .asset-primary:disabled,
@@ -156,31 +193,33 @@
 .asset-generation-actions,
 .asset-export-row {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .asset-generation-actions {
   margin: 0 0 12px;
 }
 
-.asset-generation-actions button:not(.asset-primary) {
-  background: rgba(249, 115, 22, 0.18);
-  color: #ffd7aa;
-  border: 1px solid rgba(249, 115, 22, 0.4);
-  font-size: 12px;
+.asset-generation-actions button:not(.asset-primary),
+.asset-export-row button,
+.asset-style-reference-preview button {
+  background: #252525;
+  color: #999;
+  border: 1px solid #3a3a3a;
+}
+
+.asset-generation-actions button:hover:not(:disabled),
+.asset-export-row button:hover:not(:disabled),
+.asset-card button:hover:not(:disabled),
+.asset-style-reference-preview button:hover:not(:disabled) {
+  background: #333;
+  color: #ddd;
+  border-color: #555;
 }
 
 .asset-export-row {
   margin: 12px 0 18px;
-}
-
-.asset-settings-actions button,
-.asset-export-row button,
-.asset-style-reference-preview button {
-  background: rgba(249, 115, 22, 0.18);
-  color: #ffd7aa;
-  border: 1px solid rgba(249, 115, 22, 0.4);
-  font-size: 12px;
 }
 
 .asset-list {
@@ -199,8 +238,8 @@
   width: 76px;
   height: 54px;
   object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
 }
 
 .asset-style-reference-preview div {
@@ -218,25 +257,26 @@
 }
 
 .asset-style-reference-preview span {
-  color: #b7ad9f;
-  font-size: 12px;
+  color: #777;
+  font-size: 10px;
 }
 
 .asset-card {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #2a2a2a;
+  background: #202020;
 }
 
 .asset-card-preview {
   width: 84px;
   height: 48px;
   object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
   flex-shrink: 0;
 }
 
@@ -255,16 +295,19 @@
   white-space: nowrap;
 }
 
+.asset-card strong {
+  font-size: 11px;
+  color: #ccc;
+}
+
 .asset-card span,
 .asset-card em {
-  color: #b7ad9f;
-  font-size: 12px;
+  color: #777;
+  font-size: 10px;
 }
 
 .asset-card button {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.12);
-  color: #f5f0e8;
 }
 
 .asset-card-actions {
@@ -275,7 +318,7 @@
 }
 
 .asset-file-path {
-  color: #ffd7aa;
+  color: #b98a5a;
   font-size: 10px;
   line-height: 1.3;
   white-space: normal;
