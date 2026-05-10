@@ -87,12 +87,12 @@ export default function EditorToolbar({
         </div>
       </div>
       <div className="toolbar-right">
-        {activeView === "editor" && onToggleSuggestions && (
+        {activeView === "editor" && onToggleAssets && (
           <button
-            className={`view-tab ai-toggle ${showSuggestions ? "active" : ""}`}
-            onClick={onToggleSuggestions}
+            className={`view-tab assets-toggle ${showAssets ? "active" : ""}`}
+            onClick={onToggleAssets}
           >
-            AI
+            Assets/Settings
           </button>
         )}
         {activeView === "editor" && onToggleKB && (
@@ -103,12 +103,12 @@ export default function EditorToolbar({
             KB
           </button>
         )}
-        {activeView === "editor" && onToggleAssets && (
+        {activeView === "editor" && onToggleSuggestions && (
           <button
-            className={`view-tab assets-toggle ${showAssets ? "active" : ""}`}
-            onClick={onToggleAssets}
+            className={`view-tab ai-toggle ${showSuggestions ? "active" : ""}`}
+            onClick={onToggleSuggestions}
           >
-            Assets
+            AI
           </button>
         )}
         <div className="export-dropdown">

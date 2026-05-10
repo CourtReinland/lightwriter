@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   KnowledgeBaseService,
   type KnowledgeBase,
@@ -6,9 +6,21 @@ import {
   type KBWorldRule,
   type KBPlotThread,
   type KBCustomNote,
+  type KBScene,
 } from "../../services/knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "../../services/styleProfile";
 import { GrokService } from "../../services/grokService";
+import type { AssetProvider, GeneratedAsset } from "../../types/assets";
+import { buildAssetKnowledgeItems } from "../../services/assetKnowledgeViewService";
+import {
+  buildGeneratedAssetFromResult,
+  generateImageAsset,
+  getImageProviderSettings,
+  providerLabel,
+  type ImageGenerationRequest,
+} from "../../services/imageGenerationService";
+import { loadPersistedImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
 import "./KBPanel.css";
 
@@ -19,11 +31,16 @@ interface KBPanelProps {
   onStyleChange: (profile: StyleProfile | null) => void;
   scriptContent: string;
   projectId: string;
+  assets: GeneratedAsset[];
+  onAssetsChange: (assets: GeneratedAsset[]) => void;
+  focusSection?: "characters" | "scenes" | null;
+  notice?: string;
+  onClearNotice?: () => void;
 }
 
 type EditTarget = {
-  type: "character" | "worldRule" | "plotThread" | "customNote";
-  existing?: KBCharacter | KBWorldRule | KBPlotThread | KBCustomNote;
+  type: "character" | "scene" | "worldRule" | "plotThread" | "customNote";
+  existing?: KBCharacter | KBScene | KBWorldRule | KBPlotThread | KBCustomNote;
 } | null;
 
 export default function KBPanel({
@@ -33,12 +50,18 @@ export default function KBPanel({
   onStyleChange,
   scriptContent,
   projectId,
+  assets,
+  onAssetsChange,
+  focusSection,
+  notice,
+  onClearNotice,
 }: KBPanelProps) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     characters: true,
+    scenes: false,
     world: false,
     plot: false,
     tone: false,
@@ -48,6 +71,33 @@ export default function KBPanel({
   const [styleSample, setStyleSample] = useState("");
   const [analyzingStyle, setAnalyzingStyle] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
+  const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
+  const [repromptProvider, setRepromptProvider] = useState<AssetProvider>("gemini-nano-banana");
+  const [repromptingAssetId, setRepromptingAssetId] = useState<string | null>(null);
+  const [repromptError, setRepromptError] = useState<string | null>(null);
+
+  const characterAssetItems = buildAssetKnowledgeItems(assets, kb, "character");
+  const sceneAssetItems = buildAssetKnowledgeItems(assets, kb, "scene_set");
+
+  useEffect(() => {
+    if (!focusSection) return;
+    setExpandedSections((prev) => ({ ...prev, characters: focusSection === "characters", scenes: focusSection === "scenes" }));
+  }, [focusSection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const missing = assets.filter((asset) => asset.filePath && !asset.imageDataUrl && !assetPreviewDataUrls[asset.id]);
+    missing.forEach((asset) => {
+      loadPersistedImageDataUrl(asset.filePath)
+        .then((dataUrl) => {
+          if (!cancelled && dataUrl) setAssetPreviewDataUrls((current) => ({ ...current, [asset.id]: dataUrl }));
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [assets, assetPreviewDataUrls]);
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -62,6 +112,11 @@ export default function KBPanel({
         updated = existingId
           ? KnowledgeBaseService.updateCharacter(kb, existingId, data as Partial<KBCharacter>)
           : KnowledgeBaseService.addCharacter(kb, data as Omit<KBCharacter, "id">);
+        break;
+      case "scene":
+        updated = existingId
+          ? KnowledgeBaseService.updateScene(kb, existingId, data as Partial<KBScene>)
+          : KnowledgeBaseService.addScene(kb, data as Omit<KBScene, "id">);
         break;
       case "worldRule":
         updated = existingId
@@ -89,6 +144,7 @@ export default function KBPanel({
     let updated = kb;
     switch (type) {
       case "character": updated = KnowledgeBaseService.deleteCharacter(kb, id); break;
+      case "scene": updated = KnowledgeBaseService.deleteScene(kb, id); break;
       case "worldRule": updated = KnowledgeBaseService.deleteWorldRule(kb, id); break;
       case "plotThread": updated = KnowledgeBaseService.deletePlotThread(kb, id); break;
       case "customNote": updated = KnowledgeBaseService.deleteCustomNote(kb, id); break;
@@ -167,6 +223,56 @@ export default function KBPanel({
     }
   }, [styleSample, projectId, onStyleChange]);
 
+  const handleRepromptAsset = useCallback(async (asset: GeneratedAsset) => {
+    const settings = getImageProviderSettings(repromptProvider);
+    if (!settings.apiKey?.trim()) {
+      setRepromptError(`Add a ${providerLabel(repromptProvider)} API key in Assets/Settings first.`);
+      return;
+    }
+    if (!settings.selectedModel?.trim()) {
+      setRepromptError(`Choose a ${providerLabel(repromptProvider)} image model in Assets/Settings first.`);
+      return;
+    }
+
+    setRepromptingAssetId(asset.id);
+    setRepromptError(null);
+    try {
+      const request: ImageGenerationRequest = {
+        projectId: asset.projectId,
+        kind: asset.kind,
+        provider: repromptProvider,
+        model: settings.selectedModel,
+        name: `${asset.name} reroll`,
+        prompt: asset.prompt,
+        negativePrompt: asset.negativePrompt,
+        scriptRef: asset.scriptRef,
+        aspectRatio: typeof asset.metadata.aspectRatio === "string" ? asset.metadata.aspectRatio : asset.kind === "character" ? "2:3" : "16:9",
+      };
+      const result = await generateImageAsset(request);
+      const filePath = await persistGeneratedImageFile({
+        projectId: request.projectId,
+        name: request.name,
+        mimeType: result.mimeType,
+        dataUrl: result.imageDataUrl,
+      });
+      const generated = buildGeneratedAssetFromResult(request, { ...result, filePath: filePath || result.filePath });
+      AssetService.addAsset(asset.projectId, {
+        ...generated,
+        metadata: {
+          ...generated.metadata,
+          rerolledFromAssetId: asset.id,
+          originalProvider: asset.provider,
+          originalModel: asset.model,
+        },
+      });
+      onAssetsChange(AssetService.getAssets(asset.projectId));
+    } catch (error) {
+      setRepromptError(error instanceof Error ? error.message : "Re-prompt failed.");
+    } finally {
+      setRepromptingAssetId(null);
+    }
+  }, [onAssetsChange, repromptProvider]);
+
   const handleFileImport = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -189,7 +295,22 @@ export default function KBPanel({
           {scanning ? "Scanning..." : "Scan Script"}
         </button>
       </div>
+      {notice && (
+        <div className="kb-notice">
+          <span>{notice}</span>
+          <button onClick={onClearNotice}>x</button>
+        </div>
+      )}
       {scanError && <div className="kb-error">{scanError}</div>}
+      {repromptError && <div className="kb-error">{repromptError}</div>}
+
+      <div className="kb-reprompt-bar">
+        <span>Re-roll provider</span>
+        <select value={repromptProvider} onChange={(event) => setRepromptProvider(event.target.value as AssetProvider)}>
+          <option value="gemini-nano-banana">{providerLabel("gemini-nano-banana")}</option>
+          <option value="grok-imagine">{providerLabel("grok-imagine")}</option>
+        </select>
+      </div>
 
       {/* Characters */}
       <div className="kb-section">
@@ -197,16 +318,72 @@ export default function KBPanel({
           <span>{expandedSections.characters ? "v" : ">"} Characters ({kb.characters.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "character" }); }}>+</button>
         </button>
-        {expandedSections.characters && kb.characters.map(c => (
-          <div key={c.id} className="kb-entry">
-            <div className="kb-entry-name">{c.name}</div>
-            <div className="kb-entry-preview">{c.description.slice(0, 60)}{c.description.length > 60 ? "..." : ""}</div>
-            <div className="kb-entry-actions">
-              <button onClick={() => setEditTarget({ type: "character", existing: c })}>Edit</button>
-              <button onClick={() => handleDelete("character", c.id)}>Del</button>
-            </div>
-          </div>
-        ))}
+        {expandedSections.characters && (
+          <>
+            {kb.characters.map(c => (
+              <div key={c.id} className="kb-entry">
+                <div className="kb-entry-name">{c.name}</div>
+                <div className="kb-entry-preview">{c.description.slice(0, 120)}{c.description.length > 120 ? "..." : ""}</div>
+                <div className="kb-entry-actions">
+                  <button onClick={() => setEditTarget({ type: "character", existing: c })}>Edit</button>
+                  <button onClick={() => handleDelete("character", c.id)}>Del</button>
+                </div>
+              </div>
+            ))}
+            {characterAssetItems.map(({ asset, title, description }) => {
+              const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+              return (
+                <div key={asset.id} className="kb-asset-entry">
+                  {previewDataUrl && <img className="kb-asset-thumb" src={previewDataUrl} alt={title} />}
+                  <div className="kb-asset-body">
+                    <div className="kb-entry-name">{title}</div>
+                    <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
+                    <div className="kb-entry-actions">
+                      <button onClick={() => handleRepromptAsset(asset)} disabled={repromptingAssetId === asset.id}>{repromptingAssetId === asset.id ? "Re-prompting..." : "Re-prompt"}</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      {/* Scenes */}
+      <div className="kb-section">
+        <button className="kb-section-header" onClick={() => toggleSection("scenes")}>
+          <span>{expandedSections.scenes ? "v" : ">"} Scenes ({Math.max(kb.scenes?.length || 0, sceneAssetItems.length)})</span>
+          <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "scene" }); }}>+</button>
+        </button>
+        {expandedSections.scenes && (
+          <>
+            {(kb.scenes || []).map(scene => (
+              <div key={scene.id} className="kb-entry">
+                <div className="kb-entry-name">{scene.heading}</div>
+                <div className="kb-entry-preview">{scene.description.slice(0, 120)}{scene.description.length > 120 ? "..." : ""}</div>
+                <div className="kb-entry-actions">
+                  <button onClick={() => setEditTarget({ type: "scene", existing: scene })}>Edit</button>
+                  <button onClick={() => handleDelete("scene", scene.id)}>Del</button>
+                </div>
+              </div>
+            ))}
+            {sceneAssetItems.map(({ asset, title, description }) => {
+              const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+              return (
+                <div key={asset.id} className="kb-asset-entry">
+                  {previewDataUrl && <img className="kb-asset-thumb wide" src={previewDataUrl} alt={title} />}
+                  <div className="kb-asset-body">
+                    <div className="kb-entry-name">{title}</div>
+                    <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
+                    <div className="kb-entry-actions">
+                      <button onClick={() => handleRepromptAsset(asset)} disabled={repromptingAssetId === asset.id}>{repromptingAssetId === asset.id ? "Re-prompting..." : "Re-prompt"}</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
 
       {/* World Rules */}

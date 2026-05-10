@@ -1,4 +1,5 @@
 import { TextAiService } from "./textAiService";
+import type { GeneratedAsset } from "../types/assets";
 
 // ── Knowledge Base Types ──
 
@@ -25,6 +26,13 @@ export interface KBPlotThread {
   description: string;
 }
 
+export interface KBScene {
+  id: string;
+  heading: string;
+  sceneIndex?: number;
+  description: string;
+}
+
 export interface KBToneStyle {
   genre: string;
   mood: string;
@@ -40,6 +48,7 @@ export interface KBCustomNote {
 export interface KnowledgeBase {
   projectId: string;
   characters: KBCharacter[];
+  scenes: KBScene[];
   worldRules: KBWorldRule[];
   plotThreads: KBPlotThread[];
   toneStyle: KBToneStyle;
@@ -62,6 +71,7 @@ function emptyKB(projectId: string): KnowledgeBase {
   return {
     projectId,
     characters: [],
+    scenes: [],
     worldRules: [],
     plotThreads: [],
     toneStyle: { genre: "", mood: "", pacingNotes: "" },
@@ -74,7 +84,10 @@ export class KnowledgeBaseService {
   static getKB(projectId: string): KnowledgeBase {
     try {
       const raw = localStorage.getItem(storageKey(projectId));
-      if (raw) return JSON.parse(raw) as KnowledgeBase;
+      if (raw) {
+        const parsed = JSON.parse(raw) as KnowledgeBase;
+        return { ...emptyKB(projectId), ...parsed, scenes: parsed.scenes || [] };
+      }
     } catch {
       // corrupt data
     }
@@ -95,6 +108,54 @@ export class KnowledgeBaseService {
   }
   static deleteCharacter(kb: KnowledgeBase, id: string): KnowledgeBase {
     return { ...kb, characters: kb.characters.filter(c => c.id !== id) };
+  }
+
+  // ── Scene CRUD ──
+  static addScene(kb: KnowledgeBase, scene: Omit<KBScene, "id">): KnowledgeBase {
+    return { ...kb, scenes: [...(kb.scenes || []), { ...scene, id: uid() }] };
+  }
+  static updateScene(kb: KnowledgeBase, id: string, updates: Partial<KBScene>): KnowledgeBase {
+    return { ...kb, scenes: (kb.scenes || []).map(s => s.id === id ? { ...s, ...updates } : s) };
+  }
+  static deleteScene(kb: KnowledgeBase, id: string): KnowledgeBase {
+    return { ...kb, scenes: (kb.scenes || []).filter(s => s.id !== id) };
+  }
+
+  static mergeGeneratedAssets(kb: KnowledgeBase, assets: GeneratedAsset[]): KnowledgeBase {
+    let updated = { ...kb, scenes: kb.scenes || [] };
+    for (const asset of assets) {
+      if (asset.kind === "character") {
+        const name = asset.scriptRef.characterName || asset.name;
+        if (!name.trim()) continue;
+        const existing = updated.characters.find(c => c.name.toLowerCase() === name.toLowerCase());
+        if (!existing) {
+          updated = this.addCharacter(updated, {
+            name,
+            description: asset.scriptRef.contentExcerpt || asset.prompt,
+            traits: [],
+            voiceNotes: "",
+            relationships: [],
+          });
+        } else if (!existing.description.trim() && (asset.scriptRef.contentExcerpt || asset.prompt)) {
+          updated = this.updateCharacter(updated, existing.id, { description: asset.scriptRef.contentExcerpt || asset.prompt });
+        }
+      }
+      if (asset.kind === "scene_set") {
+        const heading = asset.scriptRef.sceneHeading || asset.name;
+        if (!heading.trim()) continue;
+        const existing = updated.scenes.find(s => s.sceneIndex === asset.scriptRef.sceneIndex || s.heading.toLowerCase() === heading.toLowerCase());
+        if (!existing) {
+          updated = this.addScene(updated, {
+            heading,
+            sceneIndex: asset.scriptRef.sceneIndex,
+            description: asset.scriptRef.contentExcerpt || asset.prompt,
+          });
+        } else if (!existing.description.trim() && (asset.scriptRef.contentExcerpt || asset.prompt)) {
+          updated = this.updateScene(updated, existing.id, { description: asset.scriptRef.contentExcerpt || asset.prompt });
+        }
+      }
+    }
+    return updated;
   }
 
   // ── World Rule CRUD ──

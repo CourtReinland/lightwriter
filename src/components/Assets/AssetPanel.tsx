@@ -42,6 +42,7 @@ interface AssetPanelProps {
   project: Project;
   assets: GeneratedAsset[];
   onAssetsChange: (assets: GeneratedAsset[]) => void;
+  onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
 }
 
 type SourceKind = "scene_set" | "character" | "shot";
@@ -60,7 +61,7 @@ function isKnownModel(modelOptions: { id: string }[], model: string): boolean {
   return modelOptions.some((option) => option.id === model);
 }
 
-export default function AssetPanel({ project, assets, onAssetsChange }: AssetPanelProps) {
+export default function AssetPanel({ project, assets, onAssetsChange, onGenerationComplete }: AssetPanelProps) {
   const [activeTab, setActiveTab] = useState<AssetSubTab>("settings");
   const [provider, setProvider] = useState<AssetProvider>("gemini-nano-banana");
   const [sourceKind, setSourceKind] = useState<SourceKind>("scene_set");
@@ -487,7 +488,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
       if (!request) return;
       const asset = await saveGeneratedAssetFromRequest(request);
       onAssetsChange([...assets, asset]);
-      setSettingsMessage(asset.filePath ? `Image generated and saved: ${asset.filePath}` : "Image generated and saved to Project Assets. Use Download Image to save a file.");
+      onGenerationComplete?.([asset], asset.kind);
+      setSettingsMessage(asset.filePath ? `Done — image generated and saved: ${asset.filePath}` : "Done — image generated and saved to Project Assets. Use Download Image to save a file.");
     } catch (error) {
       setSettingsMessage(error instanceof Error ? error.message : "Image generation failed.");
     } finally {
@@ -516,7 +518,8 @@ export default function AssetPanel({ project, assets, onAssetsChange }: AssetPan
         setSettingsMessage(`Generated ${generatedAssets.length}/${choices.length}: ${asset.name}`);
       }
       onAssetsChange([...assets, ...generatedAssets]);
-      setSettingsMessage(`Generate All complete: ${generatedAssets.length} image${generatedAssets.length === 1 ? "" : "s"} saved.`);
+      onGenerationComplete?.(generatedAssets, generatedAssets[0]?.kind || (sourceKind as AssetKind));
+      setSettingsMessage(`Done — Generate All complete: ${generatedAssets.length} image${generatedAssets.length === 1 ? "" : "s"} saved.`);
     } catch (error) {
       onAssetsChange([...assets, ...generatedAssets]);
       setSettingsMessage(error instanceof Error ? `Generate All stopped after ${generatedAssets.length}: ${error.message}` : "Generate All failed.");
