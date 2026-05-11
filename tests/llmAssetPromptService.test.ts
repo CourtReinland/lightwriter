@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateReviewedAssetPrompt, generateReviewedAssetPrompts, promptViolations } from "../src/services/llmAssetPromptService";
-import type { ScriptSceneRef } from "../src/services/scriptStructure";
+import type { ScriptCharacterRef, ScriptSceneRef } from "../src/services/scriptStructure";
 
 function makeLocalStorage() {
   const store = new Map<string, string>();
@@ -74,6 +74,38 @@ describe("llmAssetPromptService", () => {
     expect(prompt).toBe(
       "cozy children's cartoon living room interior, soft daylight, rounded furniture, colorful storybook props, warm playful palette, gentle lens softness",
     );
+  });
+
+  it("sends parsed character descriptions into the reviewed prompt LLM path", async () => {
+    const character: ScriptCharacterRef = {
+      name: "AIDEN",
+      description: "earnest teenage student, forgetful, anxious about being expelled",
+      firstLine: 8,
+      evidence: ["AIDEN is earnest in his explanation", "school library at night"],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: "draft character prompt" } }] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "earnest teenage student, rumpled school uniform, anxious bright eyes, flashlight-lit library mood, grounded cinematic character reference" } }],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const prompt = await generateReviewedAssetPrompt({
+      kind: "character",
+      character,
+      fullScriptContent: "INT. SCHOOL LIBRARY - NIGHT\nAIDEN searches for lost homework while ALIYAH challenges him.",
+    });
+
+    const passOneUserBody = JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content;
+    const passTwoSystemBody = JSON.parse(fetchMock.mock.calls[1][1].body).messages[0].content;
+    expect(passOneUserBody).toContain("Parsed character description: earnest teenage student");
+    expect(passOneUserBody).toContain("school library at night");
+    expect(passTwoSystemBody).toContain("infer a grounded visual look");
+    expect(prompt).toContain("rumpled school uniform");
   });
 
   it("generates reviewed prompts for every selected script reference without generating images", async () => {

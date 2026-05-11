@@ -214,26 +214,40 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
     }
 
     let cancelled = false;
-    seedCharacterPromptDrafts(deterministicCharacters);
     setIsParsingCharacters(true);
     setCharacterParserMessage(`Parsing characters with ${textAiProviderLabel(textAiProvider)}...`);
     parseCharactersWithTextAi(project.content)
-      .then((parsed) => {
+      .then(async (parsed) => {
         if (cancelled) return;
         setAiParsedCharacters(parsed);
         setSelectedKey("0");
         if (parsed.length) {
-          seedCharacterPromptDrafts(parsed);
+          setCharacterParserMessage(
+            `${textAiProviderLabel(textAiProvider)} parser found ${parsed.length} character${parsed.length === 1 ? "" : "s"}; drafting reviewed prompt for ${parsed[0].name}...`,
+          );
+          setIsGeneratingPrompt(true);
+          const reviewedPrompt = await generateReviewedAssetPrompt({
+            kind: "character",
+            character: parsed[0],
+            fullScriptContent: project.content,
+            styleReference,
+            userPrompt: "",
+          });
+          if (cancelled) return;
+          const draftKey = promptDraftKey("character", "0");
+          setPromptDrafts((current) => ({ ...current, [draftKey]: reviewedPrompt }));
+          setPromptOverride(reviewedPrompt);
         }
         setCharacterParserMessage(
           parsed.length
-            ? `${textAiProviderLabel(textAiProvider)} parser found ${parsed.length} character${parsed.length === 1 ? "" : "s"}.`
+            ? `${textAiProviderLabel(textAiProvider)} parser found ${parsed.length} character${parsed.length === 1 ? "" : "s"}; reviewed prompt is ready.`
             : "LLM parser returned no characters; check the script text or parser key.",
         );
       })
       .catch((error) => {
         if (cancelled) return;
         setAiParsedCharacters(null);
+        seedCharacterPromptDrafts(deterministicCharacters);
         setCharacterParserMessage(
           error instanceof Error
             ? `LLM character parser failed: ${error.message}. Using local Fountain cues.`
@@ -241,13 +255,16 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
         );
       })
       .finally(() => {
-        if (!cancelled) setIsParsingCharacters(false);
+        if (!cancelled) {
+          setIsParsingCharacters(false);
+          setIsGeneratingPrompt(false);
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeTab, project.content, textAiProvider, textAiKeyDrafts, deterministicCharacters.length]);
+  }, [activeTab, project.content, textAiProvider, textAiKeyDrafts, deterministicCharacters.length, styleReference]);
 
   useEffect(() => {
     if (activeTab === "characters" && sourceKind !== "character") {
@@ -275,9 +292,49 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
 
   useEffect(() => {
     if (activeTab !== "characters" || sourceKind !== "character") return;
+    if (textAiKeyDrafts[textAiProvider]?.trim()) return;
     if (promptDrafts[selectedPromptDraftKey]) return;
     seedCharacterPromptDrafts(characters);
-  }, [activeTab, sourceKind, selectedPromptDraftKey, characters, promptDrafts]);
+  }, [activeTab, sourceKind, selectedPromptDraftKey, characters, promptDrafts, textAiProvider, textAiKeyDrafts]);
+
+  useEffect(() => {
+    if (activeTab !== "characters" || sourceKind !== "character") return;
+    if (!textAiKeyDrafts[textAiProvider]?.trim()) return;
+    if (!aiParsedCharacters?.length) return;
+    if (!selected || promptDrafts[selectedPromptDraftKey] || isParsingCharacters || isGeneratingPrompt) return;
+    let cancelled = false;
+    const character = selected as ScriptCharacterRef;
+    setIsGeneratingPrompt(true);
+    setCharacterParserMessage(`Drafting reviewed prompt for ${character.name} with ${textAiProviderLabel(textAiProvider)}...`);
+    generateReviewedAssetPrompt({
+      kind: "character",
+      character,
+      fullScriptContent: project.content,
+      styleReference,
+      userPrompt: "",
+    })
+      .then((reviewedPrompt) => {
+        if (cancelled) return;
+        setPromptDrafts((current) => ({ ...current, [selectedPromptDraftKey]: reviewedPrompt }));
+        setPromptOverride(reviewedPrompt);
+        setCharacterParserMessage(`Reviewed prompt ready for ${character.name}.`);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        seedCharacterPromptDrafts([character]);
+        setCharacterParserMessage(
+          error instanceof Error
+            ? `Reviewed prompt failed for ${character.name}: ${error.message}. Using local character summary.`
+            : `Reviewed prompt failed for ${character.name}. Using local character summary.`,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setIsGeneratingPrompt(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, sourceKind, selectedKey, selectedPromptDraftKey, selected, promptDrafts, aiParsedCharacters, isParsingCharacters, textAiProvider, textAiKeyDrafts, project.content, styleReference]);
 
   useEffect(() => {
     let cancelled = false;

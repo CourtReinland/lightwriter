@@ -109,7 +109,11 @@ function sourceText(request: LlmAssetPromptRequest): string {
     return [`Scene heading: ${request.shot.sceneHeading}`, `Shot key: ${request.shot.shotKey}`, `Shot text: ${request.shot.text}`].join("\n");
   }
   if (request.kind === "character" && request.character) {
-    return [`Character: ${request.character.name}`, `Description/evidence: ${request.character.evidence.join("\n")}`].join("\n");
+    return [
+      `Character: ${request.character.name}`,
+      request.character.description ? `Parsed character description: ${request.character.description}` : "",
+      request.character.evidence.length ? `Script evidence:\n${request.character.evidence.join("\n")}` : "",
+    ].filter(Boolean).join("\n");
   }
   return "";
 }
@@ -131,7 +135,10 @@ Critical output style:
 - Keep it concise: one comma-separated line under 70 words.`;
 }
 
-function passTwoSystem(characterNames: string[]): string {
+function passTwoSystem(characterNames: string[], kind: LlmPromptKind): string {
+  const characterNameRule = kind === "character"
+    ? "- Character asset prompts may keep the character name only if it helps the user identify the draft, but the visual content must not rely on the name; include concrete age/wardrobe/body/face/mood details."
+    : `- Remove character names: ${characterNames.length ? characterNames.join(", ") : "none detected"}.`;
   return `PASS 2 — rule-conformance reviewer and prompt cleaner.
 You are the final gatekeeper for LightWriter's Editable Generated Prompt box.
 Return ONLY the corrected image prompt text, no labels, no markdown, no explanation.
@@ -140,8 +147,9 @@ Hard rules:
 - Remove ALL instruction-style wording: generate, create, make, do not, no characters, avoid, must, should, prompt, style reference, match the style reference, copy its composition.
 - Remove screenplay scene headings such as INT., EXT., EST., INT./EXT., I/E.
 - Remove placeholders such as "description goes here", TBD, insert, fill in.
-- Remove character names: ${characterNames.length ? characterNames.join(", ") : "none detected"}.
+${characterNameRule}
 - For scene_set prompts, the result must be only environment/background/set design, not people or actions.
+- For character prompts, infer a grounded visual look from the character description, location, dialogue, and whole-script context; never return generic instructions or the deterministic seed wording.
 - Keep environmental motion/weather if useful: rain, wind, lightning, fog, smoke, shadows, water, fire.
 - Output one polished comma-separated visual prompt under 70 words.`;
 }
@@ -165,7 +173,7 @@ async function generateReviewedAssetPromptWithService(request: LlmAssetPromptReq
   );
 
   const reviewed = await service.complete(
-    passTwoSystem(characterNames),
+      passTwoSystem(characterNames, request.kind),
     [
       "Draft prompt:",
       extractTextOnly(draft),
