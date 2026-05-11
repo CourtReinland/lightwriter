@@ -382,6 +382,44 @@
   gap: 6px;
 }
 
+.kb-style-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kb-style-sample-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  background: #202020;
+  border: 1px solid #333;
+  color: #aaa;
+  font-size: 10px;
+  padding: 4px 6px;
+}
+
+.kb-style-sample-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-style-sample-row button {
+  background: none;
+  border: none;
+  color: #777;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.kb-style-sample-row button:hover {
+  color: #bbb;
+}
+
 .kb-action-btn {
   flex: 1;
   font-family: inherit;

@@ -44,6 +44,7 @@ export interface OrchestratorContext {
   customPrompt?: string;
   characterName?: string;
   characterNames?: string[]; // For scene builder: multiple characters
+  targetPages?: number;
 }
 
 // ── Mode Configs ──
@@ -201,7 +202,15 @@ export function buildPrompt(ctx: OrchestratorContext): {
 
   // Style profile
   if (ctx.styleProfile) {
-    sections.push("\n" + StyleProfileService.serializeForPrompt(ctx.styleProfile));
+    sections.push("\n" + StyleProfileService.serializeForPrompt(ctx.styleProfile, ctx.knowledgeBase?.toneStyle?.targetStyle));
+  }
+
+  if (ctx.knowledgeBase?.toneStyle?.styleNotes) {
+    sections.push("\n=== ADDITIONAL STYLE CONSTRAINTS ===\n" + ctx.knowledgeBase.toneStyle.styleNotes);
+  }
+
+  if (ctx.targetPages) {
+    sections.push(`\n=== TARGET LENGTH ===\nTarget screenplay length: ${ctx.targetPages} pages. Use this to calibrate scene density, expansion, compression, and beat weight.`);
   }
 
   // Beat context
@@ -288,7 +297,7 @@ export function buildPrompt(ctx: OrchestratorContext): {
 
 export async function generate(
   ctx: OrchestratorContext,
-  apiKey: string,
+  _apiKey?: string,
 ): Promise<string> {
   const { system, user, temperature, maxTokens } = buildPrompt(ctx);
 

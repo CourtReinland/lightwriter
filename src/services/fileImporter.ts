@@ -515,8 +515,17 @@ export async function importPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   return allLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim() + "\n";
 }
 
+// ─── .docx import ────────────────────────────────────────────────────
+// Uses mammoth for client-side DOCX text extraction.
+
+export async function importDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  const mammoth = await import("mammoth/mammoth.browser");
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+
 /**
- * Detect file type and import accordingly.
+ * Import a File object based on its extension.
  */
 export async function importFile(file: File): Promise<string> {
   const name = file.name.toLowerCase();
@@ -535,6 +544,10 @@ export async function importFile(file: File): Promise<string> {
 
   if (name.endsWith(".pdf")) {
     return importPdf(await file.arrayBuffer());
+  }
+
+  if (name.endsWith(".docx")) {
+    return importDocx(await file.arrayBuffer());
   }
 
   return importFountain(await file.text());

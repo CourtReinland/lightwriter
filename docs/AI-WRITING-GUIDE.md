@@ -67,27 +67,30 @@ Every time you ask the AI to write or improve text, it sees the relevant KB entr
 
 ## 2. The Style Profile
 
-The Style Profile captures *your* voice. Paste a writing sample (or import a `.txt` file) and the AI analyzes:
+The Style Profile captures *your* voice and turns it into an enforceable **style contract** for every AI writing pass. Paste text directly or import one/several samples in `.txt`, `.fountain`, `.pdf`, or `.docx` format. The analyzer now extracts:
 
 - Average sentence length and variance
-- Vocabulary complexity (simple / moderate / literary)
+- Vocabulary complexity
 - Predominant tone
-- POV (first person / third limited / omniscient / etc.)
-- Tense (past / present / mixed)
+- POV / screenplay objectivity and tense
 - Dialogue-to-action ratio
-- A 2-3 sentence "voice description"
+- Action-line style
+- Dialogue style and subtext habits
+- Humor, imagery, emotional register, and pacing profile
+- Concrete **Do** and **Avoid** rules
+- A compact style contract used by the AI tab
 
 ### Setting it up
 
 1. Open the KB panel (click **KB**)
-2. Expand the **Style Profile** section at the bottom
-3. Paste a writing sample into the textarea (a few thousand words is ideal — a chapter from your novel, a previous screenplay, anything that represents your voice)
-4. Optionally click **Import .txt** to load from a file
+2. Expand **Tone & Style** and optionally set a target/director style such as `Kubrick-like formal restraint`, `Pixar emotional clarity`, or your own custom direction
+3. Expand the **Style Profile** section
+4. Paste a sample and/or click **Import samples** to load `.txt`, `.fountain`, `.pdf`, or `.docx` files
 5. Click **Analyze Style**
 
-The AI returns the metrics and stores them per-project. From now on, every AI suggestion includes a "match this voice" instruction with the analyzed characteristics.
+The AI returns a project-level style contract. From then on, every AI suggestion includes the writer voice, target/director style, style constraints, KB context, beat context, and target page count where available.
 
-**Tip:** If you write in multiple voices (e.g., literary novel vs. action screenplay), create a separate project for each — style profiles are per-project.
+**Tip:** The target/director style should be treated as seasoning, not replacement. The generated prompt explicitly preserves the writer's own voice first and translates labels like "Pixar" or "Kubrick" into concrete craft choices rather than parody.
 
 ---
 

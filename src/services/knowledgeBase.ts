@@ -37,6 +37,8 @@ export interface KBToneStyle {
   genre: string;
   mood: string;
   pacingNotes: string;
+  targetStyle: string;
+  styleNotes: string;
 }
 
 export interface KBCustomNote {
@@ -74,7 +76,7 @@ function emptyKB(projectId: string): KnowledgeBase {
     scenes: [],
     worldRules: [],
     plotThreads: [],
-    toneStyle: { genre: "", mood: "", pacingNotes: "" },
+    toneStyle: { genre: "", mood: "", pacingNotes: "", targetStyle: "", styleNotes: "" },
     customNotes: [],
     updatedAt: Date.now(),
   };
@@ -86,7 +88,13 @@ export class KnowledgeBaseService {
       const raw = localStorage.getItem(storageKey(projectId));
       if (raw) {
         const parsed = JSON.parse(raw) as KnowledgeBase;
-        return { ...emptyKB(projectId), ...parsed, scenes: parsed.scenes || [] };
+        const empty = emptyKB(projectId);
+        return {
+          ...empty,
+          ...parsed,
+          scenes: parsed.scenes || [],
+          toneStyle: { ...empty.toneStyle, ...(parsed.toneStyle || {}) },
+        };
       }
     } catch {
       // corrupt data
@@ -213,9 +221,15 @@ export class KnowledgeBaseService {
     };
 
     // Tone first (small)
-    if (kb.toneStyle.genre || kb.toneStyle.mood) {
+    if (kb.toneStyle.genre || kb.toneStyle.mood || kb.toneStyle.pacingNotes || kb.toneStyle.targetStyle || kb.toneStyle.styleNotes) {
       addSection("TONE & STYLE",
-        `Genre: ${kb.toneStyle.genre || "N/A"}\nMood: ${kb.toneStyle.mood || "N/A"}\nPacing: ${kb.toneStyle.pacingNotes || "N/A"}`);
+        [
+          `Genre: ${kb.toneStyle.genre || "N/A"}`,
+          `Mood: ${kb.toneStyle.mood || "N/A"}`,
+          `Pacing: ${kb.toneStyle.pacingNotes || "N/A"}`,
+          kb.toneStyle.targetStyle ? `Target/director style: ${kb.toneStyle.targetStyle}` : "",
+          kb.toneStyle.styleNotes ? `Style constraints: ${kb.toneStyle.styleNotes}` : "",
+        ].filter(Boolean).join("\n"));
     }
 
     // Prioritize mentioned characters
@@ -266,7 +280,7 @@ export class KnowledgeBaseService {
   "characters": [{ "name": "string", "description": "string", "traits": ["string"], "voiceNotes": "string", "relationships": [{ "characterName": "string", "description": "string" }] }],
   "worldRules": [{ "category": "setting|magic|technology|time_period|other", "title": "string", "description": "string" }],
   "plotThreads": [{ "title": "string", "status": "unresolved|foreshadowed|resolved", "description": "string" }],
-  "toneStyle": { "genre": "string", "mood": "string", "pacingNotes": "string" }
+  "toneStyle": { "genre": "string", "mood": "string", "pacingNotes": "string", "targetStyle": "string", "styleNotes": "string" }
 }
 Return ONLY the JSON. No markdown. No explanation.`;
 

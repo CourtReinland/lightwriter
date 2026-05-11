@@ -8,8 +8,9 @@ import {
   type KBCustomNote,
   type KBScene,
 } from "../../services/knowledgeBase";
-import { StyleProfileService, type StyleProfile } from "../../services/styleProfile";
-import { GrokService } from "../../services/grokService";
+import { StyleProfileService, inferStyleSampleKind, type AnalyzeStyleSampleInput, type StyleProfile } from "../../services/styleProfile";
+import { importFile } from "../../services/fileImporter";
+import { getSelectedTextAiProviderSettings } from "../../services/textAiSettingsService";
 import type { AssetProvider, GeneratedAsset } from "../../types/assets";
 import { buildAssetKnowledgeItems } from "../../services/assetKnowledgeViewService";
 import {
@@ -69,6 +70,7 @@ export default function KBPanel({
     style: false,
   });
   const [styleSample, setStyleSample] = useState("");
+  const [styleSamples, setStyleSamples] = useState<AnalyzeStyleSampleInput[]>([]);
   const [analyzingStyle, setAnalyzingStyle] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
   const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
@@ -156,14 +158,14 @@ export default function KBPanel({
   }, [kb, onKBChange]);
 
   const handleScanScript = useCallback(async () => {
-    const apiKey = GrokService.getStoredApiKey();
-    if (!apiKey) { setScanError("Set your Grok API key first."); return; }
+    const settings = getSelectedTextAiProviderSettings();
+    if (!settings.apiKey.trim()) { setScanError("Set your Text AI API key first."); return; }
     if (!scriptContent.trim()) { setScanError("No script content to scan."); return; }
 
     setScanning(true);
     setScanError(null);
     try {
-      const extracted = await KnowledgeBaseService.scanScript(scriptContent, apiKey);
+      const extracted = await KnowledgeBaseService.scanScript(scriptContent, settings.apiKey);
       let updated = { ...kb };
 
       // Merge extracted entries (add new, don't overwrite existing)
@@ -208,14 +210,16 @@ export default function KBPanel({
   }, [kb, onKBChange]);
 
   const handleAnalyzeStyle = useCallback(async () => {
-    const apiKey = GrokService.getStoredApiKey();
-    if (!apiKey) { setStyleError("Set your Grok API key first."); return; }
-    if (!styleSample.trim()) { setStyleError("Paste a writing sample first."); return; }
+    const samples = [...styleSamples];
+    if (styleSample.trim()) {
+      samples.push({ filename: "Pasted sample", kind: "txt", text: styleSample.trim() });
+    }
+    if (!samples.length) { setStyleError("Paste or import at least one writing sample first."); return; }
 
     setAnalyzingStyle(true);
     setStyleError(null);
     try {
-      const profile = await StyleProfileService.analyzeStyle(styleSample, projectId, apiKey);
+      const profile = await StyleProfileService.analyzeSamples(samples, projectId);
       StyleProfileService.saveProfile(profile);
       onStyleChange(profile);
     } catch (e) {
@@ -223,7 +227,7 @@ export default function KBPanel({
     } finally {
       setAnalyzingStyle(false);
     }
-  }, [styleSample, projectId, onStyleChange]);
+  }, [styleSample, styleSamples, projectId, onStyleChange]);
 
   const handleOpenReprompt = useCallback((asset: GeneratedAsset) => {
     setRepromptTarget(asset);
@@ -299,13 +303,22 @@ export default function KBPanel({
   const handleFileImport = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".txt,.fountain";
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => setStyleSample(reader.result as string);
-      reader.readAsText(file);
+    input.accept = ".txt,.fountain,.pdf,.docx";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      setStyleError(null);
+      try {
+        const imported = await Promise.all(files.map(async (file) => ({
+          filename: file.name,
+          kind: inferStyleSampleKind(file.name),
+          text: await importFile(file),
+        })));
+        setStyleSamples((current) => [...current, ...imported.filter((sample) => sample.text.trim())]);
+      } catch (error) {
+        setStyleError(error instanceof Error ? error.message : "Could not import one of the style sample files.");
+      }
     };
     input.click();
   }, []);
@@ -479,7 +492,9 @@ export default function KBPanel({
           <div className="kb-tone-fields">
             <input className="kb-input-sm" placeholder="Genre" value={kb.toneStyle.genre} onChange={e => handleToneChange("genre", e.target.value)} />
             <input className="kb-input-sm" placeholder="Mood" value={kb.toneStyle.mood} onChange={e => handleToneChange("mood", e.target.value)} />
+            <input className="kb-input-sm" placeholder="Target/director style (e.g. Kubrick restraint, Pixar emotional clarity)" value={kb.toneStyle.targetStyle} onChange={e => handleToneChange("targetStyle", e.target.value)} />
             <textarea className="kb-textarea-sm" placeholder="Pacing notes" value={kb.toneStyle.pacingNotes} onChange={e => handleToneChange("pacingNotes", e.target.value)} rows={2} />
+            <textarea className="kb-textarea-sm" placeholder="Style constraints / blend notes (what to preserve, what to avoid)" value={kb.toneStyle.styleNotes} onChange={e => handleToneChange("styleNotes", e.target.value)} rows={3} />
           </div>
         )}
       </div>
@@ -515,6 +530,21 @@ export default function KBPanel({
                 <div className="kb-style-row"><span>Tense:</span> {styleProfile.tense}</div>
                 <div className="kb-style-row"><span>Vocab:</span> {styleProfile.vocabularyComplexity}</div>
                 <div className="kb-style-row"><span>Dialogue:</span> {styleProfile.dialogueToActionRatio}</div>
+                {styleProfile.samples?.length ? (
+                  <div className="kb-style-row"><span>Samples:</span> {styleProfile.samples.length} file(s), {styleProfile.samples.reduce((sum, sample) => sum + sample.wordCount, 0)} words</div>
+                ) : null}
+                {styleProfile.confidenceScore ? (
+                  <div className="kb-style-row"><span>Confidence:</span> {Math.round(styleProfile.confidenceScore)}/100</div>
+                ) : null}
+                {styleProfile.styleContract && (
+                  <div className="kb-style-analysis"><strong>Style contract:</strong> {styleProfile.styleContract}</div>
+                )}
+                {styleProfile.doRules?.length ? (
+                  <div className="kb-style-analysis"><strong>Do:</strong> {styleProfile.doRules.join("; ")}</div>
+                ) : null}
+                {styleProfile.avoidRules?.length ? (
+                  <div className="kb-style-analysis"><strong>Avoid:</strong> {styleProfile.avoidRules.join("; ")}</div>
+                ) : null}
                 {styleProfile.rawAnalysis && (
                   <div className="kb-style-analysis">{styleProfile.rawAnalysis}</div>
                 )}
@@ -522,13 +552,23 @@ export default function KBPanel({
             )}
             <textarea
               className="kb-textarea-sm"
-              placeholder="Paste a writing sample to analyze style..."
+              placeholder="Paste a writing sample, or import txt/fountain/pdf/docx samples below..."
               value={styleSample}
               onChange={e => setStyleSample(e.target.value)}
               rows={4}
             />
+            {styleSamples.length > 0 && (
+              <div className="kb-style-samples">
+                {styleSamples.map((sample, index) => (
+                  <div key={`${sample.filename}-${index}`} className="kb-style-sample-row">
+                    <span>{sample.filename}</span>
+                    <button onClick={() => setStyleSamples((current) => current.filter((_, i) => i !== index))}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="kb-style-actions">
-              <button className="kb-action-btn" onClick={handleFileImport}>Import .txt</button>
+              <button className="kb-action-btn" onClick={handleFileImport}>Import samples</button>
               <button className="kb-action-btn primary" onClick={handleAnalyzeStyle} disabled={analyzingStyle}>
                 {analyzingStyle ? "Analyzing..." : "Analyze Style"}
               </button>

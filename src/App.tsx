@@ -493,6 +493,7 @@ export default function App() {
               cursorBeats={cursorBeats}
               knowledgeBase={knowledgeBase}
               styleProfile={styleProfile}
+              targetPages={project.targetPages}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleReplaceScript}

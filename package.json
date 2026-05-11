@@ -21,6 +21,7 @@
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.36.0",
     "fountain-js": "^1.1.0",
+    "mammoth": "^1.12.0",
     "pdfjs-dist": "^5.5.207",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

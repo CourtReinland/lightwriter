@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { GrokService } from "../../services/grokService";
+import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import {
   generate,
@@ -23,6 +23,7 @@ interface SuggestionPanelProps {
   cursorBeats: ComputedBeat[];
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
+  targetPages: number;
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
@@ -55,11 +56,12 @@ export default function SuggestionPanel({
   cursorBeats,
   knowledgeBase,
   styleProfile,
+  targetPages,
   onApply,
   onInsertBelow,
   onReplaceScript,
 }: SuggestionPanelProps) {
-  const [apiKey, setApiKey] = useState(GrokService.getStoredApiKey());
+  const [textAiSettings, setTextAiSettings] = useState(() => getSelectedTextAiProviderSettings());
   const [showKeyDialog, setShowKeyDialog] = useState(false);
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -71,7 +73,9 @@ export default function SuggestionPanel({
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
 
   const handleFullShotPass = useCallback(async () => {
-    if (!apiKey) {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
       setShowKeyDialog(true);
       return;
     }
@@ -80,7 +84,7 @@ export default function SuggestionPanel({
       return;
     }
     const confirmed = window.confirm(
-      "Run a full-script shot pass? This will send the script to Grok scene-by-scene and replace the editor text with a shot-annotated version. Undo remains available in the editor.",
+      `Run a full-script shot pass with ${textAiProviderLabel(currentSettings.provider)}? This will send the script scene-by-scene and replace the editor text with a shot-annotated version. Undo remains available in the editor.`,
     );
     if (!confirmed) return;
 
@@ -93,7 +97,7 @@ export default function SuggestionPanel({
     try {
       const rewritten = await rewriteScriptWithShotDirections(
         fullScript,
-        apiKey,
+        currentSettings.apiKey,
         knowledgeBase,
         setShotPassProgress,
       );
@@ -105,11 +109,13 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [apiKey, fullScript, knowledgeBase, onReplaceScript]);
+  }, [fullScript, knowledgeBase, onReplaceScript]);
 
   const handleSuggest = useCallback(
     async (mode: OrchestratorMode, prompt?: string, characterName?: string) => {
-      if (!apiKey) {
+      const currentSettings = getSelectedTextAiProviderSettings();
+      setTextAiSettings(currentSettings);
+      if (!currentSettings.apiKey.trim()) {
         setShowKeyDialog(true);
         return;
       }
@@ -136,9 +142,10 @@ export default function SuggestionPanel({
           mode,
           customPrompt: prompt,
           characterName,
+          targetPages,
         };
 
-        const result = await generate(ctx, apiKey);
+        const result = await generate(ctx);
         setSuggestion(result);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Unknown error");
@@ -146,7 +153,7 @@ export default function SuggestionPanel({
         setLoading(false);
       }
     },
-    [apiKey, selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile],
+    [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages],
   );
 
   const handleCustomSubmit = useCallback(() => {
@@ -165,7 +172,7 @@ export default function SuggestionPanel({
           onClick={() => setShowKeyDialog(true)}
           title="Configure API key"
         >
-          {apiKey ? "Key OK" : "Set Key"}
+          {textAiSettings.apiKey.trim() ? `${textAiProviderLabel(textAiSettings.provider)} OK` : "Set Text AI"}
         </button>
       </div>
 
@@ -340,8 +347,8 @@ export default function SuggestionPanel({
 
       {showKeyDialog && (
         <ApiKeyDialog
-          onSave={(key) => {
-            setApiKey(key);
+          onSave={() => {
+            setTextAiSettings(getSelectedTextAiProviderSettings());
             setShowKeyDialog(false);
           }}
           onClose={() => setShowKeyDialog(false)}
