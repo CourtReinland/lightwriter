@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
-import { runScriptReportCard, generateMetricImprovementPlan, type ScriptReportCard } from "../../services/scriptReportCardService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, type ScriptReportCard, type ScriptRewriteResult } from "../../services/scriptReportCardService";
 import {
   generate,
   isAnalysisMode,
@@ -74,6 +74,7 @@ export default function SuggestionPanel({
   const [charSelect, setCharSelect] = useState<string>("");
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
+  const [lastRewriteResult, setLastRewriteResult] = useState<ScriptRewriteResult | null>(null);
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -188,6 +189,7 @@ export default function SuggestionPanel({
         targetPages,
       });
       setReportCard(report);
+      setLastRewriteResult(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Report card failed");
     } finally {
@@ -225,6 +227,83 @@ export default function SuggestionPanel({
       setLoading(false);
     }
   }, [fullScript, knowledgeBase, styleProfile, targetPages, reportCard]);
+
+  const ensureRewriteReady = useCallback((): boolean => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return false;
+    }
+    if (!reportCard) {
+      setError("Run Script Report Card first, then choose a rewrite action.");
+      return false;
+    }
+    if (!fullScript.trim()) {
+      setError("No script content to rewrite.");
+      return false;
+    }
+    return true;
+  }, [fullScript, reportCard]);
+
+  const applyRewriteResult = useCallback((result: ScriptRewriteResult, label: string) => {
+    onReplaceScript(result.rewrittenScript);
+    setLastRewriteResult(result);
+    setSuggestion(`${label} complete. The editor has been replaced with the revised full script.\n\nChanges:\n${result.changeSummary.map((item) => `- ${item}`).join("\n") || "- Rewrite completed."}${result.warnings.length ? `\n\nWarnings:\n${result.warnings.map((item) => `- ${item}`).join("\n")}` : ""}`);
+    setLastMode(null);
+  }, [onReplaceScript]);
+
+  const handleRewriteMetric = useCallback(async (metricId: string, metricName: string) => {
+    if (!ensureRewriteReady() || !reportCard) return;
+    const confirmed = window.confirm(`Rewrite the full script to improve ${metricName}? This replaces the editor text with a complete revised draft. Undo remains available in the editor.`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    try {
+      const result = await rewriteScriptForMetric({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+        reportCard,
+        metricId,
+        metricName,
+      });
+      applyRewriteResult(result, `${metricName} rewrite`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Metric rewrite failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [applyRewriteResult, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+
+  const handleFillGaps = useCallback(async (mode: "missing_beats" | "target_pages") => {
+    if (!ensureRewriteReady() || !reportCard) return;
+    const label = mode === "target_pages" ? "complete toward target pages" : "fill missing beats";
+    const confirmed = window.confirm(`Run a full-script rewrite to ${label}? This replaces the editor text with a complete revised draft. Undo remains available in the editor.`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    try {
+      const result = await fillScriptGaps({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+        reportCard,
+        mode,
+      });
+      applyRewriteResult(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [applyRewriteResult, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
 
   const characters = knowledgeBase?.characters ?? [];
 
@@ -408,7 +487,15 @@ export default function SuggestionPanel({
 
       {error && <div className="suggestion-error">{error}</div>}
 
-      {reportCard && <ReportCard report={reportCard} onImproveMetric={handleImproveMetric} loading={loading} />}
+      {reportCard && (
+        <ReportCard
+          report={reportCard}
+          onImproveMetric={handleImproveMetric}
+          onRewriteMetric={handleRewriteMetric}
+          onFillGaps={handleFillGaps}
+          loading={loading}
+        />
+      )}
 
       {suggestion && lastMode && isAnalysisMode(lastMode) && (
         <AnalysisCard text={suggestion} />

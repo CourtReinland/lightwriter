@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildScriptReportCardPrompt,
+  buildMetricRewritePrompt,
+  buildFillGapsRewritePrompt,
   normalizeReportCard,
+  parseRewriteResponse,
   parseReportCardResponse,
   type ScriptReportCard,
 } from "../src/services/scriptReportCardService";
@@ -40,6 +43,24 @@ const styleProfile: StyleProfile = {
   styleContract: "Use short, image-led action lines and subtext-heavy dialogue.",
   doRules: ["Let silence carry feeling"],
   avoidRules: ["Do not over-explain theme"],
+};
+
+const reportCard: ScriptReportCard = {
+  overallScore: 61,
+  frameworkScores: [{
+    frameworkId: "save-the-cat",
+    frameworkName: "Save the Cat",
+    score: 42,
+    summary: "The midpoint and bad-guys-close-in sections are thin.",
+    beatScores: [
+      { beatName: "Midpoint", expectedPageRange: "pages 45-45", detectedEvidence: "", score: 20, missing: true, suggestions: ["Add a false victory around the book's first major magic reveal."] },
+    ],
+  }],
+  styleScore: { score: 82, matchedTraits: ["short action lines"], drift: [], suggestions: [] },
+  characterScore: { score: 70, summary: "Aliyah voice is clear", suggestions: ["Give Aiden a stronger want."] },
+  pacingScore: { score: 50, summary: "Act 2 is underdeveloped", suggestions: ["Add reversals before the climax."] },
+  topFixes: ["Add a true midpoint reversal"],
+  recommendedNextAction: "Improve against Save the Cat.",
 };
 
 describe("script report card prompt", () => {
@@ -119,5 +140,50 @@ describe("script report card parsing", () => {
       "dan-harmon-story-circle",
     ]);
     expect(normalized.overallScore).toBe(0);
+  });
+});
+
+describe("script rewrite execution prompts", () => {
+  it("builds a metric rewrite prompt that asks for a full revised Fountain script and preserves voice", () => {
+    const prompt = buildMetricRewritePrompt({
+      script: "INT. LIBRARY - NIGHT\n\nALIYAH finds a glowing book.",
+      knowledgeBase: kb,
+      styleProfile,
+      targetPages: 90,
+      reportCard,
+      metricId: "save-the-cat",
+      metricName: "Save the Cat",
+    });
+
+    expect(prompt.system).toContain("Return ONLY valid JSON");
+    expect(prompt.user).toContain("SELECTED REWRITE METRIC: Save the Cat");
+    expect(prompt.user).toContain("Return the complete revised script");
+    expect(prompt.user).toContain("rewrittenScript");
+    expect(prompt.user).toContain("STYLE CONTRACT");
+    expect(prompt.user).toContain("Add a false victory");
+  });
+
+  it("builds a fill-gaps prompt focused on missing beats and target page completion", () => {
+    const prompt = buildFillGapsRewritePrompt({
+      script: "INT. LIBRARY - NIGHT\n\nALIYAH finds a glowing book.",
+      knowledgeBase: kb,
+      styleProfile,
+      targetPages: 120,
+      reportCard,
+      mode: "target_pages",
+    });
+
+    expect(prompt.user).toContain("FILL GAPS / COMPLETE TO TARGET PAGES");
+    expect(prompt.user).toContain("Target pages: 120");
+    expect(prompt.user).toContain("missing beats");
+    expect(prompt.user).toContain("rewrittenScript");
+  });
+
+  it("parses rewrite JSON and strips fenced output", () => {
+    const parsed = parseRewriteResponse("```json\n{\"rewrittenScript\":\"INT. LIBRARY - NIGHT\\n\\nALIYAH opens the book.\",\"changeSummary\":[\"Added midpoint\"],\"warnings\":[]}\n```");
+
+    expect(parsed.rewrittenScript).toContain("ALIYAH opens the book");
+    expect(parsed.changeSummary).toEqual(["Added midpoint"]);
+    expect(parsed.warnings).toEqual([]);
   });
 });

@@ -302,15 +302,25 @@ The AI tab includes **Run Script Report Card**, a whole-script analysis pass tha
 - Character Consistency against KB characters and voice notes
 - Pacing against target page count and escalation/payoff timing
 
-The report card returns 0-100 scores, weakest-beat notes, top fixes, and a recommended next action. Each framework/craft row includes an **Improve Against...** button. That button currently generates a focused improvement plan for that metric; it does not automatically rewrite the script yet.
+The report card returns 0-100 scores, weakest-beat notes, top fixes, and a recommended next action. Each framework/craft row includes:
+
+- **Plan Fix** — generates a focused improvement plan without changing the editor.
+- **Apply Rewrite** — runs a controlled full-script rewrite for that specific metric and replaces the editor text with the revised draft after confirmation.
+
+The report card also includes whole-draft execution buttons:
+
+- **Fill Missing Beats** — expands/reworks the draft around beats the report marked missing or weak.
+- **Complete To Target Pages** — expands toward the project target length using causally connected scenes, reversals, character choices, and payoffs.
+
+Rewrite passes return a complete revised Fountain/plain screenplay plus change-summary and warning fields. Re-run the report card after a rewrite to measure score lift.
 
 Intended loop:
 
 1. Run Report Card
 2. Pick the weakest framework or craft metric
-3. Generate an improvement plan
-4. Review the proposed inserts/rewrites
-5. Apply a later rewrite/fill-gaps pass
+3. Use **Plan Fix** if you want to inspect the strategy first
+4. Use **Apply Rewrite**, **Fill Missing Beats**, or **Complete To Target Pages** to execute a controlled rewrite
+5. Review the change summary and warnings
 6. Re-run the report card
 
 ---

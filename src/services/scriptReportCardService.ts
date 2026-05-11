@@ -57,6 +57,17 @@ export interface ImproveMetricPromptInput extends ScriptReportPromptInput {
   metricName: string;
 }
 
+export interface FillGapsRewritePromptInput extends ScriptReportPromptInput {
+  reportCard: ScriptReportCard;
+  mode: "missing_beats" | "target_pages";
+}
+
+export interface ScriptRewriteResult {
+  rewrittenScript: string;
+  changeSummary: string[];
+  warnings: string[];
+}
+
 function clampScore(value: unknown): number {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -167,6 +178,88 @@ Create a concise improvement plan with:
   };
 }
 
+function selectedMetricPayload(input: ImproveMetricPromptInput): unknown {
+  const framework = input.reportCard.frameworkScores.find((f) => f.frameworkId === input.metricId || f.frameworkName === input.metricName);
+  return framework ??
+    (input.metricId === "style" ? input.reportCard.styleScore : input.metricId === "character" ? input.reportCard.characterScore : input.reportCard.pacingScore);
+}
+
+function rewriteJsonInstructions(): string {
+  return `Return ONLY this JSON shape:
+{
+  "rewrittenScript": "complete revised screenplay in Fountain/plain screenplay format",
+  "changeSummary": ["specific change made"],
+  "warnings": ["risk or unresolved issue, empty if none"]
+}`;
+}
+
+export function buildMetricRewritePrompt(input: ImproveMetricPromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
+  const base = buildScriptReportCardPrompt(input);
+  const metricPayload = selectedMetricPayload(input);
+  return {
+    system: `You are LightWriter's controlled screenplay rewrite engine. Return ONLY valid JSON. Preserve Fountain/plain screenplay formatting. Preserve the writer's style contract, character voices, plot facts, and existing good material. Do not summarize. Do not omit scenes unless explicitly cutting dead weight.`,
+    user: `${base.user}
+
+SELECTED REWRITE METRIC: ${input.metricName} (${input.metricId})
+CURRENT REPORT DETAIL:
+${JSON.stringify(metricPayload, null, 2)}
+
+Rewrite the current script to improve ONLY this selected metric while preserving the rest of the draft.
+Rules:
+- Return the complete revised script, not a patch and not notes.
+- Keep existing scene headings and useful dialogue where they still work.
+- Add, expand, cut, or reorder only what materially improves ${input.metricName}.
+- Preserve the STYLE CONTRACT and target/director style.
+- Preserve KB continuity and character voice.
+- Keep the target length in mind: ${input.targetPages} pages.
+- If the source is short/partial, expand proportionally; do not pad with filler.
+
+${rewriteJsonInstructions()}`,
+    temperature: 0.45,
+    maxTokens: 12000,
+  };
+}
+
+function missingBeatSummary(reportCard: ScriptReportCard): string {
+  return reportCard.frameworkScores
+    .flatMap((framework) => framework.beatScores
+      .filter((beat) => beat.missing || beat.score < 55)
+      .map((beat) => `${framework.frameworkName}: ${beat.beatName} (${beat.expectedPageRange || "no range"}) score ${beat.score}${beat.missing ? " MISSING" : ""}. Suggestions: ${beat.suggestions.join("; ")}`))
+    .join("\n") || "No explicit missing beats were returned; use the lowest report card scores and top fixes.";
+}
+
+export function buildFillGapsRewritePrompt(input: FillGapsRewritePromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
+  const base = buildScriptReportCardPrompt(input);
+  const modeLabel = input.mode === "target_pages" ? "complete toward the target page count" : "fill missing/weak structural beats";
+  return {
+    system: `You are LightWriter's gap-filling screenplay rewrite engine. Return ONLY valid JSON. Preserve screenplay/Fountain formatting, existing strengths, the writer's style contract, KB continuity, and character voices.`,
+    user: `${base.user}
+
+FILL GAPS / COMPLETE TO TARGET PAGES
+Mode: ${modeLabel}
+Target pages: ${input.targetPages}
+
+Priority missing beats / weak beats:
+${missingBeatSummary(input.reportCard)}
+
+Top report-card fixes:
+${input.reportCard.topFixes.map((fix, index) => `${index + 1}. ${fix}`).join("\n") || "No top fixes supplied."}
+
+Rewrite the script as a complete revised draft.
+Rules:
+- Return the complete revised script in rewrittenScript.
+- Fill missing beats with real dramatic scenes, not outline notes.
+- Complete toward target pages by adding causally connected scenes, reversals, character choices, and payoffs.
+- Keep the writer's style contract and target/director style visible in the prose.
+- Keep all additions consistent with the KB and current script.
+- Do not pad. If the current script is extremely short relative to target pages, create a stronger partial expansion and explain limits in warnings.
+
+${rewriteJsonInstructions()}`,
+    temperature: 0.5,
+    maxTokens: 14000,
+  };
+}
+
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fenced) return fenced[1].trim();
@@ -230,6 +323,19 @@ export function parseReportCardResponse(text: string, fallbackFrameworkId?: stri
   return normalizeReportCard(parsed);
 }
 
+export function parseRewriteResponse(text: string): ScriptRewriteResult {
+  const parsed = JSON.parse(extractJson(text)) as Partial<ScriptRewriteResult>;
+  const rewrittenScript = String(parsed.rewrittenScript || "").trim();
+  if (!rewrittenScript) {
+    throw new Error("The rewrite response did not include a rewrittenScript field.");
+  }
+  return {
+    rewrittenScript,
+    changeSummary: asStringArray(parsed.changeSummary),
+    warnings: asStringArray(parsed.warnings),
+  };
+}
+
 export async function runScriptReportCard(input: ScriptReportPromptInput): Promise<ScriptReportCard> {
   const prompt = buildScriptReportCardPrompt(input);
   const service = new TextAiService();
@@ -247,4 +353,24 @@ export async function generateMetricImprovementPlan(input: ImproveMetricPromptIn
     temperature: prompt.temperature,
     maxTokens: prompt.maxTokens,
   });
+}
+
+export async function rewriteScriptForMetric(input: ImproveMetricPromptInput): Promise<ScriptRewriteResult> {
+  const prompt = buildMetricRewritePrompt(input);
+  const service = new TextAiService();
+  const response = await service.complete(prompt.system, prompt.user, {
+    temperature: prompt.temperature,
+    maxTokens: prompt.maxTokens,
+  });
+  return parseRewriteResponse(response);
+}
+
+export async function fillScriptGaps(input: FillGapsRewritePromptInput): Promise<ScriptRewriteResult> {
+  const prompt = buildFillGapsRewritePrompt(input);
+  const service = new TextAiService();
+  const response = await service.complete(prompt.system, prompt.user, {
+    temperature: prompt.temperature,
+    maxTokens: prompt.maxTokens,
+  });
+  return parseRewriteResponse(response);
 }

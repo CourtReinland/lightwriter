@@ -40,7 +40,8 @@
 .report-score.low { color: #fb7185; }
 
 .report-copy-btn,
-.report-improve-btn {
+.report-improve-btn,
+.report-rewrite-btn {
   font-family: inherit;
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -116,10 +117,29 @@
   color: #aaa;
 }
 
-.report-improve-btn {
-  width: 100%;
-  margin-top: 6px;
+.report-improve-btn,
+.report-rewrite-btn.small {
+  margin-top: 0;
   padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 8px;
+}
+
+.report-row-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.report-action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.report-improve-btn {
   background: #242424;
   border: 1px solid #444;
   color: #aaa;
@@ -133,6 +153,28 @@
   border-color: #666;
 }
 
+.report-rewrite-btn {
+  padding: 6px 8px;
+  background: #1c2230;
+  border: 1px solid #475569;
+  color: #cbd5e1;
+  border-radius: 3px;
+  font-size: 8px;
+}
+
+.report-rewrite-btn.small {
+  background: #25202a;
+  border-color: #5b426d;
+  color: #d8b4fe;
+}
+
+.report-rewrite-btn:hover:not(:disabled) {
+  background: #2f3b52;
+  border-color: #64748b;
+  color: #fff;
+}
+
+.report-rewrite-btn:disabled,
 .report-improve-btn:disabled {
   opacity: 0.4;
   cursor: default;

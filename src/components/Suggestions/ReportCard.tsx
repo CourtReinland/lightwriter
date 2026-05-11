@@ -4,10 +4,12 @@ import "./ReportCard.css";
 interface ReportCardProps {
   report: ScriptReportCard;
   onImproveMetric: (metricId: string, metricName: string) => void;
+  onRewriteMetric: (metricId: string, metricName: string) => void;
+  onFillGaps: (mode: "missing_beats" | "target_pages") => void;
   loading?: boolean;
 }
 
-export default function ReportCard({ report, onImproveMetric, loading = false }: ReportCardProps) {
+export default function ReportCard({ report, onImproveMetric, onRewriteMetric, onFillGaps, loading = false }: ReportCardProps) {
   return (
     <div className="script-report-card">
       <div className="report-header">
@@ -22,15 +24,20 @@ export default function ReportCard({ report, onImproveMetric, loading = false }:
         <div className="report-recommendation">{report.recommendedNextAction}</div>
       )}
 
+      <div className="report-action-row">
+        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("missing_beats")}>Fill Missing Beats</button>
+        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("target_pages")}>Complete To Target Pages</button>
+      </div>
+
       <div className="report-section-title">Frameworks</div>
       {report.frameworkScores.map((framework) => (
-        <FrameworkRow key={framework.frameworkId} framework={framework} disabled={loading} onImproveMetric={onImproveMetric} />
+        <FrameworkRow key={framework.frameworkId} framework={framework} disabled={loading} onImproveMetric={onImproveMetric} onRewriteMetric={onRewriteMetric} />
       ))}
 
       <div className="report-section-title">Craft Metrics</div>
-      <CraftRow id="style" name="Style Match" score={report.styleScore.score} summary={formatStyleSummary(report.styleScore)} disabled={loading} onImproveMetric={onImproveMetric} />
-      <CraftRow id="character" name="Character Consistency" score={report.characterScore.score} summary={formatSimpleSummary(report.characterScore)} disabled={loading} onImproveMetric={onImproveMetric} />
-      <CraftRow id="pacing" name="Pacing" score={report.pacingScore.score} summary={formatSimpleSummary(report.pacingScore)} disabled={loading} onImproveMetric={onImproveMetric} />
+      <CraftRow id="style" name="Style Match" score={report.styleScore.score} summary={formatStyleSummary(report.styleScore)} disabled={loading} onImproveMetric={onImproveMetric} onRewriteMetric={onRewriteMetric} />
+      <CraftRow id="character" name="Character Consistency" score={report.characterScore.score} summary={formatSimpleSummary(report.characterScore)} disabled={loading} onImproveMetric={onImproveMetric} onRewriteMetric={onRewriteMetric} />
+      <CraftRow id="pacing" name="Pacing" score={report.pacingScore.score} summary={formatSimpleSummary(report.pacingScore)} disabled={loading} onImproveMetric={onImproveMetric} onRewriteMetric={onRewriteMetric} />
 
       {report.topFixes.length > 0 && (
         <div className="report-fixes">
@@ -44,7 +51,7 @@ export default function ReportCard({ report, onImproveMetric, loading = false }:
   );
 }
 
-function FrameworkRow({ framework, disabled, onImproveMetric }: { framework: FrameworkReportScore; disabled: boolean; onImproveMetric: (metricId: string, metricName: string) => void }) {
+function FrameworkRow({ framework, disabled, onImproveMetric, onRewriteMetric }: { framework: FrameworkReportScore; disabled: boolean; onImproveMetric: (metricId: string, metricName: string) => void; onRewriteMetric: (metricId: string, metricName: string) => void }) {
   const lowestBeat = [...framework.beatScores].sort((a, b) => a.score - b.score)[0];
   return (
     <div className="report-row">
@@ -58,14 +65,19 @@ function FrameworkRow({ framework, disabled, onImproveMetric }: { framework: Fra
           Weakest: {lowestBeat.beatName} ({lowestBeat.score}){lowestBeat.missing ? " — missing" : ""}
         </div>
       )}
-      <button className="report-improve-btn" disabled={disabled} onClick={() => onImproveMetric(framework.frameworkId, framework.frameworkName)}>
-        Improve Against {framework.frameworkName}
-      </button>
+      <div className="report-row-actions">
+        <button className="report-improve-btn" disabled={disabled} onClick={() => onImproveMetric(framework.frameworkId, framework.frameworkName)}>
+          Plan Fix
+        </button>
+        <button className="report-rewrite-btn small" disabled={disabled} onClick={() => onRewriteMetric(framework.frameworkId, framework.frameworkName)}>
+          Apply Rewrite
+        </button>
+      </div>
     </div>
   );
 }
 
-function CraftRow({ id, name, score, summary, disabled, onImproveMetric }: { id: string; name: string; score: number; summary: string; disabled: boolean; onImproveMetric: (metricId: string, metricName: string) => void }) {
+function CraftRow({ id, name, score, summary, disabled, onImproveMetric, onRewriteMetric }: { id: string; name: string; score: number; summary: string; disabled: boolean; onImproveMetric: (metricId: string, metricName: string) => void; onRewriteMetric: (metricId: string, metricName: string) => void }) {
   return (
     <div className="report-row compact">
       <div className="report-row-main">
@@ -73,9 +85,14 @@ function CraftRow({ id, name, score, summary, disabled, onImproveMetric }: { id:
         <span className={`report-score ${scoreClass(score)}`}>{score}</span>
       </div>
       {summary && <div className="report-row-summary">{summary}</div>}
-      <button className="report-improve-btn" disabled={disabled} onClick={() => onImproveMetric(id, name)}>
-        Improve {name}
-      </button>
+      <div className="report-row-actions">
+        <button className="report-improve-btn" disabled={disabled} onClick={() => onImproveMetric(id, name)}>
+          Plan Fix
+        </button>
+        <button className="report-rewrite-btn small" disabled={disabled} onClick={() => onRewriteMetric(id, name)}>
+          Apply Rewrite
+        </button>
+      </div>
     </div>
   );
 }
