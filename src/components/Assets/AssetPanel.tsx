@@ -35,7 +35,7 @@ import {
   textAiProviderOptions,
   type TextAiProvider,
 } from "../../services/textAiSettingsService";
-import { parseCharactersWithTextAi } from "../../services/characterParserService";
+import { parseCharactersWithTextAi, buildCharacterAssetPrompt } from "../../services/characterParserService";
 import "./AssetPanel.css";
 
 interface AssetPanelProps {
@@ -66,7 +66,6 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const [provider, setProvider] = useState<AssetProvider>("gemini-nano-banana");
   const [sourceKind, setSourceKind] = useState<SourceKind>("scene_set");
   const [selectedKey, setSelectedKey] = useState("0");
-  const [userPrompt, setUserPrompt] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [modelOptions, setModelOptions] = useState(() => getImageModelOptions("gemini-nano-banana"));
@@ -97,6 +96,15 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const effectiveModel = selectedModel;
   const styleReference = sourceKind === "character" ? characterStyleReference : sceneStyleReference;
   const [settingsReadyProvider, setSettingsReadyProvider] = useState<AssetProvider | null>(null);
+
+  const seedCharacterPromptDrafts = (parsedCharacters: ScriptCharacterRef[]) => {
+    if (!parsedCharacters.length) return;
+    const nextDrafts = Object.fromEntries(
+      parsedCharacters.map((character, index) => [promptDraftKey("character", String(index)), buildCharacterAssetPrompt(character)]),
+    );
+    setPromptDrafts(nextDrafts);
+    setPromptOverride(nextDrafts[promptDraftKey("character", selectedKey)] || nextDrafts[promptDraftKey("character", "0")] || "");
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +204,7 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
     const apiKey = textAiKeyDrafts[textAiProvider]?.trim();
     if (!apiKey) {
       setAiParsedCharacters(null);
+      seedCharacterPromptDrafts(deterministicCharacters);
       setCharacterParserMessage(
         deterministicCharacters.length
           ? `Using local Fountain character cues (${deterministicCharacters.length}). Add a ${textAiProviderLabel(textAiProvider)} key in Settings for the LLM parser.`
@@ -205,6 +214,7 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
     }
 
     let cancelled = false;
+    seedCharacterPromptDrafts(deterministicCharacters);
     setIsParsingCharacters(true);
     setCharacterParserMessage(`Parsing characters with ${textAiProviderLabel(textAiProvider)}...`);
     parseCharactersWithTextAi(project.content)
@@ -212,6 +222,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
         if (cancelled) return;
         setAiParsedCharacters(parsed);
         setSelectedKey("0");
+        if (parsed.length) {
+          seedCharacterPromptDrafts(parsed);
+        }
         setCharacterParserMessage(
           parsed.length
             ? `${textAiProviderLabel(textAiProvider)} parser found ${parsed.length} character${parsed.length === 1 ? "" : "s"}.`
@@ -254,11 +267,17 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   useEffect(() => {
     setPromptDrafts({});
     setPromptOverride("");
-  }, [project.id, project.content, sourceKind, userPrompt, styleReference]);
+  }, [project.id, project.content, sourceKind, styleReference]);
 
   useEffect(() => {
     setPromptOverride(promptDrafts[selectedPromptDraftKey] || "");
   }, [promptDrafts, selectedPromptDraftKey]);
+
+  useEffect(() => {
+    if (activeTab !== "characters" || sourceKind !== "character") return;
+    if (promptDrafts[selectedPromptDraftKey]) return;
+    seedCharacterPromptDrafts(characters);
+  }, [activeTab, sourceKind, selectedPromptDraftKey, characters, promptDrafts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -362,7 +381,7 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
     shot: sourceKind === "shot" ? (choice as ScriptShotRef) : undefined,
     fullScriptContent: project.content,
     styleReference,
-    userPrompt,
+    userPrompt: "",
   });
 
   const buildPromptForChoice = async (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef): Promise<string> => {
@@ -670,15 +689,6 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
               {isParsingCharacters ? "LLM character parser running..." : characterParserMessage || `Using ${characters.length} parsed character${characters.length === 1 ? "" : "s"}.`}
             </p>
           )}
-
-          <label>
-            User prompt additions
-            <textarea
-              value={userPrompt}
-              onChange={(event) => setUserPrompt(event.target.value)}
-              placeholder="Add visual style, era, camera/lens, palette, wardrobe, exclusions..."
-            />
-          </label>
 
           <section className="asset-settings-box asset-style-reference-box">
             <h3>{activeTab === "characters" ? "Character Style Reference" : "Scene Style Reference"}</h3>

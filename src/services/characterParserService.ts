@@ -53,6 +53,16 @@ export function normalizeParsedCharacters(characters: ParsedCharacter[]): Script
   return Array.from(byName.values());
 }
 
+export function buildCharacterAssetPrompt(character: ScriptCharacterRef): string {
+  const evidence = character.evidence.filter(Boolean).slice(0, 3).join(" ");
+  const description = character.description || evidence || "screenplay character";
+  return [
+    `Full-body character design portrait of ${character.name}.`,
+    description,
+    "Cinematic concept art, clear readable silhouette, wardrobe and facial features consistent with the screenplay context, neutral background, no text, no logos.",
+  ].filter(Boolean).join(" ");
+}
+
 export async function parseCharactersWithTextAi(script: string, service = new TextAiService()): Promise<ScriptCharacterRef[]> {
   const truncated = script.length > 60000 ? script.slice(0, 60000) : script;
   const system = `You are a screenplay character parser. Extract ONLY real speaking or described story characters from the screenplay.

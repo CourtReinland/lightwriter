@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { normalizeParsedCharacters, parseCharactersWithTextAi } from "../src/services/characterParserService";
+import { normalizeParsedCharacters, parseCharactersWithTextAi, buildCharacterAssetPrompt } from "../src/services/characterParserService";
 
 class FakeTextAiService {
   complete = vi.fn();
@@ -33,5 +33,18 @@ describe("characterParserService", () => {
     expect(service.complete).toHaveBeenCalledTimes(1);
     expect(service.complete.mock.calls[0][0]).toContain("screenplay character parser");
     expect(characters.map((character) => character.name)).toEqual(["AIDEN", "ALIYAH"]);
+  });
+
+  it("builds an immediately editable asset prompt from parsed character descriptions", () => {
+    const prompt = buildCharacterAssetPrompt({
+      name: "ALIYAH",
+      description: "skeptical friend with a guarded expression",
+      firstLine: 12,
+      evidence: ["ALIYAH looks toward him disbelievingly"],
+    });
+
+    expect(prompt).toContain("ALIYAH");
+    expect(prompt).toContain("skeptical friend");
+    expect(prompt).toContain("no text");
   });
 });

@@ -19,7 +19,7 @@ import {
   providerLabel,
   type ImageGenerationRequest,
 } from "../../services/imageGenerationService";
-import { loadPersistedImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
 import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
 import "./KBPanel.css";
@@ -74,6 +74,8 @@ export default function KBPanel({
   const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
   const [repromptProvider, setRepromptProvider] = useState<AssetProvider>("gemini-nano-banana");
   const [repromptingAssetId, setRepromptingAssetId] = useState<string | null>(null);
+  const [repromptTarget, setRepromptTarget] = useState<GeneratedAsset | null>(null);
+  const [repromptDraft, setRepromptDraft] = useState("");
   const [repromptError, setRepromptError] = useState<string | null>(null);
 
   const characterAssetItems = buildAssetKnowledgeItems(assets, kb, "character");
@@ -223,7 +225,26 @@ export default function KBPanel({
     }
   }, [styleSample, projectId, onStyleChange]);
 
-  const handleRepromptAsset = useCallback(async (asset: GeneratedAsset) => {
+  const handleOpenReprompt = useCallback((asset: GeneratedAsset) => {
+    setRepromptTarget(asset);
+    setRepromptDraft(asset.prompt || "");
+    setRepromptError(null);
+  }, []);
+
+  const handleDownloadAsset = useCallback((asset: GeneratedAsset) => {
+    const dataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+    if (!dataUrl) {
+      setRepromptError(asset.filePath ? `Preview is still loading from ${asset.filePath}. Try again in a moment.` : "No saved image data is available to download yet.");
+      return;
+    }
+    downloadImageDataUrl({ name: asset.name, mimeType: asset.mimeType, dataUrl });
+  }, [assetPreviewDataUrls]);
+
+  const handleRepromptAsset = useCallback(async (asset: GeneratedAsset, promptText: string = asset.prompt) => {
+    if (!promptText.trim()) {
+      setRepromptError("Edit or restore the prior prompt before re-prompting.");
+      return;
+    }
     const settings = getImageProviderSettings(repromptProvider);
     if (!settings.apiKey?.trim()) {
       setRepromptError(`Add a ${providerLabel(repromptProvider)} API key in Assets/Settings first.`);
@@ -243,7 +264,7 @@ export default function KBPanel({
         provider: repromptProvider,
         model: settings.selectedModel,
         name: `${asset.name} reroll`,
-        prompt: asset.prompt,
+        prompt: promptText.trim(),
         negativePrompt: asset.negativePrompt,
         scriptRef: asset.scriptRef,
         aspectRatio: typeof asset.metadata.aspectRatio === "string" ? asset.metadata.aspectRatio : asset.kind === "character" ? "2:3" : "16:9",
@@ -266,6 +287,8 @@ export default function KBPanel({
         },
       });
       onAssetsChange(AssetService.getAssets(asset.projectId));
+      setRepromptTarget(null);
+      setRepromptDraft("");
     } catch (error) {
       setRepromptError(error instanceof Error ? error.message : "Re-prompt failed.");
     } finally {
@@ -286,6 +309,37 @@ export default function KBPanel({
     };
     input.click();
   }, []);
+
+  const renderGeneratedAssetDetails = (asset: GeneratedAsset) => {
+    const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+    const isEditingReprompt = repromptTarget?.id === asset.id;
+    return (
+      <>
+        {asset.filePath && (
+          <div className="kb-asset-file">
+            <span>Local file</span>
+            <a href={`file://${asset.filePath}`} title={asset.filePath}>{asset.filePath}</a>
+          </div>
+        )}
+        <div className="kb-entry-actions kb-asset-actions">
+          <button onClick={() => handleOpenReprompt(asset)}>Re-prompt</button>
+          <button onClick={() => handleDownloadAsset(asset)} disabled={!previewDataUrl}>Download</button>
+        </div>
+        {isEditingReprompt && (
+          <div className="kb-reprompt-editor">
+            <label>Prior prompt / edit before re-prompting</label>
+            <textarea value={repromptDraft} onChange={(event) => setRepromptDraft(event.target.value)} />
+            <div className="kb-entry-actions">
+              <button onClick={() => handleRepromptAsset(asset, repromptDraft)} disabled={repromptingAssetId === asset.id}>
+                {repromptingAssetId === asset.id ? "Generating..." : "Generate Re-prompt"}
+              </button>
+              <button onClick={() => { setRepromptTarget(null); setRepromptDraft(""); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="kb-panel">
@@ -338,9 +392,7 @@ export default function KBPanel({
                   <div className="kb-asset-body">
                     <div className="kb-entry-name">{title}</div>
                     <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
-                    <div className="kb-entry-actions">
-                      <button onClick={() => handleRepromptAsset(asset)} disabled={repromptingAssetId === asset.id}>{repromptingAssetId === asset.id ? "Re-prompting..." : "Re-prompt"}</button>
-                    </div>
+                    {renderGeneratedAssetDetails(asset)}
                   </div>
                 </div>
               );
@@ -375,9 +427,7 @@ export default function KBPanel({
                   <div className="kb-asset-body">
                     <div className="kb-entry-name">{title}</div>
                     <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
-                    <div className="kb-entry-actions">
-                      <button onClick={() => handleRepromptAsset(asset)} disabled={repromptingAssetId === asset.id}>{repromptingAssetId === asset.id ? "Re-prompting..." : "Re-prompt"}</button>
-                    </div>
+                    {renderGeneratedAssetDetails(asset)}
                   </div>
                 </div>
               );
