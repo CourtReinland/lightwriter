@@ -6,6 +6,8 @@ import {
   normalizeReportCard,
   parseRewriteResponse,
   parseReportCardResponse,
+  summarizeRewriteDiff,
+  compareReportCards,
   type ScriptReportCard,
 } from "../src/services/scriptReportCardService";
 import type { KnowledgeBase } from "../src/services/knowledgeBase";
@@ -185,5 +187,36 @@ describe("script rewrite execution prompts", () => {
     expect(parsed.rewrittenScript).toContain("ALIYAH opens the book");
     expect(parsed.changeSummary).toEqual(["Added midpoint"]);
     expect(parsed.warnings).toEqual([]);
+  });
+});
+
+describe("rewrite review helpers", () => {
+  it("summarizes line, character, and scene-heading deltas for review before accept/revert", () => {
+    const summary = summarizeRewriteDiff(
+      "INT. LIBRARY - NIGHT\n\nALIYAH finds a book.",
+      "INT. LIBRARY - NIGHT\n\nALIYAH opens a glowing book.\n\nEXT. ROOFTOP - DAWN\n\nShe runs.",
+    );
+
+    expect(summary.beforeLines).toBe(3);
+    expect(summary.afterLines).toBe(7);
+    expect(summary.lineDelta).toBe(4);
+    expect(summary.sceneHeadingDelta).toBe(1);
+    expect(summary.changedLineCount).toBeGreaterThan(0);
+  });
+
+  it("compares before and after report cards with score deltas and top improved metric", () => {
+    const after: ScriptReportCard = {
+      ...reportCard,
+      overallScore: 76,
+      frameworkScores: reportCard.frameworkScores.map((framework) => ({ ...framework, score: framework.score + 20 })),
+      pacingScore: { ...reportCard.pacingScore, score: 65 },
+    };
+
+    const comparison = compareReportCards(reportCard, after);
+
+    expect(comparison.overallDelta).toBe(15);
+    expect(comparison.metricDeltas.find((m) => m.id === "save-the-cat")?.delta).toBe(20);
+    expect(comparison.metricDeltas.find((m) => m.id === "pacing")?.delta).toBe(15);
+    expect(comparison.topImprovement?.id).toBe("save-the-cat");
   });
 });

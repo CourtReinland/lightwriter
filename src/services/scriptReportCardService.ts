@@ -68,6 +68,35 @@ export interface ScriptRewriteResult {
   warnings: string[];
 }
 
+export interface RewriteDiffSummary {
+  beforeLines: number;
+  afterLines: number;
+  lineDelta: number;
+  beforeCharacters: number;
+  afterCharacters: number;
+  characterDelta: number;
+  beforeSceneHeadings: number;
+  afterSceneHeadings: number;
+  sceneHeadingDelta: number;
+  changedLineCount: number;
+}
+
+export interface ReportMetricDelta {
+  id: string;
+  name: string;
+  before: number;
+  after: number;
+  delta: number;
+}
+
+export interface ReportCardComparison {
+  beforeOverall: number;
+  afterOverall: number;
+  overallDelta: number;
+  metricDeltas: ReportMetricDelta[];
+  topImprovement: ReportMetricDelta | null;
+}
+
 function clampScore(value: unknown): number {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -333,6 +362,65 @@ export function parseRewriteResponse(text: string): ScriptRewriteResult {
     rewrittenScript,
     changeSummary: asStringArray(parsed.changeSummary),
     warnings: asStringArray(parsed.warnings),
+  };
+}
+
+function sceneHeadingCount(script: string): number {
+  return script
+    .split("\n")
+    .filter((line) => /^(INT\.|EXT\.|INT\/EXT\.|I\/E\.)/i.test(line.trim()))
+    .length;
+}
+
+export function summarizeRewriteDiff(beforeScript: string, afterScript: string): RewriteDiffSummary {
+  const beforeLines = beforeScript.split("\n");
+  const afterLines = afterScript.split("\n");
+  const max = Math.max(beforeLines.length, afterLines.length);
+  let changedLineCount = 0;
+  for (let i = 0; i < max; i += 1) {
+    if ((beforeLines[i] || "") !== (afterLines[i] || "")) changedLineCount += 1;
+  }
+  const beforeSceneHeadings = sceneHeadingCount(beforeScript);
+  const afterSceneHeadings = sceneHeadingCount(afterScript);
+  return {
+    beforeLines: beforeLines.length,
+    afterLines: afterLines.length,
+    lineDelta: afterLines.length - beforeLines.length,
+    beforeCharacters: beforeScript.length,
+    afterCharacters: afterScript.length,
+    characterDelta: afterScript.length - beforeScript.length,
+    beforeSceneHeadings,
+    afterSceneHeadings,
+    sceneHeadingDelta: afterSceneHeadings - beforeSceneHeadings,
+    changedLineCount,
+  };
+}
+
+export function compareReportCards(before: ScriptReportCard, after: ScriptReportCard): ReportCardComparison {
+  const frameworkDeltas = before.frameworkScores.map((beforeFramework) => {
+    const afterFramework = after.frameworkScores.find((framework) => framework.frameworkId === beforeFramework.frameworkId || framework.frameworkName === beforeFramework.frameworkName);
+    const afterScore = clampScore(afterFramework?.score);
+    return {
+      id: beforeFramework.frameworkId,
+      name: beforeFramework.frameworkName,
+      before: clampScore(beforeFramework.score),
+      after: afterScore,
+      delta: afterScore - clampScore(beforeFramework.score),
+    };
+  });
+  const craftDeltas: ReportMetricDelta[] = [
+    { id: "style", name: "Style Match", before: clampScore(before.styleScore.score), after: clampScore(after.styleScore.score), delta: clampScore(after.styleScore.score) - clampScore(before.styleScore.score) },
+    { id: "character", name: "Character Consistency", before: clampScore(before.characterScore.score), after: clampScore(after.characterScore.score), delta: clampScore(after.characterScore.score) - clampScore(before.characterScore.score) },
+    { id: "pacing", name: "Pacing", before: clampScore(before.pacingScore.score), after: clampScore(after.pacingScore.score), delta: clampScore(after.pacingScore.score) - clampScore(before.pacingScore.score) },
+  ];
+  const metricDeltas = [...frameworkDeltas, ...craftDeltas];
+  const topImprovement = metricDeltas.length ? [...metricDeltas].sort((a, b) => b.delta - a.delta)[0] : null;
+  return {
+    beforeOverall: clampScore(before.overallScore),
+    afterOverall: clampScore(after.overallScore),
+    overallDelta: clampScore(after.overallScore) - clampScore(before.overallScore),
+    metricDeltas,
+    topImprovement: topImprovement && topImprovement.delta > 0 ? topImprovement : null,
   };
 }
 

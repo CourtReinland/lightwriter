@@ -312,7 +312,12 @@ The report card also includes whole-draft execution buttons:
 - **Fill Missing Beats** — expands/reworks the draft around beats the report marked missing or weak.
 - **Complete To Target Pages** — expands toward the project target length using causally connected scenes, reversals, character choices, and payoffs.
 
-Rewrite passes return a complete revised Fountain/plain screenplay plus change-summary and warning fields. Re-run the report card after a rewrite to measure score lift.
+Rewrite passes return a complete revised Fountain/plain screenplay plus change-summary and warning fields. After a rewrite, LightWriter now creates an in-panel **Rewrite Review** snapshot with before/after line, character, and scene-heading deltas. From there you can:
+
+- **Re-score After Rewrite** — runs a fresh report card on the revised draft and compares before/after scores.
+- **Revert Rewrite** — restores the saved pre-rewrite draft snapshot.
+- **Accept Rewrite** — marks the revised draft as accepted and keeps it in the editor.
+- **Copy Revised** — copies the revised full script.
 
 Intended loop:
 
@@ -320,8 +325,8 @@ Intended loop:
 2. Pick the weakest framework or craft metric
 3. Use **Plan Fix** if you want to inspect the strategy first
 4. Use **Apply Rewrite**, **Fill Missing Beats**, or **Complete To Target Pages** to execute a controlled rewrite
-5. Review the change summary and warnings
-6. Re-run the report card
+5. Review the Rewrite Review snapshot, then Accept, Revert, or Re-score After Rewrite
+6. Continue iterating from the before/after score comparison
 
 ---
 

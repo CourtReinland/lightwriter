@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
-import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, type ScriptReportCard, type ScriptRewriteResult } from "../../services/scriptReportCardService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison } from "../../services/scriptReportCardService";
 import {
   generate,
   isAnalysisMode,
@@ -15,6 +15,7 @@ import ApiKeyDialog from "./ApiKeyDialog";
 import SuggestionCard from "./SuggestionCard";
 import AnalysisCard from "./AnalysisCard";
 import ReportCard from "./ReportCard";
+import RewriteReviewCard from "./RewriteReviewCard";
 import "./SuggestionPanel.css";
 
 interface SuggestionPanelProps {
@@ -29,6 +30,19 @@ interface SuggestionPanelProps {
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
+}
+
+interface RewriteReviewState {
+  id: number;
+  label: string;
+  beforeScript: string;
+  afterScript: string;
+  beforeReport: ScriptReportCard;
+  afterReport: ScriptReportCard | null;
+  comparison: ReportCardComparison | null;
+  result: ScriptRewriteResult;
+  diff: RewriteDiffSummary;
+  accepted: boolean;
 }
 
 const WRITING_MODES: { id: OrchestratorMode; label: string; icon: string }[] = [
@@ -74,7 +88,7 @@ export default function SuggestionPanel({
   const [charSelect, setCharSelect] = useState<string>("");
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
-  const [lastRewriteResult, setLastRewriteResult] = useState<ScriptRewriteResult | null>(null);
+  const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -189,7 +203,7 @@ export default function SuggestionPanel({
         targetPages,
       });
       setReportCard(report);
-      setLastRewriteResult(null);
+      setRewriteReview(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Report card failed");
     } finally {
@@ -246,10 +260,21 @@ export default function SuggestionPanel({
     return true;
   }, [fullScript, reportCard]);
 
-  const applyRewriteResult = useCallback((result: ScriptRewriteResult, label: string) => {
+  const applyRewriteResult = useCallback((result: ScriptRewriteResult, label: string, beforeScript: string, beforeReport: ScriptReportCard) => {
     onReplaceScript(result.rewrittenScript);
-    setLastRewriteResult(result);
-    setSuggestion(`${label} complete. The editor has been replaced with the revised full script.\n\nChanges:\n${result.changeSummary.map((item) => `- ${item}`).join("\n") || "- Rewrite completed."}${result.warnings.length ? `\n\nWarnings:\n${result.warnings.map((item) => `- ${item}`).join("\n")}` : ""}`);
+    setRewriteReview({
+      id: Date.now(),
+      label,
+      beforeScript,
+      afterScript: result.rewrittenScript,
+      beforeReport,
+      afterReport: null,
+      comparison: null,
+      result,
+      diff: summarizeRewriteDiff(beforeScript, result.rewrittenScript),
+      accepted: false,
+    });
+    setSuggestion(`${label} complete. The editor has been replaced with the revised full script. Review the snapshot below, then Accept, Revert, or Re-score After Rewrite.`);
     setLastMode(null);
   }, [onReplaceScript]);
 
@@ -271,7 +296,7 @@ export default function SuggestionPanel({
         metricId,
         metricName,
       });
-      applyRewriteResult(result, `${metricName} rewrite`);
+      applyRewriteResult(result, `${metricName} rewrite`, fullScript, reportCard);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Metric rewrite failed");
     } finally {
@@ -297,13 +322,67 @@ export default function SuggestionPanel({
         reportCard,
         mode,
       });
-      applyRewriteResult(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill");
+      applyRewriteResult(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill", fullScript, reportCard);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
     } finally {
       setLoading(false);
     }
   }, [applyRewriteResult, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+
+  const handleReScoreRewrite = useCallback(async () => {
+    if (!rewriteReview) return;
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    try {
+      const afterReport = await runScriptReportCard({
+        script: rewriteReview.afterScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+      });
+      const comparison = compareReportCards(rewriteReview.beforeReport, afterReport);
+      setReportCard(afterReport);
+      setRewriteReview((current) => current && current.id === rewriteReview.id ? { ...current, afterReport, comparison } : current);
+      setSuggestion(`Re-score complete. Overall score ${comparison.beforeOverall} -> ${comparison.afterOverall} (${comparison.overallDelta > 0 ? "+" : ""}${comparison.overallDelta}).`);
+      setLastMode(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-score after rewrite failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [knowledgeBase, rewriteReview, styleProfile, targetPages]);
+
+  const handleAcceptRewrite = useCallback(() => {
+    if (!rewriteReview) return;
+    setRewriteReview({ ...rewriteReview, accepted: true });
+    setSuggestion("Rewrite accepted. You can continue editing or run another report card pass.");
+    setLastMode(null);
+  }, [rewriteReview]);
+
+  const handleRevertRewrite = useCallback(() => {
+    if (!rewriteReview) return;
+    const confirmed = window.confirm("Revert to the pre-rewrite snapshot? This replaces the editor text with the saved pre-rewrite draft.");
+    if (!confirmed) return;
+    onReplaceScript(rewriteReview.beforeScript);
+    setReportCard(rewriteReview.beforeReport);
+    setSuggestion("Rewrite reverted. The editor has been restored to the pre-rewrite snapshot.");
+    setLastMode(null);
+    setRewriteReview(null);
+  }, [onReplaceScript, rewriteReview]);
+
+  const handleCopyRewriteScript = useCallback(() => {
+    if (!rewriteReview) return;
+    navigator.clipboard.writeText(rewriteReview.afterScript);
+  }, [rewriteReview]);
 
   const characters = knowledgeBase?.characters ?? [];
 
@@ -494,6 +573,23 @@ export default function SuggestionPanel({
           onRewriteMetric={handleRewriteMetric}
           onFillGaps={handleFillGaps}
           loading={loading}
+        />
+      )}
+
+      {rewriteReview && (
+        <RewriteReviewCard
+          label={rewriteReview.label}
+          result={rewriteReview.result}
+          diff={rewriteReview.diff}
+          beforeReport={rewriteReview.beforeReport}
+          afterReport={rewriteReview.afterReport}
+          comparison={rewriteReview.comparison}
+          loading={loading}
+          accepted={rewriteReview.accepted}
+          onRescore={handleReScoreRewrite}
+          onAccept={handleAcceptRewrite}
+          onRevert={handleRevertRewrite}
+          onCopyScript={handleCopyRewriteScript}
         />
       )}
 
