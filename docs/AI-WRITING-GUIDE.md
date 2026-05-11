@@ -289,7 +289,33 @@ To clear: click **Clear**.
 
 ---
 
-## 6. Recommended Workflow
+## 6. Script Report Card (AI tab)
+
+The AI tab includes **Run Script Report Card**, a whole-script analysis pass that scores the current draft against:
+
+- Hero's Journey
+- Save the Cat
+- Propp's Functions
+- Aristotle / Three Act structure
+- Dan Harmon Story Circle
+- Style Match against the KB style contract and target/director style
+- Character Consistency against KB characters and voice notes
+- Pacing against target page count and escalation/payoff timing
+
+The report card returns 0-100 scores, weakest-beat notes, top fixes, and a recommended next action. Each framework/craft row includes an **Improve Against...** button. That button currently generates a focused improvement plan for that metric; it does not automatically rewrite the script yet.
+
+Intended loop:
+
+1. Run Report Card
+2. Pick the weakest framework or craft metric
+3. Generate an improvement plan
+4. Review the proposed inserts/rewrites
+5. Apply a later rewrite/fill-gaps pass
+6. Re-run the report card
+
+---
+
+## 7. Recommended Workflow
 
 Here's how to get the most out of LightWriter's AI for a new project:
 
@@ -324,7 +350,7 @@ Here's how to get the most out of LightWriter's AI for a new project:
 
 ---
 
-## 7. Tips & Gotchas
+## 8. Tips & Gotchas
 
 - **Keep voice notes specific.** "Speaks formally" is weak. "Uses Victorian-era English with elaborate metaphors and avoids contractions" gives the AI something to work with.
 
@@ -344,7 +370,7 @@ Here's how to get the most out of LightWriter's AI for a new project:
 
 ---
 
-## 8. Privacy
+## 9. Privacy
 
 - All data stays in your browser (localStorage)
 - API keys are never sent anywhere except to xAI's API
@@ -353,7 +379,7 @@ Here's how to get the most out of LightWriter's AI for a new project:
 
 ---
 
-## 9. What's Where
+## 10. What's Where
 
 | Feature | Location |
 |---------|----------|

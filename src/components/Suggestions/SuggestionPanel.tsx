@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
+import { runScriptReportCard, generateMetricImprovementPlan, type ScriptReportCard } from "../../services/scriptReportCardService";
 import {
   generate,
   isAnalysisMode,
@@ -13,6 +14,7 @@ import type { ComputedBeat } from "../../frameworks/utils";
 import ApiKeyDialog from "./ApiKeyDialog";
 import SuggestionCard from "./SuggestionCard";
 import AnalysisCard from "./AnalysisCard";
+import ReportCard from "./ReportCard";
 import "./SuggestionPanel.css";
 
 interface SuggestionPanelProps {
@@ -71,6 +73,7 @@ export default function SuggestionPanel({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [charSelect, setCharSelect] = useState<string>("");
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
+  const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -161,6 +164,68 @@ export default function SuggestionPanel({
     handleSuggest("custom", customPrompt.trim());
   }, [customPrompt, handleSuggest]);
 
+  const handleReportCard = useCallback(async () => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+    if (!fullScript.trim()) {
+      setError("No script content to analyze.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode(null);
+    try {
+      const report = await runScriptReportCard({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+      });
+      setReportCard(report);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Report card failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [fullScript, knowledgeBase, styleProfile, targetPages]);
+
+  const handleImproveMetric = useCallback(async (metricId: string, metricName: string) => {
+    if (!reportCard) return;
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode("instant_critique");
+    try {
+      const plan = await generateMetricImprovementPlan({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+        reportCard,
+        metricId,
+        metricName,
+      });
+      setSuggestion(plan);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Improve plan failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [fullScript, knowledgeBase, styleProfile, targetPages, reportCard]);
+
   const characters = knowledgeBase?.characters ?? [];
 
   return (
@@ -193,6 +258,20 @@ export default function SuggestionPanel({
           <span className="ctx-badge kb">KB: {knowledgeBase.characters.length}ch</span>
         )}
         {styleProfile && <span className="ctx-badge style">Style</span>}
+      </div>
+
+      <div className="full-shot-pass">
+        <button
+          className="full-shot-pass-btn report-card-btn"
+          onClick={handleReportCard}
+          disabled={loading || !fullScript.trim()}
+          title="Score the whole script against structure frameworks, style match, character consistency, and pacing"
+        >
+          Run Script Report Card
+        </button>
+        <div className="full-shot-pass-hint">
+          Scores Hero's Journey, Save the Cat, Propp, Aristotle, Dan Harmon, style match, characters, and pacing.
+        </div>
       </div>
 
       <div className="full-shot-pass">
@@ -328,6 +407,8 @@ export default function SuggestionPanel({
       )}
 
       {error && <div className="suggestion-error">{error}</div>}
+
+      {reportCard && <ReportCard report={reportCard} onImproveMetric={handleImproveMetric} loading={loading} />}
 
       {suggestion && lastMode && isAnalysisMode(lastMode) && (
         <AnalysisCard text={suggestion} />
