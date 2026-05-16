@@ -524,6 +524,29 @@ export async function importDocx(arrayBuffer: ArrayBuffer): Promise<string> {
   return result.value.trim();
 }
 
+// ─── .xlsx/.xls import ───────────────────────────────────────────────
+// Uses SheetJS for client-side spreadsheet extraction. Returns readable
+// tab-delimited sheet text so it can be used as style/context input.
+
+export async function importExcel(arrayBuffer: ArrayBuffer): Promise<string> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(arrayBuffer, { type: "array" });
+  const sheets = workbook.SheetNames.map((sheetName) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(worksheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+    });
+    const body = rows
+      .map((row) => row.map((cell) => String(cell ?? "").trim()).join("\t").replace(/\t+$/g, ""))
+      .filter((line) => line.trim())
+      .join("\n");
+    return body ? `# Sheet: ${sheetName}\n${body}` : "";
+  }).filter(Boolean);
+  return sheets.join("\n\n").trim();
+}
+
 /**
  * Import a File object based on its extension.
  */
@@ -548,6 +571,10 @@ export async function importFile(file: File): Promise<string> {
 
   if (name.endsWith(".docx")) {
     return importDocx(await file.arrayBuffer());
+  }
+
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    return importExcel(await file.arrayBuffer());
   }
 
   return importFountain(await file.text());

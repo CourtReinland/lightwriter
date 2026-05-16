@@ -1,4 +1,4 @@
-import type { ReportCardComparison, RewriteDiffSummary, ScriptReportCard, ScriptRewriteResult } from "../../services/scriptReportCardService";
+import type { ReportCardComparison, RewriteDiffSummary, RewriteValidationResult, ScriptReportCard, ScriptRewriteResult } from "../../services/scriptReportCardService";
 import "./RewriteReviewCard.css";
 
 interface RewriteReviewCardProps {
@@ -9,11 +9,15 @@ interface RewriteReviewCardProps {
   afterReport: ScriptReportCard | null;
   comparison: ReportCardComparison | null;
   loading?: boolean;
+  onApplyToDraft: () => void;
+  onDiscard: () => void;
   onRescore: () => void;
   onAccept: () => void;
   onRevert: () => void;
   onCopyScript: () => void;
   accepted?: boolean;
+  applied?: boolean;
+  validation: RewriteValidationResult;
 }
 
 export default function RewriteReviewCard({
@@ -24,20 +28,39 @@ export default function RewriteReviewCard({
   afterReport,
   comparison,
   loading = false,
+  onApplyToDraft,
+  onDiscard,
   onRescore,
   onAccept,
   onRevert,
   onCopyScript,
   accepted = false,
+  applied = false,
+  validation,
 }: RewriteReviewCardProps) {
   return (
     <div className="rewrite-review-card">
       <div className="rewrite-review-header">
         <div>
-          <div className="rewrite-review-eyebrow">Rewrite Review</div>
-          <div className="rewrite-review-title">{label}{accepted ? " — Accepted" : ""}</div>
+          <div className="rewrite-review-eyebrow">{applied ? "Rewrite Review" : "Rewrite Preview"}</div>
+          <div className="rewrite-review-title">{label}{accepted ? " — Accepted" : applied ? " — Applied" : " — Not Applied"}</div>
         </div>
         <button className="rewrite-review-copy" disabled={loading} onClick={onCopyScript}>Copy Revised</button>
+      </div>
+
+      <div className={validation.canApply ? "rewrite-validation ok" : "rewrite-validation blocked"}>
+        <div className="rewrite-review-section-title">Validation</div>
+        {validation.canApply ? (
+          <div>Looks like screenplay text: {validation.sceneHeadingCount} scene heading(s) detected. Safe to preview/apply.</div>
+        ) : (
+          <ul>{validation.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+        )}
+        {result.recoveredFrom && <div className="rewrite-score-note">Parser repaired provider output from {result.recoveredFrom}.</div>}
+      </div>
+
+      <div className="rewrite-preview-buffer">
+        <div className="rewrite-review-section-title">Revised Draft Preview</div>
+        <pre>{result.rewrittenScript.slice(0, 5000)}{result.rewrittenScript.length > 5000 ? "\n\n... preview truncated; use Copy Revised for the full draft." : ""}</pre>
       </div>
 
       <div className="rewrite-review-grid">
@@ -88,15 +111,24 @@ export default function RewriteReviewCard({
           </>
         ) : (
           <div className="rewrite-score-note">
-            Pre-rewrite score: {beforeReport.overallScore}/100. Run Re-score After Rewrite to measure score lift.
+            Pre-rewrite score: {beforeReport.overallScore}/100. {applied ? "Run Re-score After Rewrite to measure score lift." : "Apply To Draft before re-scoring."}
           </div>
         )}
       </div>
 
       <div className="rewrite-review-actions">
-        <button className="rewrite-secondary-btn" disabled={loading} onClick={onRescore}>Re-score After Rewrite</button>
-        <button className="rewrite-secondary-btn" disabled={loading} onClick={onRevert}>Revert Rewrite</button>
-        <button className="rewrite-primary-btn" disabled={loading || accepted} onClick={onAccept}>{accepted ? "Accepted" : "Accept Rewrite"}</button>
+        {!applied ? (
+          <>
+            <button className="rewrite-secondary-btn" disabled={loading} onClick={onDiscard}>Discard</button>
+            <button className="rewrite-primary-btn" disabled={loading || !validation.canApply} onClick={onApplyToDraft}>Apply To Draft</button>
+          </>
+        ) : (
+          <>
+            <button className="rewrite-secondary-btn" disabled={loading} onClick={onRescore}>Re-score After Rewrite</button>
+            <button className="rewrite-secondary-btn" disabled={loading} onClick={onRevert}>Revert Rewrite</button>
+            <button className="rewrite-primary-btn" disabled={loading || accepted} onClick={onAccept}>{accepted ? "Accepted" : "Accept Rewrite"}</button>
+          </>
+        )}
       </div>
     </div>
   );

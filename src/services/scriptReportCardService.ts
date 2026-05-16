@@ -66,6 +66,16 @@ export interface ScriptRewriteResult {
   rewrittenScript: string;
   changeSummary: string[];
   warnings: string[];
+  rawResponsePreview?: string;
+  recoveredFrom?: string;
+}
+
+export interface RewriteValidationResult {
+  canApply: boolean;
+  issues: string[];
+  sceneHeadingCount: number;
+  hasDialogueCue: boolean;
+  hasScreenplayAction: boolean;
 }
 
 export interface RewriteDiffSummary {
@@ -352,17 +362,91 @@ export function parseReportCardResponse(text: string, fallbackFrameworkId?: stri
   return normalizeReportCard(parsed);
 }
 
-export function parseRewriteResponse(text: string): ScriptRewriteResult {
-  const parsed = JSON.parse(extractJson(text)) as Partial<ScriptRewriteResult>;
-  const rewrittenScript = String(parsed.rewrittenScript || "").trim();
-  if (!rewrittenScript) {
-    throw new Error("The rewrite response did not include a rewrittenScript field.");
-  }
+export function validateRewriteScript(script: string): RewriteValidationResult {
+  const trimmed = script.trim();
+  const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  const sceneHeadingCountValue = sceneHeadingCount(trimmed);
+  const hasDialogueCue = lines.some((line, index) => /^[A-Z][A-Z0-9 .'-]{1,32}(?:\s*\([^)]*\))?$/.test(line) && Boolean(lines[index + 1]) && !/^(INT\.|EXT\.|INT\/EXT\.|I\/E\.)/i.test(line));
+  const hasScreenplayAction = lines.some((line) => /\b(opens|runs|walks|looks|finds|turns|enters|exits|stands|sits|holds|moves|crosses|stares|reveals|takes|drops|pulls|pushes)\b/i.test(line));
+  const hasScreenplayShape = sceneHeadingCountValue > 0 || (hasDialogueCue && hasScreenplayAction);
+  const hasObviousProviderNotes = /^(here(?:'s| is)|i (?:rewrote|improved|recommend|would)|summary:|notes?:|change summary:)/i.test(trimmed) && sceneHeadingCountValue === 0;
+  const issues: string[] = [];
+  if (!trimmed) issues.push("Rewrite is empty.");
+  if (!hasScreenplayShape) issues.push("Rewrite does not look like screenplay/Fountain text yet.");
+  if (hasObviousProviderNotes) issues.push("Provider returned notes instead of a revised screenplay.");
   return {
-    rewrittenScript,
-    changeSummary: asStringArray(parsed.changeSummary),
-    warnings: asStringArray(parsed.warnings),
+    canApply: issues.length === 0,
+    issues,
+    sceneHeadingCount: sceneHeadingCountValue,
+    hasDialogueCue,
+    hasScreenplayAction,
   };
+}
+
+function rawPreview(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 700);
+}
+
+function rewriteCandidateFromParsed(parsed: Record<string, unknown>): { script: string; field: string } {
+  const fields = ["rewrittenScript", "revisedScript", "script", "draft", "screenplay"];
+  for (const field of fields) {
+    const value = parsed[field];
+    if (typeof value === "string" && value.trim()) {
+      return { script: value.trim(), field };
+    }
+  }
+  return { script: "", field: "" };
+}
+
+function rewriteSummaryFromParsed(parsed: Record<string, unknown>): string[] {
+  return asStringArray(parsed.changeSummary).length
+    ? asStringArray(parsed.changeSummary)
+    : asStringArray(parsed.summary).length
+      ? asStringArray(parsed.summary)
+      : asStringArray(parsed.changes);
+}
+
+export function parseRewriteResponse(text: string): ScriptRewriteResult {
+  const preview = rawPreview(text);
+  let parsed: Record<string, unknown> | null = null;
+  let jsonError: unknown = null;
+  try {
+    parsed = JSON.parse(extractJson(text)) as Record<string, unknown>;
+  } catch (error) {
+    jsonError = error;
+  }
+
+  if (parsed) {
+    const candidate = rewriteCandidateFromParsed(parsed);
+    if (!candidate.script) {
+      throw new Error(`The rewrite response did not include a rewrittenScript, revisedScript, script, draft, or screenplay field. Raw response preview: ${preview}`);
+    }
+    const validation = validateRewriteScript(candidate.script);
+    if (!validation.canApply) {
+      throw new Error(`The rewrite response field "${candidate.field}" did not include an apply-ready screenplay: ${validation.issues.join(" ")} Raw response preview: ${preview}`);
+    }
+    const recoveredWarnings = candidate.field === "rewrittenScript" ? [] : [`Recovered screenplay from provider field "${candidate.field}"; preferred field is "rewrittenScript".`];
+    return {
+      rewrittenScript: candidate.script,
+      changeSummary: rewriteSummaryFromParsed(parsed),
+      warnings: [...recoveredWarnings, ...asStringArray(parsed.warnings)],
+      rawResponsePreview: preview,
+      recoveredFrom: candidate.field === "rewrittenScript" ? undefined : candidate.field,
+    };
+  }
+
+  const plainText = text.trim();
+  const validation = validateRewriteScript(plainText);
+  if (validation.canApply) {
+    return {
+      rewrittenScript: plainText,
+      changeSummary: ["Recovered plain screenplay text from a non-JSON provider response."],
+      warnings: [`Provider response was not valid JSON (${jsonError instanceof Error ? jsonError.message : "parse failed"}); recovered because it looked like screenplay text.`],
+      rawResponsePreview: preview,
+      recoveredFrom: "plainText",
+    };
+  }
+  throw new Error(`The rewrite response did not include a recoverable screenplay. ${validation.issues.join(" ")} Raw response preview: ${preview}`);
 }
 
 function sceneHeadingCount(script: string): number {

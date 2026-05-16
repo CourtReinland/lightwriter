@@ -51,6 +51,16 @@ function characterNamesFor(asset: GeneratedAsset): string[] {
   return asset.scriptRef.characterName ? [asset.scriptRef.characterName.toUpperCase()] : [];
 }
 
+function filenameForPath(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath;
+}
+
+function script2ScreenProviderFor(asset: GeneratedAsset): string {
+  if (asset.provider === "gemini-nano-banana") return "gemini";
+  if (asset.provider === "grok-imagine") return "grok";
+  return asset.provider;
+}
+
 export function buildLightWriterPackage(args: {
   project: Project;
   assets: GeneratedAsset[];
@@ -123,16 +133,23 @@ export function buildScript2ScreenManifest(args: {
     const shotKey = shotKeyFor(asset);
     if (!shotKey || !asset.filePath) continue;
 
-    manifest.generated_media[`${shotKey}:lightwriter:image:${asset.id}`] = {
+    const filename = filenameForPath(asset.filePath);
+    manifest.generated_media[filename] = {
       type: "image",
       shot_key: shotKey,
       prompt: asset.prompt,
-      provider: asset.provider,
+      provider: script2ScreenProviderFor(asset),
       provider_settings: {
         model: asset.model,
         aspect_ratio: asset.metadata.aspectRatio || "widescreen_16_9",
         lightwriter_asset_id: asset.id,
+        source_provider: asset.provider,
       },
+      style_reference_path: typeof asset.metadata.styleReferencePath === "string" ? asset.metadata.styleReferencePath : "",
+      character_refs:
+        asset.scriptRef.characterName && asset.filePath
+          ? { [asset.scriptRef.characterName.toUpperCase()]: asset.filePath }
+          : {},
       file_path: asset.filePath,
       generated_at: new Date(asset.createdAt).toISOString(),
       lightwriter_script_ref: asset.scriptRef,

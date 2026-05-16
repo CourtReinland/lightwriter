@@ -58,6 +58,71 @@ export interface KnowledgeBase {
   updatedAt: number;
 }
 
+
+export type ImportedPlotThread = Omit<KBPlotThread, "id">;
+
+function normalizePlotStatus(value: string): KBPlotThread["status"] {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "resolved") return "resolved";
+  if (normalized === "foreshadowed" || normalized === "foreshadow") return "foreshadowed";
+  return "unresolved";
+}
+
+function splitTableLine(line: string): string[] {
+  return line.split(/	|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+}
+
+function headerIndex(headers: string[], candidates: string[]): number {
+  return headers.findIndex((header) => candidates.some((candidate) => header.includes(candidate)));
+}
+
+export function parsePlotThreadsFromTableText(text: string): ImportedPlotThread[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("# Sheet:"));
+  if (!lines.length) return [];
+
+  const firstRawCells = splitTableLine(lines[0]);
+  const firstCells = firstRawCells.map((cell) => cell.toLowerCase());
+  const titleHeaderIndex = headerIndex(firstCells, ["thread", "plot", "title", "storyline", "arc"]);
+  const descriptionHeaderIndex = headerIndex(firstCells, ["description", "summary", "notes", "context", "detail"]);
+  const statusHeaderIndex = headerIndex(firstCells, ["status", "state"]);
+  const hasHeader = titleHeaderIndex >= 0 || descriptionHeaderIndex >= 0 || statusHeaderIndex >= 0;
+
+  const rows = hasHeader ? lines.slice(1) : lines;
+  const threads: ImportedPlotThread[] = [];
+  for (const row of rows) {
+    const cells = splitTableLine(row);
+    if (!cells.some(Boolean)) continue;
+
+    const title = (hasHeader ? cells[titleHeaderIndex >= 0 ? titleHeaderIndex : 0] : cells[0])?.trim() || "";
+    if (!title) continue;
+
+    const statusCell = hasHeader && statusHeaderIndex >= 0 ? cells[statusHeaderIndex] : cells.length >= 3 ? cells[1] : "";
+    const status = normalizePlotStatus(statusCell || "");
+    const descriptionCell = hasHeader && descriptionHeaderIndex >= 0
+      ? cells[descriptionHeaderIndex]
+      : cells.length >= 3
+        ? cells.slice(2).filter(Boolean).join(" ")
+        : cells.slice(1).filter(Boolean).join(" ");
+
+    const extraNotes = hasHeader
+      ? cells
+          .map((cell, index) => ({ cell, index }))
+          .filter(({ cell, index }) => cell && index !== titleHeaderIndex && index !== statusHeaderIndex && index !== descriptionHeaderIndex)
+          .map(({ cell, index }) => `${firstRawCells[index] || `Column ${index + 1}`}: ${cell}`)
+      : [];
+
+    threads.push({
+      title,
+      status,
+      description: [descriptionCell, ...extraNotes].filter(Boolean).join(" ").trim(),
+    });
+  }
+  return threads;
+}
+
 // ── Service ──
 
 let _uid = 0;
@@ -186,6 +251,23 @@ export class KnowledgeBaseService {
   }
   static deletePlotThread(kb: KnowledgeBase, id: string): KnowledgeBase {
     return { ...kb, plotThreads: kb.plotThreads.filter(t => t.id !== id) };
+  }
+
+  static mergePlotThreads(kb: KnowledgeBase, threads: ImportedPlotThread[]): KnowledgeBase {
+    let updated = kb;
+    for (const thread of threads) {
+      const title = thread.title.trim();
+      if (!title) continue;
+      const exists = updated.plotThreads.some((existing) => existing.title.trim().toLowerCase() === title.toLowerCase());
+      if (!exists) {
+        updated = this.addPlotThread(updated, {
+          title,
+          status: thread.status,
+          description: thread.description.trim(),
+        });
+      }
+    }
+    return updated;
   }
 
   // ── Custom Note CRUD ──

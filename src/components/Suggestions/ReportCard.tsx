@@ -70,7 +70,7 @@ function FrameworkRow({ framework, disabled, onImproveMetric, onRewriteMetric }:
           Plan Fix
         </button>
         <button className="report-rewrite-btn small" disabled={disabled} onClick={() => onRewriteMetric(framework.frameworkId, framework.frameworkName)}>
-          Apply Rewrite
+          Preview Rewrite
         </button>
       </div>
     </div>
@@ -90,7 +90,7 @@ function CraftRow({ id, name, score, summary, disabled, onImproveMetric, onRewri
           Plan Fix
         </button>
         <button className="report-rewrite-btn small" disabled={disabled} onClick={() => onRewriteMetric(id, name)}>
-          Apply Rewrite
+          Preview Rewrite
         </button>
       </div>
     </div>

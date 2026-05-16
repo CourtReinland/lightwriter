@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import {
   KnowledgeBaseService,
+  parsePlotThreadsFromTableText,
   type KnowledgeBase,
   type KBCharacter,
   type KBWorldRule,
@@ -71,6 +72,9 @@ export default function KBPanel({
   });
   const [styleSample, setStyleSample] = useState("");
   const [styleSamples, setStyleSamples] = useState<AnalyzeStyleSampleInput[]>([]);
+  const [plotImporting, setPlotImporting] = useState(false);
+  const [plotImportError, setPlotImportError] = useState<string | null>(null);
+  const [plotImportNotice, setPlotImportNotice] = useState<string | null>(null);
   const [analyzingStyle, setAnalyzingStyle] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
   const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
@@ -303,7 +307,7 @@ export default function KBPanel({
   const handleFileImport = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".txt,.fountain,.pdf,.docx";
+    input.accept = ".txt,.fountain,.pdf,.docx,.xlsx,.xls";
     input.multiple = true;
     input.onchange = async () => {
       const files = Array.from(input.files || []);
@@ -322,6 +326,39 @@ export default function KBPanel({
     };
     input.click();
   }, []);
+
+  const handlePlotThreadImport = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx,.xls,.csv,.txt";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      setPlotImporting(true);
+      setPlotImportError(null);
+      setPlotImportNotice(null);
+      try {
+        const imported = await Promise.all(files.map(async (file) => parsePlotThreadsFromTableText(await importFile(file))));
+        const threads = imported.flat();
+        if (!threads.length) {
+          setPlotImportError("No plot threads found. Use columns like Thread/Title, Status, and Description.");
+          return;
+        }
+        const before = kb.plotThreads.length;
+        const updated = KnowledgeBaseService.mergePlotThreads(kb, threads);
+        const added = updated.plotThreads.length - before;
+        KnowledgeBaseService.saveKB(updated);
+        onKBChange(updated);
+        setPlotImportNotice(`Imported ${added} new plot thread${added === 1 ? "" : "s"}${threads.length > added ? `; skipped ${threads.length - added} duplicate${threads.length - added === 1 ? "" : "s"}` : ""}.`);
+      } catch (error) {
+        setPlotImportError(error instanceof Error ? error.message : "Could not import plot threads from that file.");
+      } finally {
+        setPlotImporting(false);
+      }
+    };
+    input.click();
+  }, [kb, onKBChange]);
 
   const renderGeneratedAssetDetails = (asset: GeneratedAsset) => {
     const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
@@ -472,15 +509,24 @@ export default function KBPanel({
           <span>{expandedSections.plot ? "v" : ">"} Plot Threads ({kb.plotThreads.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "plotThread" }); }}>+</button>
         </button>
-        {expandedSections.plot && kb.plotThreads.map(t => (
-          <div key={t.id} className="kb-entry">
-            <div className="kb-entry-name">{t.title} <span className={`kb-status ${t.status}`}>{t.status}</span></div>
-            <div className="kb-entry-actions">
-              <button onClick={() => setEditTarget({ type: "plotThread", existing: t })}>Edit</button>
-              <button onClick={() => handleDelete("plotThread", t.id)}>Del</button>
+        {expandedSections.plot && (
+          <>
+            <div className="kb-entry-actions kb-import-actions">
+              <button onClick={handlePlotThreadImport} disabled={plotImporting}>{plotImporting ? "Importing..." : "Import Excel/CSV"}</button>
             </div>
-          </div>
-        ))}
+            {plotImportNotice && <div className="kb-notice inline">{plotImportNotice}</div>}
+            {plotImportError && <div className="kb-error">{plotImportError}</div>}
+            {kb.plotThreads.map(t => (
+              <div key={t.id} className="kb-entry">
+                <div className="kb-entry-name">{t.title} <span className={`kb-status ${t.status}`}>{t.status}</span></div>
+                <div className="kb-entry-actions">
+                  <button onClick={() => setEditTarget({ type: "plotThread", existing: t })}>Edit</button>
+                  <button onClick={() => handleDelete("plotThread", t.id)}>Del</button>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Tone & Style */}
@@ -552,7 +598,7 @@ export default function KBPanel({
             )}
             <textarea
               className="kb-textarea-sm"
-              placeholder="Paste a writing sample, or import txt/fountain/pdf/docx samples below..."
+              placeholder="Paste a writing sample, or import txt/fountain/pdf/docx/xlsx samples below..."
               value={styleSample}
               onChange={e => setStyleSample(e.target.value)}
               rows={4}

@@ -47,6 +47,7 @@ Click the **+** button next to any section. A modal opens with form fields:
 **For Plot Threads:**
 - **Title** and **Description**
 - **Status**: Unresolved / Foreshadowed / Resolved
+- **Import Excel/CSV**: In the Plot Threads section, click **Import Excel/CSV** to merge a spreadsheet of plot threads into the KB. Supported columns include `Thread`, `Title`, `Plot`, or `Arc` for the title; `Status` for unresolved/foreshadowed/resolved; and `Description`, `Summary`, `Notes`, or `Context` for the body. Duplicate titles are skipped so imports do not overwrite hand-edited KB entries.
 
 ### Auto-Extraction with "Scan Script"
 
@@ -67,7 +68,7 @@ Every time you ask the AI to write or improve text, it sees the relevant KB entr
 
 ## 2. The Style Profile
 
-The Style Profile captures *your* voice and turns it into an enforceable **style contract** for every AI writing pass. Paste text directly or import one/several samples in `.txt`, `.fountain`, `.pdf`, or `.docx` format. The analyzer now extracts:
+The Style Profile captures *your* voice and turns it into an enforceable **style contract** for every AI writing pass. Paste text directly or import one/several samples in `.txt`, `.fountain`, `.pdf`, `.docx`, `.xlsx`, or `.xls` format. Spreadsheet rows are converted into readable tab-delimited context so beat sheets, style notes, dialogue examples, and other Excel references can participate in the style analysis. The analyzer now extracts:
 
 - Average sentence length and variance
 - Vocabulary complexity
@@ -85,7 +86,7 @@ The Style Profile captures *your* voice and turns it into an enforceable **style
 1. Open the KB panel (click **KB**)
 2. Expand **Tone & Style** and optionally set a target/director style such as `Kubrick-like formal restraint`, `Pixar emotional clarity`, or your own custom direction
 3. Expand the **Style Profile** section
-4. Paste a sample and/or click **Import samples** to load `.txt`, `.fountain`, `.pdf`, or `.docx` files
+4. Paste a sample and/or click **Import samples** to load `.txt`, `.fountain`, `.pdf`, `.docx`, `.xlsx`, or `.xls` files
 5. Click **Analyze Style**
 
 The AI returns a project-level style contract. From then on, every AI suggestion includes the writer voice, target/director style, style constraints, KB context, beat context, and target page count where available.
@@ -409,3 +410,84 @@ Here's how to get the most out of LightWriter's AI for a new project:
 | Full analysis | Toolbar → **Analysis** tab |
 
 Happy writing.
+---
+
+## 7. Script Doctor Report Card Workflow
+
+The AI panel includes a safer full-draft rewriting workflow for report-card fixes. This replaces the old mental model where the scorecard also acted like a hidden command console.
+
+### Mental model
+
+Use the workflow in this order:
+
+1. Diagnose the draft
+2. Select a treatment
+3. Ask AI for a revised draft
+4. Validate the AI response
+5. Preview the rewrite
+6. Apply to the editor only after a human decision
+7. Optionally re-score the revised draft
+
+The panel shows these steps in the **Script Doctor Workflow** status box so the writer can see whether LightWriter is diagnosing, waiting for a treatment choice, asking the provider, validating output, previewing a rewrite, or waiting for the writer to apply it.
+
+### Controls
+
+- **Run Script Report Card** scores the screenplay against Hero's Journey, Save the Cat, Propp, Aristotle, Dan Harmon's Story Circle, style match, character consistency, and pacing.
+- **Plan Fix** asks for strategy only. It must not edit the screenplay.
+- **Preview Rewrite** asks for a complete revised screenplay for a specific metric, then opens a preview buffer.
+- **Fill Missing Beats** and **Complete To Target Pages** also open the same preview buffer.
+- **Apply To Draft** is the only control in this workflow that replaces the main editor with the revised draft.
+- **Discard** closes an unapplied preview without touching the editor.
+- **Re-score After Rewrite** runs a fresh report card only after the preview has been applied.
+- **Revert Rewrite** restores the pre-rewrite snapshot after an applied rewrite.
+
+### Safety contract
+
+Full-script rewrites must not auto-apply. Provider output goes through this boundary:
+
+```text
+AI RESPONSE
+   |
+   v
+parse / repair / validate
+   |
+   v
+rewrite preview buffer
+   |
+   v
+HUMAN DECISION
+   |-- Apply To Draft  -> overwrite editor
+   |-- Discard         -> keep old draft
+   `-- Re-score        -> only after apply
+```
+
+This prevents accidental draft pollution when a provider returns notes, apologies, malformed JSON, or non-screenplay text.
+
+### Parser and repair behavior
+
+The preferred provider contract is strict JSON:
+
+```json
+{
+  "rewrittenScript": "complete revised screenplay in Fountain/plain screenplay format",
+  "changeSummary": ["specific change made"],
+  "warnings": ["risk or unresolved issue, empty if none"]
+}
+```
+
+Because real providers sometimes drift, LightWriter now repairs common alternatives before failing:
+
+1. `rewrittenScript`
+2. `revisedScript`
+3. `script`
+4. `draft`
+5. `screenplay`
+6. Plain text, but only if it looks like screenplay/Fountain text
+
+Recovered responses show a warning in the Rewrite Preview. If the response is not recoverable, the error includes the missing contract fields and a raw response preview so the next pass can ask the model to reformat.
+
+### Validation before Apply
+
+A rewrite cannot be applied unless it looks like a screenplay. Validation checks for screenplay/Fountain shape such as scene headings, dialogue cues, or action lines, and blocks obvious provider notes like “Here is my improved version...” when no screenplay text is present.
+
+The main editor is only changed after validation passes and the writer clicks **Apply To Draft**.

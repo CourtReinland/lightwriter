@@ -72,11 +72,18 @@ describe("asset manifest export", () => {
     });
 
     expect(manifest.version).toBe(1);
-    expect(manifest.generated_media["s0_sh0:lightwriter:image:scene-asset"]).toMatchObject({
+    expect(manifest.generated_media["s0_sh0_coffee.png"]).toMatchObject({
       type: "image",
       shot_key: "s0_sh0",
-      provider: "gemini-nano-banana",
+      provider: "gemini",
       file_path: "/tmp/lightwriter/assets/images/s0_sh0_coffee.png",
+      style_reference_path: "",
+      character_refs: {},
+    });
+    expect(manifest.generated_media["s0_sh0_coffee.png"].provider_settings).toMatchObject({
+      model: "gemini-2.5-flash-image",
+      source_provider: "gemini-nano-banana",
+      lightwriter_asset_id: "scene-asset",
     });
     expect(manifest.characters.ALEX).toMatchObject({
       reference_image_path: "/tmp/lightwriter/assets/characters/alex.png",

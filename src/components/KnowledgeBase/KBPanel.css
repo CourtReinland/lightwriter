@@ -452,3 +452,22 @@
 .kb-action-btn:disabled {
   opacity: 0.5;
 }
+
+.kb-import-actions {
+  justify-content: flex-start;
+  margin: 8px 0;
+}
+
+.kb-import-actions button {
+  border: 1px solid #c9c0b5;
+  background: #f5f2ee;
+  color: #3b342d;
+  padding: 5px 10px;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.kb-notice.inline {
+  margin: 6px 0 10px;
+}

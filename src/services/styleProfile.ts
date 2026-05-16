@@ -5,7 +5,7 @@ import { TextAiService } from "./textAiService";
 export interface StyleSample {
   id: string;
   filename: string;
-  kind: "txt" | "fountain" | "pdf" | "docx" | "other";
+  kind: "txt" | "fountain" | "pdf" | "docx" | "xlsx" | "xls" | "csv" | "other";
   wordCount: number;
   excerpt: string;
   importedAt: number;
@@ -69,6 +69,9 @@ function sampleKindFromFilename(filename: string): StyleSample["kind"] {
   if (lower.endsWith(".fountain")) return "fountain";
   if (lower.endsWith(".pdf")) return "pdf";
   if (lower.endsWith(".docx")) return "docx";
+  if (lower.endsWith(".xlsx")) return "xlsx";
+  if (lower.endsWith(".xls")) return "xls";
+  if (lower.endsWith(".csv")) return "csv";
   return "other";
 }
 

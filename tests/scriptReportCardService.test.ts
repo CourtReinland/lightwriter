@@ -6,6 +6,7 @@ import {
   normalizeReportCard,
   parseRewriteResponse,
   parseReportCardResponse,
+  validateRewriteScript,
   summarizeRewriteDiff,
   compareReportCards,
   type ScriptReportCard,
@@ -187,6 +188,36 @@ describe("script rewrite execution prompts", () => {
     expect(parsed.rewrittenScript).toContain("ALIYAH opens the book");
     expect(parsed.changeSummary).toEqual(["Added midpoint"]);
     expect(parsed.warnings).toEqual([]);
+  });
+
+  it("repairs common provider field names before failing the rewrite contract", () => {
+    const parsed = parseRewriteResponse(JSON.stringify({
+      revisedScript: "INT. LIBRARY - NIGHT\n\nALIYAH opens the glowing book.",
+      summary: ["Used revisedScript fallback."],
+    }));
+
+    expect(parsed.rewrittenScript).toContain("glowing book");
+    expect(parsed.changeSummary).toEqual(["Used revisedScript fallback."]);
+    expect(parsed.warnings.join(" ")).toContain("revisedScript");
+  });
+
+  it("recovers plain screenplay text and warns that JSON was repaired", () => {
+    const parsed = parseRewriteResponse("INT. LIBRARY - NIGHT\n\nALIYAH\nWe found it.\n\nEXT. ROOFTOP - DAWN\n\nShe runs.");
+
+    expect(parsed.rewrittenScript).toContain("EXT. ROOFTOP");
+    expect(parsed.changeSummary.join(" ")).toContain("plain screenplay");
+    expect(parsed.warnings.join(" ")).toContain("not valid JSON");
+  });
+
+  it("rejects provider notes that do not look like screenplay", () => {
+    expect(() => parseRewriteResponse("I improved the midpoint and recommend adding a scene later.")).toThrow(/did not include a recoverable screenplay/i);
+  });
+
+  it("validates whether a rewrite can be applied to the editor", () => {
+    expect(validateRewriteScript("INT. LIBRARY - NIGHT\n\nALIYAH opens the book.").canApply).toBe(true);
+    const invalid = validateRewriteScript("Here are my notes: add a midpoint and improve pacing.");
+    expect(invalid.canApply).toBe(false);
+    expect(invalid.issues.join(" ")).toContain("screenplay");
   });
 });
 
