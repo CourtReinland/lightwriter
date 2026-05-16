@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
-import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison } from "../../services/scriptReportCardService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import {
   generate,
   isAnalysisMode,
@@ -42,8 +42,12 @@ interface RewriteReviewState {
   comparison: ReportCardComparison | null;
   result: ScriptRewriteResult;
   diff: RewriteDiffSummary;
+  validation: RewriteValidationResult;
+  applied: boolean;
   accepted: boolean;
 }
+
+type ScriptDoctorStage = "idle" | "diagnosing" | "treatment" | "requesting" | "validating" | "preview" | "applied" | "rescoring";
 
 const WRITING_MODES: { id: OrchestratorMode; label: string; icon: string }[] = [
   { id: "improve_dialogue", label: "Improve", icon: "^" },
@@ -89,6 +93,7 @@ export default function SuggestionPanel({
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
+  const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -195,6 +200,7 @@ export default function SuggestionPanel({
     setError(null);
     setSuggestion(null);
     setLastMode(null);
+    setScriptDoctorStage("diagnosing");
     try {
       const report = await runScriptReportCard({
         script: fullScript,
@@ -204,6 +210,7 @@ export default function SuggestionPanel({
       });
       setReportCard(report);
       setRewriteReview(null);
+      setScriptDoctorStage("treatment");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Report card failed");
     } finally {
@@ -235,6 +242,7 @@ export default function SuggestionPanel({
         metricName,
       });
       setSuggestion(plan);
+      setScriptDoctorStage("treatment");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Improve plan failed");
     } finally {
@@ -260,8 +268,8 @@ export default function SuggestionPanel({
     return true;
   }, [fullScript, reportCard]);
 
-  const applyRewriteResult = useCallback((result: ScriptRewriteResult, label: string, beforeScript: string, beforeReport: ScriptReportCard) => {
-    onReplaceScript(result.rewrittenScript);
+  const stageRewritePreview = useCallback((result: ScriptRewriteResult, label: string, beforeScript: string, beforeReport: ScriptReportCard) => {
+    const validation = validateRewriteScript(result.rewrittenScript);
     setRewriteReview({
       id: Date.now(),
       label,
@@ -272,20 +280,26 @@ export default function SuggestionPanel({
       comparison: null,
       result,
       diff: summarizeRewriteDiff(beforeScript, result.rewrittenScript),
+      validation,
+      applied: false,
       accepted: false,
     });
-    setSuggestion(`${label} complete. The editor has been replaced with the revised full script. Review the snapshot below, then Accept, Revert, or Re-score After Rewrite.`);
+    setScriptDoctorStage("preview");
+    setSuggestion(validation.canApply
+      ? `${label} preview is ready. The main editor has NOT been changed. Review the rewrite below, then Apply To Draft or Discard.`
+      : `${label} returned a draft, but validation found issues. The main editor has NOT been changed.`);
     setLastMode(null);
-  }, [onReplaceScript]);
+  }, []);
 
   const handleRewriteMetric = useCallback(async (metricId: string, metricName: string) => {
     if (!ensureRewriteReady() || !reportCard) return;
-    const confirmed = window.confirm(`Rewrite the full script to improve ${metricName}? This replaces the editor text with a complete revised draft. Undo remains available in the editor.`);
+    const confirmed = window.confirm(`Ask AI for a full-script rewrite to improve ${metricName}? This will create a preview first and will NOT change the editor until you click Apply To Draft.`);
     if (!confirmed) return;
 
     setLoading(true);
     setError(null);
     setSuggestion(null);
+    setScriptDoctorStage("requesting");
     try {
       const result = await rewriteScriptForMetric({
         script: fullScript,
@@ -296,23 +310,26 @@ export default function SuggestionPanel({
         metricId,
         metricName,
       });
-      applyRewriteResult(result, `${metricName} rewrite`, fullScript, reportCard);
+      setScriptDoctorStage("validating");
+      stageRewritePreview(result, `${metricName} rewrite`, fullScript, reportCard);
     } catch (e) {
+      setScriptDoctorStage(reportCard ? "treatment" : "idle");
       setError(e instanceof Error ? e.message : "Metric rewrite failed");
     } finally {
       setLoading(false);
     }
-  }, [applyRewriteResult, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
 
   const handleFillGaps = useCallback(async (mode: "missing_beats" | "target_pages") => {
     if (!ensureRewriteReady() || !reportCard) return;
     const label = mode === "target_pages" ? "complete toward target pages" : "fill missing beats";
-    const confirmed = window.confirm(`Run a full-script rewrite to ${label}? This replaces the editor text with a complete revised draft. Undo remains available in the editor.`);
+    const confirmed = window.confirm(`Ask AI to ${label}? This will create a rewrite preview first and will NOT change the editor until you click Apply To Draft.`);
     if (!confirmed) return;
 
     setLoading(true);
     setError(null);
     setSuggestion(null);
+    setScriptDoctorStage("requesting");
     try {
       const result = await fillScriptGaps({
         script: fullScript,
@@ -322,16 +339,22 @@ export default function SuggestionPanel({
         reportCard,
         mode,
       });
-      applyRewriteResult(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill", fullScript, reportCard);
+      setScriptDoctorStage("validating");
+      stageRewritePreview(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill", fullScript, reportCard);
     } catch (e) {
+      setScriptDoctorStage(reportCard ? "treatment" : "idle");
       setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
     } finally {
       setLoading(false);
     }
-  }, [applyRewriteResult, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;
+    if (!rewriteReview.applied) {
+      setError("Apply the rewrite to the draft before re-scoring it.");
+      return;
+    }
     const currentSettings = getSelectedTextAiProviderSettings();
     setTextAiSettings(currentSettings);
     if (!currentSettings.apiKey.trim()) {
@@ -342,6 +365,7 @@ export default function SuggestionPanel({
     setLoading(true);
     setError(null);
     setSuggestion(null);
+    setScriptDoctorStage("rescoring");
     try {
       const afterReport = await runScriptReportCard({
         script: rewriteReview.afterScript,
@@ -353,6 +377,7 @@ export default function SuggestionPanel({
       setReportCard(afterReport);
       setRewriteReview((current) => current && current.id === rewriteReview.id ? { ...current, afterReport, comparison } : current);
       setSuggestion(`Re-score complete. Overall score ${comparison.beforeOverall} -> ${comparison.afterOverall} (${comparison.overallDelta > 0 ? "+" : ""}${comparison.overallDelta}).`);
+      setScriptDoctorStage("applied");
       setLastMode(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Re-score after rewrite failed");
@@ -360,6 +385,26 @@ export default function SuggestionPanel({
       setLoading(false);
     }
   }, [knowledgeBase, rewriteReview, styleProfile, targetPages]);
+
+  const handleApplyRewriteToDraft = useCallback(() => {
+    if (!rewriteReview) return;
+    if (!rewriteReview.validation.canApply) {
+      setError(`Cannot apply yet: ${rewriteReview.validation.issues.join(" ")}`);
+      return;
+    }
+    onReplaceScript(rewriteReview.afterScript);
+    setRewriteReview({ ...rewriteReview, applied: true });
+    setScriptDoctorStage("applied");
+    setSuggestion("Rewrite applied to the main editor. You can Re-score, Revert to the pre-rewrite snapshot, or Accept the rewrite.");
+    setLastMode(null);
+  }, [onReplaceScript, rewriteReview]);
+
+  const handleDiscardRewritePreview = useCallback(() => {
+    setRewriteReview(null);
+    setScriptDoctorStage(reportCard ? "treatment" : "idle");
+    setSuggestion("Rewrite preview discarded. The main editor was not changed.");
+    setLastMode(null);
+  }, [reportCard]);
 
   const handleAcceptRewrite = useCallback(() => {
     if (!rewriteReview) return;
@@ -370,14 +415,19 @@ export default function SuggestionPanel({
 
   const handleRevertRewrite = useCallback(() => {
     if (!rewriteReview) return;
+    if (!rewriteReview.applied) {
+      handleDiscardRewritePreview();
+      return;
+    }
     const confirmed = window.confirm("Revert to the pre-rewrite snapshot? This replaces the editor text with the saved pre-rewrite draft.");
     if (!confirmed) return;
     onReplaceScript(rewriteReview.beforeScript);
     setReportCard(rewriteReview.beforeReport);
     setSuggestion("Rewrite reverted. The editor has been restored to the pre-rewrite snapshot.");
+    setScriptDoctorStage("treatment");
     setLastMode(null);
     setRewriteReview(null);
-  }, [onReplaceScript, rewriteReview]);
+  }, [handleDiscardRewritePreview, onReplaceScript, rewriteReview]);
 
   const handleCopyRewriteScript = useCallback(() => {
     if (!rewriteReview) return;
@@ -566,6 +616,10 @@ export default function SuggestionPanel({
 
       {error && <div className="suggestion-error">{error}</div>}
 
+      {(reportCard || rewriteReview || scriptDoctorStage !== "idle") && (
+        <ScriptDoctorWorkflow stage={scriptDoctorStage} reportReady={Boolean(reportCard)} previewReady={Boolean(rewriteReview)} applied={Boolean(rewriteReview?.applied)} />
+      )}
+
       {reportCard && (
         <ReportCard
           report={reportCard}
@@ -586,6 +640,10 @@ export default function SuggestionPanel({
           comparison={rewriteReview.comparison}
           loading={loading}
           accepted={rewriteReview.accepted}
+          applied={rewriteReview.applied}
+          validation={rewriteReview.validation}
+          onApplyToDraft={handleApplyRewriteToDraft}
+          onDiscard={handleDiscardRewritePreview}
           onRescore={handleReScoreRewrite}
           onAccept={handleAcceptRewrite}
           onRevert={handleRevertRewrite}
@@ -618,6 +676,29 @@ export default function SuggestionPanel({
           onClose={() => setShowKeyDialog(false)}
         />
       )}
+    </div>
+  );
+}
+
+function ScriptDoctorWorkflow({ stage, reportReady, previewReady, applied }: { stage: ScriptDoctorStage; reportReady: boolean; previewReady: boolean; applied: boolean }) {
+  const rows = [
+    { label: "Diagnose draft", status: reportReady ? "DONE" : stage === "diagnosing" ? "RUNNING" : "WAITING" },
+    { label: "Select treatment", status: reportReady ? "READY" : "WAITING" },
+    { label: "Ask AI for revised draft", status: stage === "requesting" ? "RUNNING" : previewReady || applied ? "DONE" : "WAITING" },
+    { label: "Validate AI response", status: stage === "validating" ? "RUNNING" : previewReady || applied ? "DONE" : "WAITING" },
+    { label: "Preview rewrite", status: previewReady && !applied ? "HUMAN DECISION" : applied ? "DONE" : "WAITING" },
+    { label: "Apply to editor", status: applied ? "DONE" : previewReady ? "HUMAN DECISION" : "WAITING" },
+    { label: "Re-score revised draft", status: stage === "rescoring" ? "RUNNING" : applied ? "OPTIONAL" : "WAITING" },
+  ];
+  return (
+    <div className="script-doctor-workflow">
+      <div className="script-doctor-title">Script Doctor Workflow</div>
+      {rows.map((row, index) => (
+        <div key={row.label} className="script-doctor-row">
+          <span>{index + 1}. {row.label}</span>
+          <span className={`script-doctor-status ${row.status.toLowerCase().replace(/\s+/g, "-")}`}>{row.status}</span>
+        </div>
+      ))}
     </div>
   );
 }

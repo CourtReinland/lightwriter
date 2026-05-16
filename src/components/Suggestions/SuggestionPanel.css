@@ -361,3 +361,52 @@
 .mode-btn.analysis .mode-icon {
   color: #8b8bbb;
 }
+
+.script-doctor-workflow {
+  margin: 8px;
+  padding: 9px;
+  background: #181818;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.script-doctor-title {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 7px;
+}
+
+.script-doctor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 10px;
+  color: #aaa;
+  border-top: 1px solid #242424;
+}
+
+.script-doctor-status {
+  flex-shrink: 0;
+  font-size: 8px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.script-doctor-status.done,
+.script-doctor-status.ready {
+  color: #4ade80;
+}
+
+.script-doctor-status.running {
+  color: #93c5fd;
+}
+
+.script-doctor-status.human-decision,
+.script-doctor-status.optional {
+  color: #facc15;
+}
