@@ -1,5 +1,7 @@
 import { useState, useCallback } from "react";
-import { GrokService } from "../../services/grokService";
+import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
+import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import {
   generate,
   isAnalysisMode,
@@ -12,6 +14,8 @@ import type { ComputedBeat } from "../../frameworks/utils";
 import ApiKeyDialog from "./ApiKeyDialog";
 import SuggestionCard from "./SuggestionCard";
 import AnalysisCard from "./AnalysisCard";
+import ReportCard from "./ReportCard";
+import RewriteReviewCard from "./RewriteReviewCard";
 import "./SuggestionPanel.css";
 
 interface SuggestionPanelProps {
@@ -22,9 +26,28 @@ interface SuggestionPanelProps {
   cursorBeats: ComputedBeat[];
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
+  targetPages: number;
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
+  onReplaceScript: (text: string) => void;
 }
+
+interface RewriteReviewState {
+  id: number;
+  label: string;
+  beforeScript: string;
+  afterScript: string;
+  beforeReport: ScriptReportCard;
+  afterReport: ScriptReportCard | null;
+  comparison: ReportCardComparison | null;
+  result: ScriptRewriteResult;
+  diff: RewriteDiffSummary;
+  validation: RewriteValidationResult;
+  applied: boolean;
+  accepted: boolean;
+}
+
+type ScriptDoctorStage = "idle" | "diagnosing" | "treatment" | "requesting" | "validating" | "preview" | "applied" | "rescoring";
 
 const WRITING_MODES: { id: OrchestratorMode; label: string; icon: string }[] = [
   { id: "improve_dialogue", label: "Improve", icon: "^" },
@@ -32,6 +55,7 @@ const WRITING_MODES: { id: OrchestratorMode; label: string; icon: string }[] = [
   { id: "compress", label: "Compress", icon: "-" },
   { id: "alternative_line", label: "Alt Lines", icon: "~" },
   { id: "add_action", label: "Action", icon: "!" },
+  { id: "add_shots", label: "Shots", icon: "MS" },
   { id: "fix_formatting", label: "Fix Fmt", icon: "#" },
 ];
 
@@ -52,10 +76,12 @@ export default function SuggestionPanel({
   cursorBeats,
   knowledgeBase,
   styleProfile,
+  targetPages,
   onApply,
   onInsertBelow,
+  onReplaceScript,
 }: SuggestionPanelProps) {
-  const [apiKey, setApiKey] = useState(GrokService.getStoredApiKey());
+  const [textAiSettings, setTextAiSettings] = useState(() => getSelectedTextAiProviderSettings());
   const [showKeyDialog, setShowKeyDialog] = useState(false);
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -64,10 +90,55 @@ export default function SuggestionPanel({
   const [customPrompt, setCustomPrompt] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [charSelect, setCharSelect] = useState<string>("");
+  const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
+  const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
+  const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
+  const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
+
+  const handleFullShotPass = useCallback(async () => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+    if (!fullScript.trim()) {
+      setError("No script content to rewrite.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Run a full-script shot pass with ${textAiProviderLabel(currentSettings.provider)}? This will send the script scene-by-scene and replace the editor text with a shot-annotated version. Undo remains available in the editor.`,
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode(null);
+    setShotPassProgress({ completed: 0, total: 1, label: "Starting full-script shot pass..." });
+
+    try {
+      const rewritten = await rewriteScriptWithShotDirections(
+        fullScript,
+        currentSettings.apiKey,
+        knowledgeBase,
+        setShotPassProgress,
+      );
+      onReplaceScript(rewritten);
+      setSuggestion("Full-script shot pass complete. The editor has been updated with professional shot direction lines.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Shot pass failed");
+    } finally {
+      setLoading(false);
+      setShotPassProgress(null);
+    }
+  }, [fullScript, knowledgeBase, onReplaceScript]);
 
   const handleSuggest = useCallback(
     async (mode: OrchestratorMode, prompt?: string, characterName?: string) => {
-      if (!apiKey) {
+      const currentSettings = getSelectedTextAiProviderSettings();
+      setTextAiSettings(currentSettings);
+      if (!currentSettings.apiKey.trim()) {
         setShowKeyDialog(true);
         return;
       }
@@ -94,9 +165,10 @@ export default function SuggestionPanel({
           mode,
           customPrompt: prompt,
           characterName,
+          targetPages,
         };
 
-        const result = await generate(ctx, apiKey);
+        const result = await generate(ctx);
         setSuggestion(result);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Unknown error");
@@ -104,13 +176,263 @@ export default function SuggestionPanel({
         setLoading(false);
       }
     },
-    [apiKey, selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile],
+    [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages],
   );
 
   const handleCustomSubmit = useCallback(() => {
     if (!customPrompt.trim()) return;
     handleSuggest("custom", customPrompt.trim());
   }, [customPrompt, handleSuggest]);
+
+  const handleReportCard = useCallback(async () => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+    if (!fullScript.trim()) {
+      setError("No script content to analyze.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode(null);
+    setScriptDoctorStage("diagnosing");
+    try {
+      const report = await runScriptReportCard({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+      });
+      setReportCard(report);
+      setRewriteReview(null);
+      setScriptDoctorStage("treatment");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Report card failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [fullScript, knowledgeBase, styleProfile, targetPages]);
+
+  const handleImproveMetric = useCallback(async (metricId: string, metricName: string) => {
+    if (!reportCard) return;
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode("instant_critique");
+    try {
+      const plan = await generateMetricImprovementPlan({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+        reportCard,
+        metricId,
+        metricName,
+      });
+      setSuggestion(plan);
+      setScriptDoctorStage("treatment");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Improve plan failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [fullScript, knowledgeBase, styleProfile, targetPages, reportCard]);
+
+  const ensureRewriteReady = useCallback((): boolean => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return false;
+    }
+    if (!reportCard) {
+      setError("Run Script Report Card first, then choose a rewrite action.");
+      return false;
+    }
+    if (!fullScript.trim()) {
+      setError("No script content to rewrite.");
+      return false;
+    }
+    return true;
+  }, [fullScript, reportCard]);
+
+  const stageRewritePreview = useCallback((result: ScriptRewriteResult, label: string, beforeScript: string, beforeReport: ScriptReportCard) => {
+    const validation = validateRewriteScript(result.rewrittenScript);
+    setRewriteReview({
+      id: Date.now(),
+      label,
+      beforeScript,
+      afterScript: result.rewrittenScript,
+      beforeReport,
+      afterReport: null,
+      comparison: null,
+      result,
+      diff: summarizeRewriteDiff(beforeScript, result.rewrittenScript),
+      validation,
+      applied: false,
+      accepted: false,
+    });
+    setScriptDoctorStage("preview");
+    setSuggestion(validation.canApply
+      ? `${label} preview is ready. The main editor has NOT been changed. Review the rewrite below, then Apply To Draft or Discard.`
+      : `${label} returned a draft, but validation found issues. The main editor has NOT been changed.`);
+    setLastMode(null);
+  }, []);
+
+  const handleRewriteMetric = useCallback(async (metricId: string, metricName: string) => {
+    if (!ensureRewriteReady() || !reportCard) return;
+    const confirmed = window.confirm(`Ask AI for a full-script rewrite to improve ${metricName}? This will create a preview first and will NOT change the editor until you click Apply To Draft.`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setScriptDoctorStage("requesting");
+    try {
+      const result = await rewriteScriptForMetric({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+        reportCard,
+        metricId,
+        metricName,
+      });
+      setScriptDoctorStage("validating");
+      stageRewritePreview(result, `${metricName} rewrite`, fullScript, reportCard);
+    } catch (e) {
+      setScriptDoctorStage(reportCard ? "treatment" : "idle");
+      setError(e instanceof Error ? e.message : "Metric rewrite failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+
+  const handleFillGaps = useCallback(async (mode: "missing_beats" | "target_pages") => {
+    if (!ensureRewriteReady() || !reportCard) return;
+    const label = mode === "target_pages" ? "complete toward target pages" : "fill missing beats";
+    const confirmed = window.confirm(`Ask AI to ${label}? This will create a rewrite preview first and will NOT change the editor until you click Apply To Draft.`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setScriptDoctorStage("requesting");
+    try {
+      const result = await fillScriptGaps({
+        script: fullScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+        reportCard,
+        mode,
+      });
+      setScriptDoctorStage("validating");
+      stageRewritePreview(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill", fullScript, reportCard);
+    } catch (e) {
+      setScriptDoctorStage(reportCard ? "treatment" : "idle");
+      setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+
+  const handleReScoreRewrite = useCallback(async () => {
+    if (!rewriteReview) return;
+    if (!rewriteReview.applied) {
+      setError("Apply the rewrite to the draft before re-scoring it.");
+      return;
+    }
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setScriptDoctorStage("rescoring");
+    try {
+      const afterReport = await runScriptReportCard({
+        script: rewriteReview.afterScript,
+        knowledgeBase,
+        styleProfile,
+        targetPages,
+      });
+      const comparison = compareReportCards(rewriteReview.beforeReport, afterReport);
+      setReportCard(afterReport);
+      setRewriteReview((current) => current && current.id === rewriteReview.id ? { ...current, afterReport, comparison } : current);
+      setSuggestion(`Re-score complete. Overall score ${comparison.beforeOverall} -> ${comparison.afterOverall} (${comparison.overallDelta > 0 ? "+" : ""}${comparison.overallDelta}).`);
+      setScriptDoctorStage("applied");
+      setLastMode(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-score after rewrite failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [knowledgeBase, rewriteReview, styleProfile, targetPages]);
+
+  const handleApplyRewriteToDraft = useCallback(() => {
+    if (!rewriteReview) return;
+    if (!rewriteReview.validation.canApply) {
+      setError(`Cannot apply yet: ${rewriteReview.validation.issues.join(" ")}`);
+      return;
+    }
+    onReplaceScript(rewriteReview.afterScript);
+    setRewriteReview({ ...rewriteReview, applied: true });
+    setScriptDoctorStage("applied");
+    setSuggestion("Rewrite applied to the main editor. You can Re-score, Revert to the pre-rewrite snapshot, or Accept the rewrite.");
+    setLastMode(null);
+  }, [onReplaceScript, rewriteReview]);
+
+  const handleDiscardRewritePreview = useCallback(() => {
+    setRewriteReview(null);
+    setScriptDoctorStage(reportCard ? "treatment" : "idle");
+    setSuggestion("Rewrite preview discarded. The main editor was not changed.");
+    setLastMode(null);
+  }, [reportCard]);
+
+  const handleAcceptRewrite = useCallback(() => {
+    if (!rewriteReview) return;
+    setRewriteReview({ ...rewriteReview, accepted: true });
+    setSuggestion("Rewrite accepted. You can continue editing or run another report card pass.");
+    setLastMode(null);
+  }, [rewriteReview]);
+
+  const handleRevertRewrite = useCallback(() => {
+    if (!rewriteReview) return;
+    if (!rewriteReview.applied) {
+      handleDiscardRewritePreview();
+      return;
+    }
+    const confirmed = window.confirm("Revert to the pre-rewrite snapshot? This replaces the editor text with the saved pre-rewrite draft.");
+    if (!confirmed) return;
+    onReplaceScript(rewriteReview.beforeScript);
+    setReportCard(rewriteReview.beforeReport);
+    setSuggestion("Rewrite reverted. The editor has been restored to the pre-rewrite snapshot.");
+    setScriptDoctorStage("treatment");
+    setLastMode(null);
+    setRewriteReview(null);
+  }, [handleDiscardRewritePreview, onReplaceScript, rewriteReview]);
+
+  const handleCopyRewriteScript = useCallback(() => {
+    if (!rewriteReview) return;
+    navigator.clipboard.writeText(rewriteReview.afterScript);
+  }, [rewriteReview]);
 
   const characters = knowledgeBase?.characters ?? [];
 
@@ -123,7 +445,7 @@ export default function SuggestionPanel({
           onClick={() => setShowKeyDialog(true)}
           title="Configure API key"
         >
-          {apiKey ? "Key OK" : "Set Key"}
+          {textAiSettings.apiKey.trim() ? `${textAiProviderLabel(textAiSettings.provider)} OK` : "Set Text AI"}
         </button>
       </div>
 
@@ -144,6 +466,34 @@ export default function SuggestionPanel({
           <span className="ctx-badge kb">KB: {knowledgeBase.characters.length}ch</span>
         )}
         {styleProfile && <span className="ctx-badge style">Style</span>}
+      </div>
+
+      <div className="full-shot-pass">
+        <button
+          className="full-shot-pass-btn report-card-btn"
+          onClick={handleReportCard}
+          disabled={loading || !fullScript.trim()}
+          title="Score the whole script against structure frameworks, style match, character consistency, and pacing"
+        >
+          Run Script Report Card
+        </button>
+        <div className="full-shot-pass-hint">
+          Scores Hero's Journey, Save the Cat, Propp, Aristotle, Dan Harmon, style match, characters, and pacing.
+        </div>
+      </div>
+
+      <div className="full-shot-pass">
+        <button
+          className="full-shot-pass-btn"
+          onClick={handleFullShotPass}
+          disabled={loading || !fullScript.trim()}
+          title="Analyze the whole script scene-by-scene and automatically add professional shot direction lines"
+        >
+          Full Script Shot Pass
+        </button>
+        <div className="full-shot-pass-hint">
+          Adds WS/MS/CU coverage, OTS dialogue shots, inserts, reactions, and action beats across the whole script.
+        </div>
       </div>
 
       {!selectedText.trim() && (
@@ -258,11 +608,48 @@ export default function SuggestionPanel({
       {loading && (
         <div className="suggestion-loading">
           <span className="spinner" />
-          Thinking...
+          {shotPassProgress
+            ? `${shotPassProgress.label} (${shotPassProgress.completed}/${shotPassProgress.total})`
+            : "Thinking..."}
         </div>
       )}
 
       {error && <div className="suggestion-error">{error}</div>}
+
+      {(reportCard || rewriteReview || scriptDoctorStage !== "idle") && (
+        <ScriptDoctorWorkflow stage={scriptDoctorStage} reportReady={Boolean(reportCard)} previewReady={Boolean(rewriteReview)} applied={Boolean(rewriteReview?.applied)} />
+      )}
+
+      {reportCard && (
+        <ReportCard
+          report={reportCard}
+          onImproveMetric={handleImproveMetric}
+          onRewriteMetric={handleRewriteMetric}
+          onFillGaps={handleFillGaps}
+          loading={loading}
+        />
+      )}
+
+      {rewriteReview && (
+        <RewriteReviewCard
+          label={rewriteReview.label}
+          result={rewriteReview.result}
+          diff={rewriteReview.diff}
+          beforeReport={rewriteReview.beforeReport}
+          afterReport={rewriteReview.afterReport}
+          comparison={rewriteReview.comparison}
+          loading={loading}
+          accepted={rewriteReview.accepted}
+          applied={rewriteReview.applied}
+          validation={rewriteReview.validation}
+          onApplyToDraft={handleApplyRewriteToDraft}
+          onDiscard={handleDiscardRewritePreview}
+          onRescore={handleReScoreRewrite}
+          onAccept={handleAcceptRewrite}
+          onRevert={handleRevertRewrite}
+          onCopyScript={handleCopyRewriteScript}
+        />
+      )}
 
       {suggestion && lastMode && isAnalysisMode(lastMode) && (
         <AnalysisCard text={suggestion} />
@@ -276,15 +663,42 @@ export default function SuggestionPanel({
         />
       )}
 
+      {suggestion && !lastMode && (
+        <div className="suggestion-success">{suggestion}</div>
+      )}
+
       {showKeyDialog && (
         <ApiKeyDialog
-          onSave={(key) => {
-            setApiKey(key);
+          onSave={() => {
+            setTextAiSettings(getSelectedTextAiProviderSettings());
             setShowKeyDialog(false);
           }}
           onClose={() => setShowKeyDialog(false)}
         />
       )}
+    </div>
+  );
+}
+
+function ScriptDoctorWorkflow({ stage, reportReady, previewReady, applied }: { stage: ScriptDoctorStage; reportReady: boolean; previewReady: boolean; applied: boolean }) {
+  const rows = [
+    { label: "Diagnose draft", status: reportReady ? "DONE" : stage === "diagnosing" ? "RUNNING" : "WAITING" },
+    { label: "Select treatment", status: reportReady ? "READY" : "WAITING" },
+    { label: "Ask AI for revised draft", status: stage === "requesting" ? "RUNNING" : previewReady || applied ? "DONE" : "WAITING" },
+    { label: "Validate AI response", status: stage === "validating" ? "RUNNING" : previewReady || applied ? "DONE" : "WAITING" },
+    { label: "Preview rewrite", status: previewReady && !applied ? "HUMAN DECISION" : applied ? "DONE" : "WAITING" },
+    { label: "Apply to editor", status: applied ? "DONE" : previewReady ? "HUMAN DECISION" : "WAITING" },
+    { label: "Re-score revised draft", status: stage === "rescoring" ? "RUNNING" : applied ? "OPTIONAL" : "WAITING" },
+  ];
+  return (
+    <div className="script-doctor-workflow">
+      <div className="script-doctor-title">Script Doctor Workflow</div>
+      {rows.map((row, index) => (
+        <div key={row.label} className="script-doctor-row">
+          <span>{index + 1}. {row.label}</span>
+          <span className={`script-doctor-status ${row.status.toLowerCase().replace(/\s+/g, "-")}`}>{row.status}</span>
+        </div>
+      ))}
     </div>
   );
 }

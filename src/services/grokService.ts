@@ -1,9 +1,12 @@
+import { getTextAiProviderSettings, saveTextAiProviderSettings } from "./textAiSettingsService";
+
 export type SuggestionMode =
   | "improve_dialogue"
   | "expand_scene"
   | "compress"
   | "alternative_line"
   | "add_action"
+  | "add_shots"
   | "fix_formatting"
   | "general"
   | "custom";
@@ -19,6 +22,8 @@ const MODE_PROMPTS: Record<SuggestionMode, string> = {
     "Write 3 alternative versions of this line/dialogue. Number them 1-3. Each should have a different tone or approach.",
   add_action:
     "Add vivid action/description lines around this content to enhance the visual storytelling.",
+  add_shots:
+    "Add concise camera shot direction lines to this screenplay passage where they clarify visual storytelling. Use MS for Medium Shot, WS for Wide Shot, and CU for Close Up. Format each added shot line as Fountain forced-shot text: !!SHOT CHARACTER NAME ACTION IN CONTEXT, for example !!MS AIDEN TURNS HIS HEAD AND COUGHS. Preserve the original story beats and dialogue.",
   fix_formatting:
     "Fix the Fountain formatting of this content. Ensure proper scene headings, character names, dialogue, parentheticals, and transitions.",
   general:
@@ -29,6 +34,25 @@ const MODE_PROMPTS: Record<SuggestionMode, string> = {
 const SYSTEM_PROMPT = `You are a professional screenwriting assistant. You write in proper Fountain screenplay format.
 
 CRITICAL RULE: Return ONLY the screenplay text itself. No explanations, no commentary, no preamble, no "Here is the improved version:", no "I've made the following changes:", no notes after the text. Your entire response must be valid Fountain screenplay content that can be directly inserted into a script. Do not wrap the text in code blocks or markdown formatting.`;
+
+const DEFAULT_GROK_TIMEOUT_MS = 90_000;
+
+type GrokCompleteOptions = { temperature?: number; maxTokens?: number; timeoutMs?: number };
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_GROK_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Grok API timed out after ${timeoutMs}ms. Check your network/API key or try a smaller batch.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export class GrokService {
   private apiKey: string;
@@ -54,7 +78,7 @@ export class GrokService {
       ? `Context:\n---\n${surroundingContext}\n---\n\nRewrite this:\n---\n${selectedText}\n---`
       : `Rewrite this:\n---\n${selectedText}\n---`;
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -88,9 +112,9 @@ export class GrokService {
   async complete(
     systemPrompt: string,
     userMessage: string,
-    options?: { temperature?: number; maxTokens?: number },
+    options?: GrokCompleteOptions,
   ): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -105,7 +129,7 @@ export class GrokService {
         temperature: options?.temperature ?? 0.8,
         max_tokens: options?.maxTokens ?? 2048,
       }),
-    });
+    }, options?.timeoutMs);
 
     if (!response.ok) {
       const err = await response.text();
@@ -118,15 +142,15 @@ export class GrokService {
   }
 
   static getStoredApiKey(): string | null {
-    return localStorage.getItem("lw-grok-api-key");
+    return getTextAiProviderSettings("grok").apiKey || null;
   }
 
   static setStoredApiKey(key: string): void {
-    localStorage.setItem("lw-grok-api-key", key);
+    saveTextAiProviderSettings("grok", { apiKey: key });
   }
 
   static clearStoredApiKey(): void {
-    localStorage.removeItem("lw-grok-api-key");
+    saveTextAiProviderSettings("grok", { apiKey: "" });
   }
 }
 

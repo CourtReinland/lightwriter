@@ -1,0 +1,223 @@
+.rewrite-review-card {
+  margin: 8px;
+  background: #161616;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 10px;
+  color: #bbb;
+}
+
+.rewrite-review-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  border-bottom: 1px solid #2a2a2a;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.rewrite-review-eyebrow,
+.rewrite-review-section-title {
+  font-size: 9px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.rewrite-review-title {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #eee;
+}
+
+.rewrite-review-copy,
+.rewrite-secondary-btn,
+.rewrite-primary-btn {
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.rewrite-review-copy {
+  font-size: 8px;
+  padding: 3px 6px;
+  background: #222;
+  border: 1px solid #3a3a3a;
+  color: #888;
+}
+
+.rewrite-review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.rewrite-review-metric,
+.rewrite-score-box,
+.rewrite-review-section {
+  background: #202020;
+  border: 1px solid #303030;
+  border-radius: 3px;
+  padding: 7px;
+}
+
+.rewrite-review-metric-value {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #ddd;
+}
+
+.delta-positive {
+  color: #4ade80;
+}
+
+.delta-negative {
+  color: #fb7185;
+}
+
+.rewrite-review-section {
+  margin-top: 6px;
+}
+
+.rewrite-review-section.warning {
+  border-color: #6b3d1f;
+  background: #211a14;
+}
+
+.rewrite-review-section ul {
+  margin: 5px 0 0 16px;
+  padding: 0;
+}
+
+.rewrite-review-section li,
+.rewrite-score-note {
+  font-size: 10px;
+  line-height: 1.4;
+  margin-bottom: 3px;
+}
+
+.rewrite-score-box {
+  margin-top: 6px;
+}
+
+.rewrite-overall-delta {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #eee;
+}
+
+.rewrite-metric-deltas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.delta-chip {
+  font-size: 9px;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 2px 5px;
+  background: #242424;
+}
+
+.delta-chip.positive {
+  border-color: #245d3a;
+}
+
+.delta-chip.negative {
+  border-color: #6b2b39;
+}
+
+.rewrite-review-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rewrite-secondary-btn,
+.rewrite-primary-btn {
+  font-size: 8px;
+  padding: 5px 6px;
+}
+
+.rewrite-secondary-btn {
+  background: #242424;
+  border: 1px solid #444;
+  color: #aaa;
+}
+
+.rewrite-primary-btn {
+  background: #1c2230;
+  border: 1px solid #475569;
+  color: #cbd5e1;
+}
+
+.rewrite-secondary-btn:hover:not(:disabled),
+.rewrite-primary-btn:hover:not(:disabled),
+.rewrite-review-copy:hover:not(:disabled) {
+  color: #fff;
+  border-color: #666;
+  background: #303030;
+}
+
+.rewrite-secondary-btn:disabled,
+.rewrite-primary-btn:disabled,
+.rewrite-review-copy:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rewrite-validation,
+.rewrite-preview-buffer {
+  background: #202020;
+  border: 1px solid #303030;
+  border-radius: 3px;
+  padding: 7px;
+  margin-bottom: 8px;
+}
+
+.rewrite-validation.ok {
+  border-color: #245d3a;
+}
+
+.rewrite-validation.blocked {
+  border-color: #6b2b39;
+  background: #21161a;
+}
+
+.rewrite-validation ul {
+  margin: 5px 0 0 16px;
+  padding: 0;
+}
+
+.rewrite-validation li,
+.rewrite-validation div {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.rewrite-preview-buffer pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #d6d6d6;
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  padding: 8px;
+  margin: 6px 0 0;
+}
+
+.rewrite-review-actions {
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+}

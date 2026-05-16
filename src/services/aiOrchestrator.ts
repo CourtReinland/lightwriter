@@ -1,4 +1,4 @@
-import { GrokService } from "./grokService";
+import { TextAiService } from "./textAiService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import type { ComputedBeat } from "../frameworks/utils";
@@ -12,6 +12,7 @@ export type OrchestratorMode =
   | "compress"
   | "alternative_line"
   | "add_action"
+  | "add_shots"
   | "fix_formatting"
   | "custom"
   // New writing modes
@@ -43,6 +44,7 @@ export interface OrchestratorContext {
   customPrompt?: string;
   characterName?: string;
   characterNames?: string[]; // For scene builder: multiple characters
+  targetPages?: number;
 }
 
 // ── Mode Configs ──
@@ -75,6 +77,25 @@ const MODE_CONFIGS: Record<OrchestratorMode, ModeConfig> = {
   add_action: {
     taskPrompt: "Add vivid action/description lines to enhance visual storytelling. Return ONLY the enhanced version in Fountain format.",
     temperature: 0.8, maxTokens: 2048, needsSelection: true, isAnalysis: false,
+  },
+  add_shots: {
+    taskPrompt: `Add cinematic shot direction lines to the selected screenplay passage while preserving the original dialogue, action, scene order, and story beats.
+
+Use the shot vocabulary exactly:
+- MS = Medium Shot
+- WS = Wide Shot
+- CU = Close Up
+
+Format every added shot as a Fountain forced-shot line using this syntax:
+!!SHOT CHARACTER NAME ACTION IN CONTEXT
+
+Examples of valid added lines:
+!!WS AIDEN CROSSES THE EMPTY PARKING LOT UNDER THE FLICKERING SIGN
+!!MS AIDEN TURNS HIS HEAD AND COUGHS
+!!CU MARA HIDES THE MATCHBOOK IN HER PALM
+
+Choose shots based on scene context and professional film grammar: WS to establish geography or isolation, MS for character action and blocking, CU for important reactions, objects, emotion, or clues. Add only shots that help the reader visualize the scene; do not over-direct every sentence. Return ONLY the revised Fountain text.`,
+    temperature: 0.55, maxTokens: 2048, needsSelection: true, isAnalysis: false,
   },
   fix_formatting: {
     taskPrompt: "Fix the Fountain formatting. Ensure proper scene headings, character names, dialogue, parentheticals, and transitions. Return ONLY the corrected Fountain text.",
@@ -181,7 +202,15 @@ export function buildPrompt(ctx: OrchestratorContext): {
 
   // Style profile
   if (ctx.styleProfile) {
-    sections.push("\n" + StyleProfileService.serializeForPrompt(ctx.styleProfile));
+    sections.push("\n" + StyleProfileService.serializeForPrompt(ctx.styleProfile, ctx.knowledgeBase?.toneStyle?.targetStyle));
+  }
+
+  if (ctx.knowledgeBase?.toneStyle?.styleNotes) {
+    sections.push("\n=== ADDITIONAL STYLE CONSTRAINTS ===\n" + ctx.knowledgeBase.toneStyle.styleNotes);
+  }
+
+  if (ctx.targetPages) {
+    sections.push(`\n=== TARGET LENGTH ===\nTarget screenplay length: ${ctx.targetPages} pages. Use this to calibrate scene density, expansion, compression, and beat weight.`);
   }
 
   // Beat context
@@ -268,11 +297,11 @@ export function buildPrompt(ctx: OrchestratorContext): {
 
 export async function generate(
   ctx: OrchestratorContext,
-  apiKey: string,
+  _apiKey?: string,
 ): Promise<string> {
   const { system, user, temperature, maxTokens } = buildPrompt(ctx);
 
-  const service = new GrokService(apiKey);
+  const service = new TextAiService();
   return service.complete(system, user, { temperature, maxTokens });
 }
 

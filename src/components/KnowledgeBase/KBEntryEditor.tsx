@@ -1,12 +1,12 @@
 import { useState } from "react";
-import type { KBCharacter, KBWorldRule, KBPlotThread, KBCustomNote } from "../../services/knowledgeBase";
+import type { KBCharacter, KBWorldRule, KBPlotThread, KBCustomNote, KBScene } from "../../services/knowledgeBase";
 import "./KBEntryEditor.css";
 
-type EntryType = "character" | "worldRule" | "plotThread" | "customNote";
+type EntryType = "character" | "scene" | "worldRule" | "plotThread" | "customNote";
 
 interface KBEntryEditorProps {
   type: EntryType;
-  existing?: KBCharacter | KBWorldRule | KBPlotThread | KBCustomNote;
+  existing?: KBCharacter | KBScene | KBWorldRule | KBPlotThread | KBCustomNote;
   onSave: (type: EntryType, data: Record<string, unknown>) => void;
   onClose: () => void;
 }
@@ -14,8 +14,9 @@ interface KBEntryEditorProps {
 export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEntryEditorProps) {
   // Character fields
   const [name, setName] = useState((existing as KBCharacter)?.name ?? "");
+  const [sceneHeading, setSceneHeading] = useState((existing as KBScene)?.heading ?? "");
   const [description, setDescription] = useState(
-    (existing as KBCharacter | KBWorldRule | KBPlotThread)?.description ?? "",
+    (existing as KBCharacter | KBScene | KBWorldRule | KBPlotThread)?.description ?? "",
   );
   const [traits, setTraits] = useState(
     (existing as KBCharacter)?.traits?.join(", ") ?? "",
@@ -52,6 +53,13 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
           relationships: (existing as KBCharacter)?.relationships ?? [],
         });
         break;
+      case "scene":
+        onSave(type, {
+          heading: sceneHeading,
+          sceneIndex: (existing as KBScene)?.sceneIndex,
+          description,
+        });
+        break;
       case "worldRule":
         onSave(type, { category, title, description });
         break;
@@ -66,6 +74,7 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
 
   const typeLabel = {
     character: "Character",
+    scene: "Scene",
     worldRule: "World Rule",
     plotThread: "Plot Thread",
     customNote: "Note",
@@ -88,6 +97,15 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
             <input className="kb-input" value={traits} onChange={e => setTraits(e.target.value)} placeholder="brave, sarcastic, loyal" />
             <label className="kb-label">Voice Notes</label>
             <textarea className="kb-textarea" value={voiceNotes} onChange={e => setVoiceNotes(e.target.value)} placeholder="How do they speak? Short sentences? Formal? Slang?" rows={2} />
+          </>
+        )}
+
+        {type === "scene" && (
+          <>
+            <label className="kb-label">Scene Heading</label>
+            <input className="kb-input" value={sceneHeading} onChange={e => setSceneHeading(e.target.value)} placeholder="INT. LIBRARY - NIGHT" autoFocus />
+            <label className="kb-label">Description</label>
+            <textarea className="kb-textarea" value={description} onChange={e => setDescription(e.target.value)} placeholder="What should this scene look and feel like?" rows={4} />
           </>
         )}
 

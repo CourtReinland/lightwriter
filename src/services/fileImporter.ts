@@ -395,12 +395,18 @@ function parseCeltxHtml(html: string): string {
 // Extracts text page-by-page, attempts to reconstruct screenplay structure
 // by analyzing vertical positioning of text items.
 
+export function resolvePdfWorkerSrc(pageHref = globalThis.location?.href): string {
+  if (!pageHref) return "pdf.worker.min.mjs";
+  return new URL("pdf.worker.min.mjs", pageHref).toString();
+}
+
 export async function importPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   // Dynamic import to avoid loading pdf.js unless needed
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Use the worker from public/ (copied from node_modules/pdfjs-dist/build/)
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  // Resolve relative to the current page. A leading slash becomes file:///pdf.worker.min.mjs
+  // in packaged Electron, which makes pdf.js fail to fetch its fake worker module.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = resolvePdfWorkerSrc();
 
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const allLines: string[] = [];
@@ -509,8 +515,40 @@ export async function importPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   return allLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim() + "\n";
 }
 
+// ─── .docx import ────────────────────────────────────────────────────
+// Uses mammoth for client-side DOCX text extraction.
+
+export async function importDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  const mammoth = await import("mammoth/mammoth.browser");
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+
+// ─── .xlsx/.xls import ───────────────────────────────────────────────
+// Uses SheetJS for client-side spreadsheet extraction. Returns readable
+// tab-delimited sheet text so it can be used as style/context input.
+
+export async function importExcel(arrayBuffer: ArrayBuffer): Promise<string> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(arrayBuffer, { type: "array" });
+  const sheets = workbook.SheetNames.map((sheetName) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(worksheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+    });
+    const body = rows
+      .map((row) => row.map((cell) => String(cell ?? "").trim()).join("\t").replace(/\t+$/g, ""))
+      .filter((line) => line.trim())
+      .join("\n");
+    return body ? `# Sheet: ${sheetName}\n${body}` : "";
+  }).filter(Boolean);
+  return sheets.join("\n\n").trim();
+}
+
 /**
- * Detect file type and import accordingly.
+ * Import a File object based on its extension.
  */
 export async function importFile(file: File): Promise<string> {
   const name = file.name.toLowerCase();
@@ -529,6 +567,14 @@ export async function importFile(file: File): Promise<string> {
 
   if (name.endsWith(".pdf")) {
     return importPdf(await file.arrayBuffer());
+  }
+
+  if (name.endsWith(".docx")) {
+    return importDocx(await file.arrayBuffer());
+  }
+
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    return importExcel(await file.arrayBuffer());
   }
 
   return importFountain(await file.text());

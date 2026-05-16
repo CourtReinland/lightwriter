@@ -1,4 +1,4 @@
-import { GrokService } from "./grokService";
+import { TextAiService } from "./textAiService";
 import type { KnowledgeBase } from "./knowledgeBase";
 import type { StyleProfile } from "./styleProfile";
 import { computeBeatRanges, type ComputedBeat } from "../frameworks/utils";
@@ -152,7 +152,7 @@ function parseJsonResponse<T>(text: string, fallback: T): T {
 
 async function analyzePacingBatch(
   scenes: SceneBlock[],
-  service: GrokService,
+  service: TextAiService,
 ): Promise<ScenePacingResult[]> {
   // Batch 3 scenes per API call
   const results: ScenePacingResult[] = [];
@@ -207,7 +207,7 @@ Consider: does the scene move with appropriate speed? Is there enough breathing 
 async function analyzeCharacterConsistency(
   kb: KnowledgeBase,
   content: string,
-  service: GrokService,
+  service: TextAiService,
 ): Promise<CharacterConsistencyResult[]> {
   const results: CharacterConsistencyResult[] = [];
 
@@ -274,7 +274,7 @@ async function analyzeBeatAlignment(
   activeFrameworks: string[],
   targetPages: number,
   totalLines: number,
-  service: GrokService,
+  service: TextAiService,
 ): Promise<BeatAlignmentResult[]> {
   const results: BeatAlignmentResult[] = [];
   const lines = content.split("\n");
@@ -359,7 +359,7 @@ How well does this section serve the expected beat?`;
 
 async function analyzeDialogueQuality(
   scenes: SceneBlock[],
-  service: GrokService,
+  service: TextAiService,
 ): Promise<SceneDialogueResult[]> {
   const results: SceneDialogueResult[] = [];
 
@@ -452,7 +452,7 @@ export async function runFullAnalysis(
   apiKey: string,
   onProgress: (progress: AnalysisProgress, partialResult: Partial<AnalysisResult>) => void,
 ): Promise<AnalysisResult> {
-  const service = new GrokService(apiKey);
+  const service = new TextAiService();
   const scenes = extractScenes(content);
   const totalLines = content.split("\n").length;
 

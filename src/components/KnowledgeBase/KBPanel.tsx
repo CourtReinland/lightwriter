@@ -1,14 +1,28 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   KnowledgeBaseService,
+  parsePlotThreadsFromTableText,
   type KnowledgeBase,
   type KBCharacter,
   type KBWorldRule,
   type KBPlotThread,
   type KBCustomNote,
+  type KBScene,
 } from "../../services/knowledgeBase";
-import { StyleProfileService, type StyleProfile } from "../../services/styleProfile";
-import { GrokService } from "../../services/grokService";
+import { StyleProfileService, inferStyleSampleKind, type AnalyzeStyleSampleInput, type StyleProfile } from "../../services/styleProfile";
+import { importFile } from "../../services/fileImporter";
+import { getSelectedTextAiProviderSettings } from "../../services/textAiSettingsService";
+import type { AssetProvider, GeneratedAsset } from "../../types/assets";
+import { buildAssetKnowledgeItems } from "../../services/assetKnowledgeViewService";
+import {
+  buildGeneratedAssetFromResult,
+  generateImageAsset,
+  getImageProviderSettings,
+  providerLabel,
+  type ImageGenerationRequest,
+} from "../../services/imageGenerationService";
+import { downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
 import "./KBPanel.css";
 
@@ -19,11 +33,16 @@ interface KBPanelProps {
   onStyleChange: (profile: StyleProfile | null) => void;
   scriptContent: string;
   projectId: string;
+  assets: GeneratedAsset[];
+  onAssetsChange: (assets: GeneratedAsset[]) => void;
+  focusSection?: "characters" | "scenes" | null;
+  notice?: string;
+  onClearNotice?: () => void;
 }
 
 type EditTarget = {
-  type: "character" | "worldRule" | "plotThread" | "customNote";
-  existing?: KBCharacter | KBWorldRule | KBPlotThread | KBCustomNote;
+  type: "character" | "scene" | "worldRule" | "plotThread" | "customNote";
+  existing?: KBCharacter | KBScene | KBWorldRule | KBPlotThread | KBCustomNote;
 } | null;
 
 export default function KBPanel({
@@ -33,12 +52,18 @@ export default function KBPanel({
   onStyleChange,
   scriptContent,
   projectId,
+  assets,
+  onAssetsChange,
+  focusSection,
+  notice,
+  onClearNotice,
 }: KBPanelProps) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     characters: true,
+    scenes: false,
     world: false,
     plot: false,
     tone: false,
@@ -46,8 +71,41 @@ export default function KBPanel({
     style: false,
   });
   const [styleSample, setStyleSample] = useState("");
+  const [styleSamples, setStyleSamples] = useState<AnalyzeStyleSampleInput[]>([]);
+  const [plotImporting, setPlotImporting] = useState(false);
+  const [plotImportError, setPlotImportError] = useState<string | null>(null);
+  const [plotImportNotice, setPlotImportNotice] = useState<string | null>(null);
   const [analyzingStyle, setAnalyzingStyle] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
+  const [assetPreviewDataUrls, setAssetPreviewDataUrls] = useState<Record<string, string>>({});
+  const [repromptProvider, setRepromptProvider] = useState<AssetProvider>("gemini-nano-banana");
+  const [repromptingAssetId, setRepromptingAssetId] = useState<string | null>(null);
+  const [repromptTarget, setRepromptTarget] = useState<GeneratedAsset | null>(null);
+  const [repromptDraft, setRepromptDraft] = useState("");
+  const [repromptError, setRepromptError] = useState<string | null>(null);
+
+  const characterAssetItems = buildAssetKnowledgeItems(assets, kb, "character");
+  const sceneAssetItems = buildAssetKnowledgeItems(assets, kb, "scene_set");
+
+  useEffect(() => {
+    if (!focusSection) return;
+    setExpandedSections((prev) => ({ ...prev, characters: focusSection === "characters", scenes: focusSection === "scenes" }));
+  }, [focusSection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const missing = assets.filter((asset) => asset.filePath && !asset.imageDataUrl && !assetPreviewDataUrls[asset.id]);
+    missing.forEach((asset) => {
+      loadPersistedImageDataUrl(asset.filePath)
+        .then((dataUrl) => {
+          if (!cancelled && dataUrl) setAssetPreviewDataUrls((current) => ({ ...current, [asset.id]: dataUrl }));
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [assets, assetPreviewDataUrls]);
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -62,6 +120,11 @@ export default function KBPanel({
         updated = existingId
           ? KnowledgeBaseService.updateCharacter(kb, existingId, data as Partial<KBCharacter>)
           : KnowledgeBaseService.addCharacter(kb, data as Omit<KBCharacter, "id">);
+        break;
+      case "scene":
+        updated = existingId
+          ? KnowledgeBaseService.updateScene(kb, existingId, data as Partial<KBScene>)
+          : KnowledgeBaseService.addScene(kb, data as Omit<KBScene, "id">);
         break;
       case "worldRule":
         updated = existingId
@@ -89,6 +152,7 @@ export default function KBPanel({
     let updated = kb;
     switch (type) {
       case "character": updated = KnowledgeBaseService.deleteCharacter(kb, id); break;
+      case "scene": updated = KnowledgeBaseService.deleteScene(kb, id); break;
       case "worldRule": updated = KnowledgeBaseService.deleteWorldRule(kb, id); break;
       case "plotThread": updated = KnowledgeBaseService.deletePlotThread(kb, id); break;
       case "customNote": updated = KnowledgeBaseService.deleteCustomNote(kb, id); break;
@@ -98,14 +162,14 @@ export default function KBPanel({
   }, [kb, onKBChange]);
 
   const handleScanScript = useCallback(async () => {
-    const apiKey = GrokService.getStoredApiKey();
-    if (!apiKey) { setScanError("Set your Grok API key first."); return; }
+    const settings = getSelectedTextAiProviderSettings();
+    if (!settings.apiKey.trim()) { setScanError("Set your Text AI API key first."); return; }
     if (!scriptContent.trim()) { setScanError("No script content to scan."); return; }
 
     setScanning(true);
     setScanError(null);
     try {
-      const extracted = await KnowledgeBaseService.scanScript(scriptContent, apiKey);
+      const extracted = await KnowledgeBaseService.scanScript(scriptContent, settings.apiKey);
       let updated = { ...kb };
 
       // Merge extracted entries (add new, don't overwrite existing)
@@ -150,14 +214,16 @@ export default function KBPanel({
   }, [kb, onKBChange]);
 
   const handleAnalyzeStyle = useCallback(async () => {
-    const apiKey = GrokService.getStoredApiKey();
-    if (!apiKey) { setStyleError("Set your Grok API key first."); return; }
-    if (!styleSample.trim()) { setStyleError("Paste a writing sample first."); return; }
+    const samples = [...styleSamples];
+    if (styleSample.trim()) {
+      samples.push({ filename: "Pasted sample", kind: "txt", text: styleSample.trim() });
+    }
+    if (!samples.length) { setStyleError("Paste or import at least one writing sample first."); return; }
 
     setAnalyzingStyle(true);
     setStyleError(null);
     try {
-      const profile = await StyleProfileService.analyzeStyle(styleSample, projectId, apiKey);
+      const profile = await StyleProfileService.analyzeSamples(samples, projectId);
       StyleProfileService.saveProfile(profile);
       onStyleChange(profile);
     } catch (e) {
@@ -165,21 +231,165 @@ export default function KBPanel({
     } finally {
       setAnalyzingStyle(false);
     }
-  }, [styleSample, projectId, onStyleChange]);
+  }, [styleSample, styleSamples, projectId, onStyleChange]);
+
+  const handleOpenReprompt = useCallback((asset: GeneratedAsset) => {
+    setRepromptTarget(asset);
+    setRepromptDraft(asset.prompt || "");
+    setRepromptError(null);
+  }, []);
+
+  const handleDownloadAsset = useCallback((asset: GeneratedAsset) => {
+    const dataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+    if (!dataUrl) {
+      setRepromptError(asset.filePath ? `Preview is still loading from ${asset.filePath}. Try again in a moment.` : "No saved image data is available to download yet.");
+      return;
+    }
+    downloadImageDataUrl({ name: asset.name, mimeType: asset.mimeType, dataUrl });
+  }, [assetPreviewDataUrls]);
+
+  const handleRepromptAsset = useCallback(async (asset: GeneratedAsset, promptText: string = asset.prompt) => {
+    if (!promptText.trim()) {
+      setRepromptError("Edit or restore the prior prompt before re-prompting.");
+      return;
+    }
+    const settings = getImageProviderSettings(repromptProvider);
+    if (!settings.apiKey?.trim()) {
+      setRepromptError(`Add a ${providerLabel(repromptProvider)} API key in Assets/Settings first.`);
+      return;
+    }
+    if (!settings.selectedModel?.trim()) {
+      setRepromptError(`Choose a ${providerLabel(repromptProvider)} image model in Assets/Settings first.`);
+      return;
+    }
+
+    setRepromptingAssetId(asset.id);
+    setRepromptError(null);
+    try {
+      const request: ImageGenerationRequest = {
+        projectId: asset.projectId,
+        kind: asset.kind,
+        provider: repromptProvider,
+        model: settings.selectedModel,
+        name: `${asset.name} reroll`,
+        prompt: promptText.trim(),
+        negativePrompt: asset.negativePrompt,
+        scriptRef: asset.scriptRef,
+        aspectRatio: typeof asset.metadata.aspectRatio === "string" ? asset.metadata.aspectRatio : asset.kind === "character" ? "2:3" : "16:9",
+      };
+      const result = await generateImageAsset(request);
+      const filePath = await persistGeneratedImageFile({
+        projectId: request.projectId,
+        name: request.name,
+        mimeType: result.mimeType,
+        dataUrl: result.imageDataUrl,
+      });
+      const generated = buildGeneratedAssetFromResult(request, { ...result, filePath: filePath || result.filePath });
+      AssetService.addAsset(asset.projectId, {
+        ...generated,
+        metadata: {
+          ...generated.metadata,
+          rerolledFromAssetId: asset.id,
+          originalProvider: asset.provider,
+          originalModel: asset.model,
+        },
+      });
+      onAssetsChange(AssetService.getAssets(asset.projectId));
+      setRepromptTarget(null);
+      setRepromptDraft("");
+    } catch (error) {
+      setRepromptError(error instanceof Error ? error.message : "Re-prompt failed.");
+    } finally {
+      setRepromptingAssetId(null);
+    }
+  }, [onAssetsChange, repromptProvider]);
 
   const handleFileImport = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".txt,.fountain";
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => setStyleSample(reader.result as string);
-      reader.readAsText(file);
+    input.accept = ".txt,.fountain,.pdf,.docx,.xlsx,.xls";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      setStyleError(null);
+      try {
+        const imported = await Promise.all(files.map(async (file) => ({
+          filename: file.name,
+          kind: inferStyleSampleKind(file.name),
+          text: await importFile(file),
+        })));
+        setStyleSamples((current) => [...current, ...imported.filter((sample) => sample.text.trim())]);
+      } catch (error) {
+        setStyleError(error instanceof Error ? error.message : "Could not import one of the style sample files.");
+      }
     };
     input.click();
   }, []);
+
+  const handlePlotThreadImport = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx,.xls,.csv,.txt";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      setPlotImporting(true);
+      setPlotImportError(null);
+      setPlotImportNotice(null);
+      try {
+        const imported = await Promise.all(files.map(async (file) => parsePlotThreadsFromTableText(await importFile(file))));
+        const threads = imported.flat();
+        if (!threads.length) {
+          setPlotImportError("No plot threads found. Use columns like Thread/Title, Status, and Description.");
+          return;
+        }
+        const before = kb.plotThreads.length;
+        const updated = KnowledgeBaseService.mergePlotThreads(kb, threads);
+        const added = updated.plotThreads.length - before;
+        KnowledgeBaseService.saveKB(updated);
+        onKBChange(updated);
+        setPlotImportNotice(`Imported ${added} new plot thread${added === 1 ? "" : "s"}${threads.length > added ? `; skipped ${threads.length - added} duplicate${threads.length - added === 1 ? "" : "s"}` : ""}.`);
+      } catch (error) {
+        setPlotImportError(error instanceof Error ? error.message : "Could not import plot threads from that file.");
+      } finally {
+        setPlotImporting(false);
+      }
+    };
+    input.click();
+  }, [kb, onKBChange]);
+
+  const renderGeneratedAssetDetails = (asset: GeneratedAsset) => {
+    const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+    const isEditingReprompt = repromptTarget?.id === asset.id;
+    return (
+      <>
+        {asset.filePath && (
+          <div className="kb-asset-file">
+            <span>Local file</span>
+            <a href={`file://${asset.filePath}`} title={asset.filePath}>{asset.filePath}</a>
+          </div>
+        )}
+        <div className="kb-entry-actions kb-asset-actions">
+          <button onClick={() => handleOpenReprompt(asset)}>Re-prompt</button>
+          <button onClick={() => handleDownloadAsset(asset)} disabled={!previewDataUrl}>Download</button>
+        </div>
+        {isEditingReprompt && (
+          <div className="kb-reprompt-editor">
+            <label>Prior prompt / edit before re-prompting</label>
+            <textarea value={repromptDraft} onChange={(event) => setRepromptDraft(event.target.value)} />
+            <div className="kb-entry-actions">
+              <button onClick={() => handleRepromptAsset(asset, repromptDraft)} disabled={repromptingAssetId === asset.id}>
+                {repromptingAssetId === asset.id ? "Generating..." : "Generate Re-prompt"}
+              </button>
+              <button onClick={() => { setRepromptTarget(null); setRepromptDraft(""); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="kb-panel">
@@ -189,7 +399,22 @@ export default function KBPanel({
           {scanning ? "Scanning..." : "Scan Script"}
         </button>
       </div>
+      {notice && (
+        <div className="kb-notice">
+          <span>{notice}</span>
+          <button onClick={onClearNotice}>x</button>
+        </div>
+      )}
       {scanError && <div className="kb-error">{scanError}</div>}
+      {repromptError && <div className="kb-error">{repromptError}</div>}
+
+      <div className="kb-reprompt-bar">
+        <span>Re-roll provider</span>
+        <select value={repromptProvider} onChange={(event) => setRepromptProvider(event.target.value as AssetProvider)}>
+          <option value="gemini-nano-banana">{providerLabel("gemini-nano-banana")}</option>
+          <option value="grok-imagine">{providerLabel("grok-imagine")}</option>
+        </select>
+      </div>
 
       {/* Characters */}
       <div className="kb-section">
@@ -197,16 +422,68 @@ export default function KBPanel({
           <span>{expandedSections.characters ? "v" : ">"} Characters ({kb.characters.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "character" }); }}>+</button>
         </button>
-        {expandedSections.characters && kb.characters.map(c => (
-          <div key={c.id} className="kb-entry">
-            <div className="kb-entry-name">{c.name}</div>
-            <div className="kb-entry-preview">{c.description.slice(0, 60)}{c.description.length > 60 ? "..." : ""}</div>
-            <div className="kb-entry-actions">
-              <button onClick={() => setEditTarget({ type: "character", existing: c })}>Edit</button>
-              <button onClick={() => handleDelete("character", c.id)}>Del</button>
-            </div>
-          </div>
-        ))}
+        {expandedSections.characters && (
+          <>
+            {kb.characters.map(c => (
+              <div key={c.id} className="kb-entry">
+                <div className="kb-entry-name">{c.name}</div>
+                <div className="kb-entry-preview">{c.description.slice(0, 120)}{c.description.length > 120 ? "..." : ""}</div>
+                <div className="kb-entry-actions">
+                  <button onClick={() => setEditTarget({ type: "character", existing: c })}>Edit</button>
+                  <button onClick={() => handleDelete("character", c.id)}>Del</button>
+                </div>
+              </div>
+            ))}
+            {characterAssetItems.map(({ asset, title, description }) => {
+              const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+              return (
+                <div key={asset.id} className="kb-asset-entry">
+                  {previewDataUrl && <img className="kb-asset-thumb" src={previewDataUrl} alt={title} />}
+                  <div className="kb-asset-body">
+                    <div className="kb-entry-name">{title}</div>
+                    <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
+                    {renderGeneratedAssetDetails(asset)}
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      {/* Scenes */}
+      <div className="kb-section">
+        <button className="kb-section-header" onClick={() => toggleSection("scenes")}>
+          <span>{expandedSections.scenes ? "v" : ">"} Scenes ({Math.max(kb.scenes?.length || 0, sceneAssetItems.length)})</span>
+          <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "scene" }); }}>+</button>
+        </button>
+        {expandedSections.scenes && (
+          <>
+            {(kb.scenes || []).map(scene => (
+              <div key={scene.id} className="kb-entry">
+                <div className="kb-entry-name">{scene.heading}</div>
+                <div className="kb-entry-preview">{scene.description.slice(0, 120)}{scene.description.length > 120 ? "..." : ""}</div>
+                <div className="kb-entry-actions">
+                  <button onClick={() => setEditTarget({ type: "scene", existing: scene })}>Edit</button>
+                  <button onClick={() => handleDelete("scene", scene.id)}>Del</button>
+                </div>
+              </div>
+            ))}
+            {sceneAssetItems.map(({ asset, title, description }) => {
+              const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+              return (
+                <div key={asset.id} className="kb-asset-entry">
+                  {previewDataUrl && <img className="kb-asset-thumb wide" src={previewDataUrl} alt={title} />}
+                  <div className="kb-asset-body">
+                    <div className="kb-entry-name">{title}</div>
+                    <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
+                    {renderGeneratedAssetDetails(asset)}
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
 
       {/* World Rules */}
@@ -232,15 +509,24 @@ export default function KBPanel({
           <span>{expandedSections.plot ? "v" : ">"} Plot Threads ({kb.plotThreads.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "plotThread" }); }}>+</button>
         </button>
-        {expandedSections.plot && kb.plotThreads.map(t => (
-          <div key={t.id} className="kb-entry">
-            <div className="kb-entry-name">{t.title} <span className={`kb-status ${t.status}`}>{t.status}</span></div>
-            <div className="kb-entry-actions">
-              <button onClick={() => setEditTarget({ type: "plotThread", existing: t })}>Edit</button>
-              <button onClick={() => handleDelete("plotThread", t.id)}>Del</button>
+        {expandedSections.plot && (
+          <>
+            <div className="kb-entry-actions kb-import-actions">
+              <button onClick={handlePlotThreadImport} disabled={plotImporting}>{plotImporting ? "Importing..." : "Import Excel/CSV"}</button>
             </div>
-          </div>
-        ))}
+            {plotImportNotice && <div className="kb-notice inline">{plotImportNotice}</div>}
+            {plotImportError && <div className="kb-error">{plotImportError}</div>}
+            {kb.plotThreads.map(t => (
+              <div key={t.id} className="kb-entry">
+                <div className="kb-entry-name">{t.title} <span className={`kb-status ${t.status}`}>{t.status}</span></div>
+                <div className="kb-entry-actions">
+                  <button onClick={() => setEditTarget({ type: "plotThread", existing: t })}>Edit</button>
+                  <button onClick={() => handleDelete("plotThread", t.id)}>Del</button>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Tone & Style */}
@@ -252,7 +538,9 @@ export default function KBPanel({
           <div className="kb-tone-fields">
             <input className="kb-input-sm" placeholder="Genre" value={kb.toneStyle.genre} onChange={e => handleToneChange("genre", e.target.value)} />
             <input className="kb-input-sm" placeholder="Mood" value={kb.toneStyle.mood} onChange={e => handleToneChange("mood", e.target.value)} />
+            <input className="kb-input-sm" placeholder="Target/director style (e.g. Kubrick restraint, Pixar emotional clarity)" value={kb.toneStyle.targetStyle} onChange={e => handleToneChange("targetStyle", e.target.value)} />
             <textarea className="kb-textarea-sm" placeholder="Pacing notes" value={kb.toneStyle.pacingNotes} onChange={e => handleToneChange("pacingNotes", e.target.value)} rows={2} />
+            <textarea className="kb-textarea-sm" placeholder="Style constraints / blend notes (what to preserve, what to avoid)" value={kb.toneStyle.styleNotes} onChange={e => handleToneChange("styleNotes", e.target.value)} rows={3} />
           </div>
         )}
       </div>
@@ -288,6 +576,21 @@ export default function KBPanel({
                 <div className="kb-style-row"><span>Tense:</span> {styleProfile.tense}</div>
                 <div className="kb-style-row"><span>Vocab:</span> {styleProfile.vocabularyComplexity}</div>
                 <div className="kb-style-row"><span>Dialogue:</span> {styleProfile.dialogueToActionRatio}</div>
+                {styleProfile.samples?.length ? (
+                  <div className="kb-style-row"><span>Samples:</span> {styleProfile.samples.length} file(s), {styleProfile.samples.reduce((sum, sample) => sum + sample.wordCount, 0)} words</div>
+                ) : null}
+                {styleProfile.confidenceScore ? (
+                  <div className="kb-style-row"><span>Confidence:</span> {Math.round(styleProfile.confidenceScore)}/100</div>
+                ) : null}
+                {styleProfile.styleContract && (
+                  <div className="kb-style-analysis"><strong>Style contract:</strong> {styleProfile.styleContract}</div>
+                )}
+                {styleProfile.doRules?.length ? (
+                  <div className="kb-style-analysis"><strong>Do:</strong> {styleProfile.doRules.join("; ")}</div>
+                ) : null}
+                {styleProfile.avoidRules?.length ? (
+                  <div className="kb-style-analysis"><strong>Avoid:</strong> {styleProfile.avoidRules.join("; ")}</div>
+                ) : null}
                 {styleProfile.rawAnalysis && (
                   <div className="kb-style-analysis">{styleProfile.rawAnalysis}</div>
                 )}
@@ -295,13 +598,23 @@ export default function KBPanel({
             )}
             <textarea
               className="kb-textarea-sm"
-              placeholder="Paste a writing sample to analyze style..."
+              placeholder="Paste a writing sample, or import txt/fountain/pdf/docx/xlsx samples below..."
               value={styleSample}
               onChange={e => setStyleSample(e.target.value)}
               rows={4}
             />
+            {styleSamples.length > 0 && (
+              <div className="kb-style-samples">
+                {styleSamples.map((sample, index) => (
+                  <div key={`${sample.filename}-${index}`} className="kb-style-sample-row">
+                    <span>{sample.filename}</span>
+                    <button onClick={() => setStyleSamples((current) => current.filter((_, i) => i !== index))}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="kb-style-actions">
-              <button className="kb-action-btn" onClick={handleFileImport}>Import .txt</button>
+              <button className="kb-action-btn" onClick={handleFileImport}>Import samples</button>
               <button className="kb-action-btn primary" onClick={handleAnalyzeStyle} disabled={analyzingStyle}>
                 {analyzingStyle ? "Analyzing..." : "Analyze Style"}
               </button>

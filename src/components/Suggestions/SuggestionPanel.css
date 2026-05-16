@@ -249,6 +249,64 @@
   color: #c084fc;
 }
 
+.full-shot-pass {
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.full-shot-pass-btn {
+  width: 100%;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 7px 8px;
+  background: #2a1f12;
+  border: 1px solid #8b5a1f;
+  color: #fbbf24;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.full-shot-pass-btn:hover:not(:disabled) {
+  background: #3a2a16;
+  border-color: #d97706;
+}
+
+.full-shot-pass-btn.report-card-btn {
+  background: #1c2230;
+  border-color: #475569;
+  color: #cbd5e1;
+}
+
+.full-shot-pass-btn.report-card-btn:hover:not(:disabled) {
+  background: #253044;
+  border-color: #64748b;
+}
+
+.full-shot-pass-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.full-shot-pass-hint {
+  margin-top: 6px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: #777;
+}
+
+.suggestion-success {
+  padding: 10px 12px;
+  font-size: 10px;
+  color: #4ade80;
+  background: #132213;
+  margin: 8px;
+  border-radius: 3px;
+  border: 1px solid #1f3a1f;
+  line-height: 1.5;
+}
+
 /* Advanced tools section */
 .advanced-toggle {
   display: block;
@@ -302,4 +360,53 @@
 
 .mode-btn.analysis .mode-icon {
   color: #8b8bbb;
+}
+
+.script-doctor-workflow {
+  margin: 8px;
+  padding: 9px;
+  background: #181818;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.script-doctor-title {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 7px;
+}
+
+.script-doctor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 10px;
+  color: #aaa;
+  border-top: 1px solid #242424;
+}
+
+.script-doctor-status {
+  flex-shrink: 0;
+  font-size: 8px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.script-doctor-status.done,
+.script-doctor-status.ready {
+  color: #4ade80;
+}
+
+.script-doctor-status.running {
+  color: #93c5fd;
+}
+
+.script-doctor-status.human-decision,
+.script-doctor-status.optional {
+  color: #facc15;
 }

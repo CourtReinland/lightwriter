@@ -1,3 +1,6 @@
+import { TextAiService } from "./textAiService";
+import type { GeneratedAsset } from "../types/assets";
+
 // ── Knowledge Base Types ──
 
 export interface KBCharacter {
@@ -23,10 +26,19 @@ export interface KBPlotThread {
   description: string;
 }
 
+export interface KBScene {
+  id: string;
+  heading: string;
+  sceneIndex?: number;
+  description: string;
+}
+
 export interface KBToneStyle {
   genre: string;
   mood: string;
   pacingNotes: string;
+  targetStyle: string;
+  styleNotes: string;
 }
 
 export interface KBCustomNote {
@@ -38,11 +50,77 @@ export interface KBCustomNote {
 export interface KnowledgeBase {
   projectId: string;
   characters: KBCharacter[];
+  scenes: KBScene[];
   worldRules: KBWorldRule[];
   plotThreads: KBPlotThread[];
   toneStyle: KBToneStyle;
   customNotes: KBCustomNote[];
   updatedAt: number;
+}
+
+
+export type ImportedPlotThread = Omit<KBPlotThread, "id">;
+
+function normalizePlotStatus(value: string): KBPlotThread["status"] {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "resolved") return "resolved";
+  if (normalized === "foreshadowed" || normalized === "foreshadow") return "foreshadowed";
+  return "unresolved";
+}
+
+function splitTableLine(line: string): string[] {
+  return line.split(/	|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+}
+
+function headerIndex(headers: string[], candidates: string[]): number {
+  return headers.findIndex((header) => candidates.some((candidate) => header.includes(candidate)));
+}
+
+export function parsePlotThreadsFromTableText(text: string): ImportedPlotThread[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("# Sheet:"));
+  if (!lines.length) return [];
+
+  const firstRawCells = splitTableLine(lines[0]);
+  const firstCells = firstRawCells.map((cell) => cell.toLowerCase());
+  const titleHeaderIndex = headerIndex(firstCells, ["thread", "plot", "title", "storyline", "arc"]);
+  const descriptionHeaderIndex = headerIndex(firstCells, ["description", "summary", "notes", "context", "detail"]);
+  const statusHeaderIndex = headerIndex(firstCells, ["status", "state"]);
+  const hasHeader = titleHeaderIndex >= 0 || descriptionHeaderIndex >= 0 || statusHeaderIndex >= 0;
+
+  const rows = hasHeader ? lines.slice(1) : lines;
+  const threads: ImportedPlotThread[] = [];
+  for (const row of rows) {
+    const cells = splitTableLine(row);
+    if (!cells.some(Boolean)) continue;
+
+    const title = (hasHeader ? cells[titleHeaderIndex >= 0 ? titleHeaderIndex : 0] : cells[0])?.trim() || "";
+    if (!title) continue;
+
+    const statusCell = hasHeader && statusHeaderIndex >= 0 ? cells[statusHeaderIndex] : cells.length >= 3 ? cells[1] : "";
+    const status = normalizePlotStatus(statusCell || "");
+    const descriptionCell = hasHeader && descriptionHeaderIndex >= 0
+      ? cells[descriptionHeaderIndex]
+      : cells.length >= 3
+        ? cells.slice(2).filter(Boolean).join(" ")
+        : cells.slice(1).filter(Boolean).join(" ");
+
+    const extraNotes = hasHeader
+      ? cells
+          .map((cell, index) => ({ cell, index }))
+          .filter(({ cell, index }) => cell && index !== titleHeaderIndex && index !== statusHeaderIndex && index !== descriptionHeaderIndex)
+          .map(({ cell, index }) => `${firstRawCells[index] || `Column ${index + 1}`}: ${cell}`)
+      : [];
+
+    threads.push({
+      title,
+      status,
+      description: [descriptionCell, ...extraNotes].filter(Boolean).join(" ").trim(),
+    });
+  }
+  return threads;
 }
 
 // ── Service ──
@@ -60,9 +138,10 @@ function emptyKB(projectId: string): KnowledgeBase {
   return {
     projectId,
     characters: [],
+    scenes: [],
     worldRules: [],
     plotThreads: [],
-    toneStyle: { genre: "", mood: "", pacingNotes: "" },
+    toneStyle: { genre: "", mood: "", pacingNotes: "", targetStyle: "", styleNotes: "" },
     customNotes: [],
     updatedAt: Date.now(),
   };
@@ -72,7 +151,16 @@ export class KnowledgeBaseService {
   static getKB(projectId: string): KnowledgeBase {
     try {
       const raw = localStorage.getItem(storageKey(projectId));
-      if (raw) return JSON.parse(raw) as KnowledgeBase;
+      if (raw) {
+        const parsed = JSON.parse(raw) as KnowledgeBase;
+        const empty = emptyKB(projectId);
+        return {
+          ...empty,
+          ...parsed,
+          scenes: parsed.scenes || [],
+          toneStyle: { ...empty.toneStyle, ...(parsed.toneStyle || {}) },
+        };
+      }
     } catch {
       // corrupt data
     }
@@ -95,6 +183,54 @@ export class KnowledgeBaseService {
     return { ...kb, characters: kb.characters.filter(c => c.id !== id) };
   }
 
+  // ── Scene CRUD ──
+  static addScene(kb: KnowledgeBase, scene: Omit<KBScene, "id">): KnowledgeBase {
+    return { ...kb, scenes: [...(kb.scenes || []), { ...scene, id: uid() }] };
+  }
+  static updateScene(kb: KnowledgeBase, id: string, updates: Partial<KBScene>): KnowledgeBase {
+    return { ...kb, scenes: (kb.scenes || []).map(s => s.id === id ? { ...s, ...updates } : s) };
+  }
+  static deleteScene(kb: KnowledgeBase, id: string): KnowledgeBase {
+    return { ...kb, scenes: (kb.scenes || []).filter(s => s.id !== id) };
+  }
+
+  static mergeGeneratedAssets(kb: KnowledgeBase, assets: GeneratedAsset[]): KnowledgeBase {
+    let updated = { ...kb, scenes: kb.scenes || [] };
+    for (const asset of assets) {
+      if (asset.kind === "character") {
+        const name = asset.scriptRef.characterName || asset.name;
+        if (!name.trim()) continue;
+        const existing = updated.characters.find(c => c.name.toLowerCase() === name.toLowerCase());
+        if (!existing) {
+          updated = this.addCharacter(updated, {
+            name,
+            description: asset.scriptRef.contentExcerpt || asset.prompt,
+            traits: [],
+            voiceNotes: "",
+            relationships: [],
+          });
+        } else if (!existing.description.trim() && (asset.scriptRef.contentExcerpt || asset.prompt)) {
+          updated = this.updateCharacter(updated, existing.id, { description: asset.scriptRef.contentExcerpt || asset.prompt });
+        }
+      }
+      if (asset.kind === "scene_set") {
+        const heading = asset.scriptRef.sceneHeading || asset.name;
+        if (!heading.trim()) continue;
+        const existing = updated.scenes.find(s => s.sceneIndex === asset.scriptRef.sceneIndex || s.heading.toLowerCase() === heading.toLowerCase());
+        if (!existing) {
+          updated = this.addScene(updated, {
+            heading,
+            sceneIndex: asset.scriptRef.sceneIndex,
+            description: asset.scriptRef.contentExcerpt || asset.prompt,
+          });
+        } else if (!existing.description.trim() && (asset.scriptRef.contentExcerpt || asset.prompt)) {
+          updated = this.updateScene(updated, existing.id, { description: asset.scriptRef.contentExcerpt || asset.prompt });
+        }
+      }
+    }
+    return updated;
+  }
+
   // ── World Rule CRUD ──
   static addWorldRule(kb: KnowledgeBase, rule: Omit<KBWorldRule, "id">): KnowledgeBase {
     return { ...kb, worldRules: [...kb.worldRules, { ...rule, id: uid() }] };
@@ -115,6 +251,23 @@ export class KnowledgeBaseService {
   }
   static deletePlotThread(kb: KnowledgeBase, id: string): KnowledgeBase {
     return { ...kb, plotThreads: kb.plotThreads.filter(t => t.id !== id) };
+  }
+
+  static mergePlotThreads(kb: KnowledgeBase, threads: ImportedPlotThread[]): KnowledgeBase {
+    let updated = kb;
+    for (const thread of threads) {
+      const title = thread.title.trim();
+      if (!title) continue;
+      const exists = updated.plotThreads.some((existing) => existing.title.trim().toLowerCase() === title.toLowerCase());
+      if (!exists) {
+        updated = this.addPlotThread(updated, {
+          title,
+          status: thread.status,
+          description: thread.description.trim(),
+        });
+      }
+    }
+    return updated;
   }
 
   // ── Custom Note CRUD ──
@@ -150,9 +303,15 @@ export class KnowledgeBaseService {
     };
 
     // Tone first (small)
-    if (kb.toneStyle.genre || kb.toneStyle.mood) {
+    if (kb.toneStyle.genre || kb.toneStyle.mood || kb.toneStyle.pacingNotes || kb.toneStyle.targetStyle || kb.toneStyle.styleNotes) {
       addSection("TONE & STYLE",
-        `Genre: ${kb.toneStyle.genre || "N/A"}\nMood: ${kb.toneStyle.mood || "N/A"}\nPacing: ${kb.toneStyle.pacingNotes || "N/A"}`);
+        [
+          `Genre: ${kb.toneStyle.genre || "N/A"}`,
+          `Mood: ${kb.toneStyle.mood || "N/A"}`,
+          `Pacing: ${kb.toneStyle.pacingNotes || "N/A"}`,
+          kb.toneStyle.targetStyle ? `Target/director style: ${kb.toneStyle.targetStyle}` : "",
+          kb.toneStyle.styleNotes ? `Style constraints: ${kb.toneStyle.styleNotes}` : "",
+        ].filter(Boolean).join("\n"));
     }
 
     // Prioritize mentioned characters
@@ -198,39 +357,20 @@ export class KnowledgeBaseService {
   ): Promise<Partial<KnowledgeBase>> {
     const truncated = content.length > 50000 ? content.slice(0, 50000) : content;
 
-    const response = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "grok-3-mini-fast",
-        messages: [
-          {
-            role: "system",
-            content: `You are a screenplay analysis tool. Extract story elements from the screenplay and return ONLY a valid JSON object with this exact structure:
+    const system = `You are a screenplay analysis tool. Extract story elements from the screenplay and return ONLY a valid JSON object with this exact structure:
 {
   "characters": [{ "name": "string", "description": "string", "traits": ["string"], "voiceNotes": "string", "relationships": [{ "characterName": "string", "description": "string" }] }],
   "worldRules": [{ "category": "setting|magic|technology|time_period|other", "title": "string", "description": "string" }],
   "plotThreads": [{ "title": "string", "status": "unresolved|foreshadowed|resolved", "description": "string" }],
-  "toneStyle": { "genre": "string", "mood": "string", "pacingNotes": "string" }
+  "toneStyle": { "genre": "string", "mood": "string", "pacingNotes": "string", "targetStyle": "string", "styleNotes": "string" }
 }
-Return ONLY the JSON. No markdown. No explanation.`,
-          },
-          {
-            role: "user",
-            content: `Analyze this screenplay and extract all characters, world rules, plot threads, and tone:\n\n${truncated}`,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-    });
+Return ONLY the JSON. No markdown. No explanation.`;
 
-    if (!response.ok) throw new Error(`Scan failed: ${response.status}`);
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content ?? "";
+    const text = await new TextAiService().complete(
+      system,
+      `Analyze this screenplay and extract all characters, world rules, plot threads, and tone:\n\n${truncated}`,
+      { temperature: 0.3, maxTokens: 4096 },
+    );
 
     // Try to parse JSON from the response
     try {

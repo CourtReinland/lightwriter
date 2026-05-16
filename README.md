@@ -90,10 +90,15 @@ Powered by xAI's Grok API with these modes:
 - **Compress** — Tighten content while preserving beats
 - **Alt Lines** — Generate 3 alternative versions with different tones
 - **Action** — Add vivid visual description around content
+- **Shots** — Add context-aware `MS`/`WS`/`CU` camera direction lines in forced Fountain shot format
 - **Fix Fmt** — Correct Fountain formatting errors
 - **Custom Prompt** — Free-text: ask anything about the selected text
 
 Suggestions can be applied as a replacement or inserted below the selection. LLM explanatory text is automatically stripped — only screenplay content is inserted.
+
+For production visualization workflows, **Full Script Shot Pass** analyzes the screenplay scene-by-scene and automatically rewrites the editor content with dense professional shot coverage for downstream image/video generation tools.
+
+The **Script Report Card / Script Doctor** workflow is intentionally safer: Run Script Report Card diagnoses the draft, Plan Fix returns strategy only, Preview Rewrite / Fill Missing Beats / Complete To Target Pages create a validation-gated rewrite preview, and the editor is not changed until the writer clicks **Apply To Draft**. See `docs/AI-WRITING-GUIDE.md` for the full pipeline contract.
 
 ### Views
 - **Write** — The main editor with syntax highlighting, overlays, and element bar
@@ -103,7 +108,7 @@ Suggestions can be applied as a replacement or inserted below the selection. LLM
 ### Import / Export
 **Import:** `.fountain`, `.fdx` (Final Draft), `.celtx` — via the project menu (LW button)
 
-**Export:** `.fountain`, `.fdx` (Final Draft XML), `.pdf` (print-to-PDF via browser) — via the Export dropdown
+**Export:** `.fountain`, `.fdx` (Final Draft XML), `.pdf` (print-to-PDF via browser) — via the Export dropdown. AI Assets can also export a LightWriter-native package and a narrower ScriptToScreen manifest; see `docs/SCRIPT2SCREEN-HANDOFF.md` for the handoff contract.
 
 ### Project Management
 - Multiple projects stored in browser localStorage

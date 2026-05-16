@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain } from "electron";
+import * as fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +12,67 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const DIST = path.join(__dirname, "..", "dist");
 
 let mainWindow: BrowserWindow | null = null;
+
+function extensionForMimeType(mimeType: string): string {
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/gif") return "gif";
+  return "png";
+}
+
+function mimeTypeForFilePath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  return "image/png";
+}
+
+function assetRootDir(): string {
+  return path.join(app.getPath("userData"), "assets");
+}
+
+function assertInsideAssetRoot(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  const root = path.resolve(assetRootDir());
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Asset image path is outside LightWriter's asset folder.");
+  }
+  return resolved;
+}
+
+function safePathSegment(value: string): string {
+  return value
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "asset";
+}
+
+function registerAssetIpc() {
+  ipcMain.handle("lightwriter:save-asset-image", async (_event, request: { projectId?: string; assetId?: string; name?: string; mimeType?: string; dataUrl?: string }) => {
+    const dataUrl = request.dataUrl || "";
+    const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
+    if (!match) throw new Error("Invalid generated image payload.");
+    const mimeType = request.mimeType || match[1] || "image/png";
+    const projectId = safePathSegment(request.projectId || "project");
+    const assetId = request.assetId ? `${safePathSegment(request.assetId)}_` : `${Date.now().toString(36)}_`;
+    const fileName = `${assetId}${safePathSegment(request.name || "lightwriter_asset")}.${extensionForMimeType(mimeType)}`;
+    const dir = path.join(assetRootDir(), projectId);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, fileName);
+    await fs.writeFile(filePath, Buffer.from(match[2], "base64"));
+    return { filePath };
+  });
+
+  ipcMain.handle("lightwriter:load-asset-image", async (_event, request: { filePath?: string }) => {
+    const filePath = assertInsideAssetRoot(request.filePath || "");
+    const bytes = await fs.readFile(filePath);
+    const mimeType = mimeTypeForFilePath(filePath);
+    return { dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}` };
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -26,6 +88,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
+      preload: path.join(__dirname, "preload.mjs"),
     },
   });
 
@@ -134,6 +197,7 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
+  registerAssetIpc();
   buildMenu();
   createWindow();
 

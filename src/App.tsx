@@ -16,6 +16,7 @@ import ElementBar, {
   stripForcePrefix,
 } from "./components/Editor/ElementBar";
 import KBPanel from "./components/KnowledgeBase/KBPanel";
+import AssetPanel from "./components/Assets/AssetPanel";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import { useFountainParser } from "./hooks/useFountainParser";
 import { exportFountain, exportFdx, exportPdf } from "./services/fountainExporter";
@@ -25,6 +26,8 @@ import {
 } from "./services/storageService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./services/knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./services/styleProfile";
+import { AssetService } from "./services/assetService";
+import type { GeneratedAsset, AssetKind } from "./types/assets";
 import type { ComputedBeat } from "./frameworks/utils";
 
 const SAMPLE_FOUNTAIN = `Title: My Screenplay
@@ -112,11 +115,17 @@ export default function App() {
   const [cardAiDescs, setCardAiDescs] = useState<Record<number, string>>({});
   const [cardAiEnabled, setCardAiEnabled] = useState(false);
   const [showKB, setShowKB] = useState(false);
+  const [showAssets, setShowAssets] = useState(false);
+  const [kbFocus, setKbFocus] = useState<"characters" | "scenes" | null>(null);
+  const [kbNotice, setKbNotice] = useState("");
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(() =>
     KnowledgeBaseService.getKB(loadOrCreateInitialProject().id),
   );
   const [styleProfile, setStyleProfile] = useState<StyleProfile | null>(() =>
     StyleProfileService.getProfile(loadOrCreateInitialProject().id),
+  );
+  const [assets, setAssets] = useState<GeneratedAsset[]>(() =>
+    AssetService.getAssets(loadOrCreateInitialProject().id),
   );
   const [cursorBeats, setCursorBeats] = useState<ComputedBeat[]>([]);
   const [cursorLine, setCursorLine] = useState(0);
@@ -298,6 +307,22 @@ export default function App() {
     [],
   );
 
+  const handleReplaceScript = useCallback(
+    (text: string) => {
+      const view = editorViewRef.current;
+      if (!view) {
+        handleContentChange(text);
+        return;
+      }
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+        selection: { anchor: Math.min(text.length, view.state.selection.main.head) },
+      });
+      view.focus();
+    },
+    [handleContentChange],
+  );
+
   const handleExportFountain = useCallback(() => {
     const filename = project.name.replace(/[^a-zA-Z0-9_-]/g, "_") + ".fountain";
     exportFountain(project.content, filename);
@@ -321,6 +346,9 @@ export default function App() {
     });
     StorageService.setActiveProjectId(loaded.id);
     setProject(loaded);
+    setKnowledgeBase(KnowledgeBaseService.getKB(loaded.id));
+    setStyleProfile(StyleProfileService.getProfile(loaded.id));
+    setAssets(AssetService.getAssets(loaded.id));
     setEditorKey((k) => k + 1); // Force editor remount with new content
     setShowProjectMenu(false);
   }, []);
@@ -334,11 +362,30 @@ export default function App() {
     const newProj = StorageService.createProject(name, content || "", 120);
     StorageService.setActiveProjectId(newProj.id);
     setProject(newProj);
+    setKnowledgeBase(KnowledgeBaseService.getKB(newProj.id));
+    setStyleProfile(StyleProfileService.getProfile(newProj.id));
+    setAssets(AssetService.getAssets(newProj.id));
     setEditorKey((k) => k + 1);
     setShowProjectMenu(false);
   }, []);
 
   const totalLines = project.content.split("\n").length;
+
+  const handleAssetGenerationComplete = useCallback((generated: GeneratedAsset[], kind: AssetKind) => {
+    if (generated.length === 0) return;
+    const updatedAssets = AssetService.getAssets(project.id);
+    setAssets(updatedAssets);
+    const mergedKB = KnowledgeBaseService.mergeGeneratedAssets(knowledgeBase, generated);
+    KnowledgeBaseService.saveKB(mergedKB);
+    setKnowledgeBase(mergedKB);
+    if (kind === "character" || kind === "scene_set") {
+      setKbFocus(kind === "character" ? "characters" : "scenes");
+      setKbNotice(`Done — ${generated.length} ${kind === "character" ? "character" : "scene"} image${generated.length === 1 ? "" : "s"} generated and added to the Knowledge Base view.`);
+      setShowAssets(false);
+      setShowKB(true);
+      setShowSuggestions(false);
+    }
+  }, [knowledgeBase, project.id]);
 
   return (
     <ArtisticBorder>
@@ -350,9 +397,31 @@ export default function App() {
           activeView={activeView}
           onViewChange={setActiveView}
           showSuggestions={showSuggestions}
-          onToggleSuggestions={() => setShowSuggestions(!showSuggestions)}
+          onToggleSuggestions={() => {
+            setShowSuggestions(!showSuggestions);
+            if (!showSuggestions) {
+              setShowKB(false);
+              setShowAssets(false);
+            }
+          }}
           showKB={showKB}
-          onToggleKB={() => setShowKB(!showKB)}
+          onToggleKB={() => {
+            setShowKB(!showKB);
+            if (!showKB) {
+              setShowSuggestions(false);
+              setShowAssets(false);
+              setKbNotice("");
+            }
+          }}
+          showAssets={showAssets}
+          onToggleAssets={() => {
+            setShowAssets(!showAssets);
+            if (!showAssets) {
+              setShowKB(false);
+              setShowSuggestions(false);
+              setKbNotice("");
+            }
+          }}
           onExport={handleExportFountain}
           onExportFdx={handleExportFdx}
           onExportPdf={handleExportPdf}
@@ -424,8 +493,10 @@ export default function App() {
               cursorBeats={cursorBeats}
               knowledgeBase={knowledgeBase}
               styleProfile={styleProfile}
+              targetPages={project.targetPages}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
+              onReplaceScript={handleReplaceScript}
             />
           )}
           {activeView === "editor" && showKB && (
@@ -436,6 +507,19 @@ export default function App() {
               onStyleChange={setStyleProfile}
               scriptContent={project.content}
               projectId={project.id}
+              assets={assets}
+              onAssetsChange={setAssets}
+              focusSection={kbFocus}
+              notice={kbNotice}
+              onClearNotice={() => setKbNotice("")}
+            />
+          )}
+          {activeView === "editor" && showAssets && (
+            <AssetPanel
+              project={project}
+              assets={assets}
+              onAssetsChange={setAssets}
+              onGenerationComplete={handleAssetGenerationComplete}
             />
           )}
           {activeView === "editor" && (
