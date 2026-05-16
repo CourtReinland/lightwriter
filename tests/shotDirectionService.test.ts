@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildShotRewritePrompt,
   extractShotScenes,
+  formatShotPassError,
+  rewriteScriptWithShotDirections,
   type ShotSceneBlock,
 } from "../src/services/shotDirectionService";
 
@@ -42,5 +44,37 @@ describe("buildShotRewritePrompt", () => {
     expect(prompt.system).toContain("rapid camera changes");
     expect(prompt.user).toContain("Next scene: EXT. STREET - DAY");
     expect(prompt.user).toContain(scene.text);
+  });
+});
+
+describe("rewriteScriptWithShotDirections", () => {
+  const settings = {
+    provider: "grok" as const,
+    apiKey: "test-key",
+    model: "grok-3-mini-fast",
+    updatedAt: 0,
+  };
+
+  it("passes selected provider settings, longer timeout, and preserves scene-specific error context", async () => {
+    const script = "INT. ROOM - DAY\n\nAIDEN waits.";
+    const completions: unknown[] = [];
+
+    await expect(rewriteScriptWithShotDirections(
+      script,
+      settings,
+      null,
+      undefined,
+      async (_system, _user, options) => {
+        completions.push(options);
+        throw new Error("Grok API timed out after 90000ms");
+      },
+    )).rejects.toThrow("Shot pass failed on scene 1/1 (INT. ROOM - DAY): Grok API timed out after 90000ms");
+
+    expect(completions).toEqual([expect.objectContaining({ timeoutMs: 240_000 })]);
+  });
+
+  it("formats shot-pass failures with the scene heading", () => {
+    const err = formatShotPassError({ idx: 0, heading: "EXT. ROAD - NIGHT", text: "", startLine: 0, endLine: 0 }, 2, 4, new Error("bad model"));
+    expect(err.message).toBe("Shot pass failed on scene 2/4 (EXT. ROAD - NIGHT): bad model");
   });
 });

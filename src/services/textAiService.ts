@@ -64,7 +64,7 @@ export class TextAiService {
   async complete(systemPrompt: string, userMessage: string, options?: TextCompleteOptions): Promise<string> {
     const apiKey = this.settings.apiKey.trim();
     if (!apiKey) throw new Error(`Add a ${textAiProviderLabel(this.settings.provider)} API key before using AI text features.`);
-    if (this.settings.provider === "grok") return new GrokService(apiKey).complete(systemPrompt, userMessage, options);
+    if (this.settings.provider === "grok") return new GrokService(apiKey, this.settings.model).complete(systemPrompt, userMessage, options);
     if (this.settings.provider === "openai") return this.completeOpenAi(systemPrompt, userMessage, options);
     return this.completeClaude(systemPrompt, userMessage, options);
   }

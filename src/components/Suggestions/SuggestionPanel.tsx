@@ -120,7 +120,7 @@ export default function SuggestionPanel({
     try {
       const rewritten = await rewriteScriptWithShotDirections(
         fullScript,
-        currentSettings.apiKey,
+        currentSettings,
         knowledgeBase,
         setShotPassProgress,
       );

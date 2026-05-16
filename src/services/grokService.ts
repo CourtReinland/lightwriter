@@ -56,11 +56,12 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFA
 
 export class GrokService {
   private apiKey: string;
-  private model = "grok-3-mini-fast";
+  private model: string;
   private baseUrl = "https://api.x.ai/v1";
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, model = "grok-3-mini-fast") {
     this.apiKey = apiKey;
+    this.model = model;
   }
 
   async suggest(

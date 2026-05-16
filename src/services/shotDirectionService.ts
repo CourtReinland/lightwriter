@@ -1,5 +1,6 @@
-import { TextAiService } from "./textAiService";
+import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
+import type { TextAiProviderSettings } from "./textAiSettingsService";
 
 export interface ShotSceneBlock {
   idx: number;
@@ -16,6 +17,14 @@ export interface ShotPassProgress {
 }
 
 const SCENE_PATTERN = /^\.((?!\.)\S)|^(INT|EXT|EST|INT\.\/EXT|I\/E)[.\s]/i;
+const SHOT_PASS_TIMEOUT_MS = 240_000;
+
+type ShotPassCompletion = (systemPrompt: string, userMessage: string, options?: TextCompleteOptions) => Promise<string>;
+
+export function formatShotPassError(scene: ShotSceneBlock, sceneNumber: number, totalScenes: number, error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error || "Unknown error");
+  return new Error(`Shot pass failed on scene ${sceneNumber}/${totalScenes} (${scene.heading}): ${message}`);
+}
 
 export function extractShotScenes(content: string): { preamble: string; scenes: ShotSceneBlock[] } {
   const lines = content.split("\n");
@@ -114,14 +123,16 @@ function cleanSceneRewrite(text: string): string {
 
 export async function rewriteScriptWithShotDirections(
   content: string,
-  apiKey: string,
+  settings: TextAiProviderSettings,
   knowledgeBase: KnowledgeBase | null,
   onProgress?: (progress: ShotPassProgress) => void,
+  completeOverride?: ShotPassCompletion,
 ): Promise<string> {
   const { preamble, scenes } = extractShotScenes(content);
   if (scenes.length === 0) return content;
 
-  const service = new TextAiService();
+  const service = new TextAiService(settings);
+  const complete: ShotPassCompletion = completeOverride ?? service.complete.bind(service);
   const rewrittenScenes: string[] = [];
 
   for (let i = 0; i < scenes.length; i++) {
@@ -139,10 +150,16 @@ export async function rewriteScriptWithShotDirections(
       knowledgeBase,
     });
 
-    const rewritten = await service.complete(prompt.system, prompt.user, {
-      temperature: prompt.temperature,
-      maxTokens: prompt.maxTokens,
-    });
+    let rewritten: string;
+    try {
+      rewritten = await complete(prompt.system, prompt.user, {
+        temperature: prompt.temperature,
+        maxTokens: prompt.maxTokens,
+        timeoutMs: SHOT_PASS_TIMEOUT_MS,
+      });
+    } catch (error) {
+      throw formatShotPassError(scene, i + 1, scenes.length, error);
+    }
 
     rewrittenScenes.push(cleanSceneRewrite(rewritten) || scene.text);
 
