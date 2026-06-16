@@ -118,6 +118,13 @@ export default function KBPanel({
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const handleSectionKeyDown = (e: React.KeyboardEvent, key: string) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggleSection(key);
+    }
+  };
+
   const handleSave = useCallback((type: string, data: Record<string, unknown>) => {
     let updated = kb;
     const existingId = editTarget?.existing && "id" in editTarget.existing ? editTarget.existing.id : null;
@@ -425,10 +432,10 @@ export default function KBPanel({
 
       {/* Characters */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("characters")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("characters")} onKeyDown={(e) => handleSectionKeyDown(e, "characters")}>
           <span>{expandedSections.characters ? "v" : ">"} Characters ({kb.characters.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "character" }); }}>+</button>
-        </button>
+        </div>
         {expandedSections.characters && (
           <>
             {kb.characters.map(c => (
@@ -460,10 +467,10 @@ export default function KBPanel({
 
       {/* Scenes */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("scenes")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("scenes")} onKeyDown={(e) => handleSectionKeyDown(e, "scenes")}>
           <span>{expandedSections.scenes ? "v" : ">"} Scenes ({Math.max(kb.scenes?.length || 0, sceneAssetItems.length)})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "scene" }); }}>+</button>
-        </button>
+        </div>
         {expandedSections.scenes && (
           <>
             {(kb.scenes || []).map(scene => (
@@ -495,9 +502,9 @@ export default function KBPanel({
 
       {/* Generate Images — character portraits + scene backgrounds */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("generate")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("generate")} onKeyDown={(e) => handleSectionKeyDown(e, "generate")}>
           <span>{expandedSections.generate ? "v" : ">"} Generate Images</span>
-        </button>
+        </div>
         {expandedSections.generate && (
           <div className="kb-generate-embed">
             <AssetPanel
@@ -513,10 +520,10 @@ export default function KBPanel({
 
       {/* World Rules */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("world")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("world")} onKeyDown={(e) => handleSectionKeyDown(e, "world")}>
           <span>{expandedSections.world ? "v" : ">"} World Rules ({kb.worldRules.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "worldRule" }); }}>+</button>
-        </button>
+        </div>
         {expandedSections.world && kb.worldRules.map(r => (
           <div key={r.id} className="kb-entry">
             <div className="kb-entry-name">{r.title} <span className="kb-tag">{r.category}</span></div>
@@ -530,10 +537,10 @@ export default function KBPanel({
 
       {/* Plot Threads */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("plot")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("plot")} onKeyDown={(e) => handleSectionKeyDown(e, "plot")}>
           <span>{expandedSections.plot ? "v" : ">"} Plot Threads ({kb.plotThreads.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "plotThread" }); }}>+</button>
-        </button>
+        </div>
         {expandedSections.plot && (
           <>
             <div className="kb-entry-actions kb-import-actions">
@@ -556,9 +563,9 @@ export default function KBPanel({
 
       {/* Tone & Style */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("tone")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("tone")} onKeyDown={(e) => handleSectionKeyDown(e, "tone")}>
           <span>{expandedSections.tone ? "v" : ">"} Tone & Style</span>
-        </button>
+        </div>
         {expandedSections.tone && (
           <div className="kb-tone-fields">
             <input className="kb-input-sm" placeholder="Genre" value={kb.toneStyle.genre} onChange={e => handleToneChange("genre", e.target.value)} />
@@ -572,10 +579,10 @@ export default function KBPanel({
 
       {/* Custom Notes */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("notes")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("notes")} onKeyDown={(e) => handleSectionKeyDown(e, "notes")}>
           <span>{expandedSections.notes ? "v" : ">"} Notes ({kb.customNotes.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "customNote" }); }}>+</button>
-        </button>
+        </div>
         {expandedSections.notes && kb.customNotes.map(n => (
           <div key={n.id} className="kb-entry">
             <div className="kb-entry-name">{n.title}</div>
@@ -589,9 +596,9 @@ export default function KBPanel({
 
       {/* Style Profile */}
       <div className="kb-section">
-        <button className="kb-section-header" onClick={() => toggleSection("style")}>
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("style")} onKeyDown={(e) => handleSectionKeyDown(e, "style")}>
           <span>{expandedSections.style ? "v" : ">"} Style Profile {styleProfile ? "(active)" : ""}</span>
-        </button>
+        </div>
         {expandedSections.style && (
           <div className="kb-style-section">
             {styleProfile && (
