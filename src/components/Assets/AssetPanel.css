@@ -324,3 +324,21 @@
   white-space: normal;
   word-break: break-all;
 }
+
+/* Embedded generation mode — rendered inside the KB panel's "Generate Images" section */
+.asset-panel.asset-panel-embedded {
+  width: auto;
+  max-width: none;
+  border-left: none;
+  padding: 0;
+  background: transparent;
+  overflow-y: visible;
+}
+
+.asset-panel.asset-panel-embedded .asset-panel-header {
+  margin-bottom: 8px;
+}
+
+.kb-generate-embed {
+  padding: 6px 12px 10px 20px;
+}

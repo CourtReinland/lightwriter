@@ -11,8 +11,8 @@ interface EditorToolbarProps {
   onToggleSuggestions?: () => void;
   showKB?: boolean;
   onToggleKB?: () => void;
-  showAssets?: boolean;
-  onToggleAssets?: () => void;
+  showSettings?: boolean;
+  onToggleSettings?: () => void;
   onExport?: () => void;
   onExportFdx?: () => void;
   onExportPdf?: () => void;
@@ -30,8 +30,8 @@ export default function EditorToolbar({
   onToggleSuggestions,
   showKB,
   onToggleKB,
-  showAssets,
-  onToggleAssets,
+  showSettings,
+  onToggleSettings,
   onExport,
   onExportFdx,
   onExportPdf,
@@ -87,12 +87,12 @@ export default function EditorToolbar({
         </div>
       </div>
       <div className="toolbar-right">
-        {activeView === "editor" && onToggleAssets && (
+        {activeView === "editor" && onToggleSettings && (
           <button
-            className={`view-tab assets-toggle ${showAssets ? "active" : ""}`}
-            onClick={onToggleAssets}
+            className={`view-tab assets-toggle ${showSettings ? "active" : ""}`}
+            onClick={onToggleSettings}
           >
-            Assets/Settings
+            Settings
           </button>
         )}
         {activeView === "editor" && onToggleKB && (

@@ -12,7 +12,9 @@ import {
 import { StyleProfileService, inferStyleSampleKind, type AnalyzeStyleSampleInput, type StyleProfile } from "../../services/styleProfile";
 import { importFile } from "../../services/fileImporter";
 import { getSelectedTextAiProviderSettings } from "../../services/textAiSettingsService";
-import type { AssetProvider, GeneratedAsset } from "../../types/assets";
+import type { AssetProvider, AssetKind, GeneratedAsset } from "../../types/assets";
+import type { Project } from "../../services/storageService";
+import AssetPanel from "../Assets/AssetPanel";
 import { buildAssetKnowledgeItems } from "../../services/assetKnowledgeViewService";
 import {
   buildGeneratedAssetFromResult,
@@ -33,8 +35,10 @@ interface KBPanelProps {
   onStyleChange: (profile: StyleProfile | null) => void;
   scriptContent: string;
   projectId: string;
+  project: Project;
   assets: GeneratedAsset[];
   onAssetsChange: (assets: GeneratedAsset[]) => void;
+  onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
   focusSection?: "characters" | "scenes" | null;
   notice?: string;
   onClearNotice?: () => void;
@@ -52,8 +56,10 @@ export default function KBPanel({
   onStyleChange,
   scriptContent,
   projectId,
+  project,
   assets,
   onAssetsChange,
+  onGenerationComplete,
   focusSection,
   notice,
   onClearNotice,
@@ -64,6 +70,7 @@ export default function KBPanel({
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     characters: true,
     scenes: false,
+    generate: false,
     world: false,
     plot: false,
     tone: false,
@@ -255,11 +262,11 @@ export default function KBPanel({
     }
     const settings = getImageProviderSettings(repromptProvider);
     if (!settings.apiKey?.trim()) {
-      setRepromptError(`Add a ${providerLabel(repromptProvider)} API key in Assets/Settings first.`);
+      setRepromptError(`Add a ${providerLabel(repromptProvider)} API key in Settings first.`);
       return;
     }
     if (!settings.selectedModel?.trim()) {
-      setRepromptError(`Choose a ${providerLabel(repromptProvider)} image model in Assets/Settings first.`);
+      setRepromptError(`Choose a ${providerLabel(repromptProvider)} image model in Settings first.`);
       return;
     }
 
@@ -483,6 +490,24 @@ export default function KBPanel({
               );
             })}
           </>
+        )}
+      </div>
+
+      {/* Generate Images — character portraits + scene backgrounds */}
+      <div className="kb-section">
+        <button className="kb-section-header" onClick={() => toggleSection("generate")}>
+          <span>{expandedSections.generate ? "v" : ">"} Generate Images</span>
+        </button>
+        {expandedSections.generate && (
+          <div className="kb-generate-embed">
+            <AssetPanel
+              mode="generation"
+              project={project}
+              assets={assets}
+              onAssetsChange={onAssetsChange}
+              onGenerationComplete={onGenerationComplete}
+            />
+          </div>
         )}
       </div>
 

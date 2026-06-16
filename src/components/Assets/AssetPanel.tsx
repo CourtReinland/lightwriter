@@ -43,6 +43,12 @@ interface AssetPanelProps {
   assets: GeneratedAsset[];
   onAssetsChange: (assets: GeneratedAsset[]) => void;
   onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
+  /**
+   * "settings" — provider/API-key/style config + export (shown under the Settings toggle).
+   * "generation" — character/scene image generation, embedded inside the KB panel.
+   * "full" — everything (legacy/standalone).
+   */
+  mode?: "settings" | "generation" | "full";
 }
 
 type SourceKind = "scene_set" | "character" | "shot";
@@ -61,8 +67,10 @@ function isKnownModel(modelOptions: { id: string }[], model: string): boolean {
   return modelOptions.some((option) => option.id === model);
 }
 
-export default function AssetPanel({ project, assets, onAssetsChange, onGenerationComplete }: AssetPanelProps) {
-  const [activeTab, setActiveTab] = useState<AssetSubTab>("settings");
+export default function AssetPanel({ project, assets, onAssetsChange, onGenerationComplete, mode = "full" }: AssetPanelProps) {
+  const showSettings = mode === "settings" || mode === "full";
+  const showGeneration = mode === "generation" || mode === "full";
+  const [activeTab, setActiveTab] = useState<AssetSubTab>(mode === "generation" ? "characters" : "settings");
   const [provider, setProvider] = useState<AssetProvider>("gemini-nano-banana");
   const [sourceKind, setSourceKind] = useState<SourceKind>("scene_set");
   const [selectedKey, setSelectedKey] = useState("0");
@@ -631,29 +639,53 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   };
 
   return (
-    <aside className="asset-panel">
+    <aside className={`asset-panel${mode === "generation" ? " asset-panel-embedded" : ""}`}>
       <div className="asset-panel-header">
         <div>
-          <h2>AI Assets</h2>
-          <p>Generate and tag sets, characters, and shot start frames for Script2Screen.</p>
+          <h2>{mode === "settings" ? "Settings" : mode === "generation" ? "Generate Images" : "AI Assets"}</h2>
+          <p>
+            {mode === "settings"
+              ? "Writing-AI and image-provider keys, models, and Script2Screen export."
+              : mode === "generation"
+                ? "Generate character portraits and scene backgrounds from the script."
+                : "Generate and tag sets, characters, and shot start frames for Script2Screen."}
+          </p>
         </div>
       </div>
 
-      <div className="asset-subtabs" role="tablist" aria-label="Asset workspace sections">
-        {(["settings", "characters", "scenes"] as AssetSubTab[]).map((tab) => (
-          <button
-            key={tab}
-            className={activeTab === tab ? "active" : ""}
-            onClick={() => setActiveTab(tab)}
-            role="tab"
-            aria-selected={activeTab === tab}
-          >
-            {tab === "settings" ? "Settings" : tab === "characters" ? "Characters" : "Scenes"}
-          </button>
-        ))}
-      </div>
+      {showSettings && showGeneration && (
+        <div className="asset-subtabs" role="tablist" aria-label="Asset workspace sections">
+          {(["settings", "characters", "scenes"] as AssetSubTab[]).map((tab) => (
+            <button
+              key={tab}
+              className={activeTab === tab ? "active" : ""}
+              onClick={() => setActiveTab(tab)}
+              role="tab"
+              aria-selected={activeTab === tab}
+            >
+              {tab === "settings" ? "Settings" : tab === "characters" ? "Characters" : "Scenes"}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {activeTab === "settings" && (
+      {mode === "generation" && (
+        <div className="asset-subtabs" role="tablist" aria-label="Generation sections">
+          {(["characters", "scenes"] as AssetSubTab[]).map((tab) => (
+            <button
+              key={tab}
+              className={activeTab === tab ? "active" : ""}
+              onClick={() => setActiveTab(tab)}
+              role="tab"
+              aria-selected={activeTab === tab}
+            >
+              {tab === "characters" ? "Characters" : "Scenes"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showSettings && activeTab === "settings" && (
         <div className="asset-tab-pane">
           <section className="asset-settings-box">
             <div className="asset-settings-heading">
@@ -717,10 +749,21 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
             <p className="asset-muted">Selected model: {effectiveModel || "none yet"}</p>
             {settingsMessage && <p className="asset-status">{settingsMessage}</p>}
           </section>
+
+          <section className="asset-settings-box">
+            <div className="asset-settings-heading">
+              <h3>ScriptToScreen Export</h3>
+            </div>
+            <p className="asset-muted">Export the generated assets for the ScriptToScreen handoff.</p>
+            <div className="asset-export-row">
+              <button onClick={handleExportLightWriterPackage}>Export LW Package</button>
+              <button onClick={handleExportScript2ScreenManifest}>Export STS Manifest</button>
+            </div>
+          </section>
         </div>
       )}
 
-      {activeTab !== "settings" && (
+      {showGeneration && activeTab !== "settings" && (
         <div className="asset-tab-pane">
           {activeTab === "scenes" && (
             <label>
@@ -810,15 +853,10 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
               Stage Prompt Only
             </button>
           </div>
-
-          <div className="asset-export-row">
-            <button onClick={handleExportLightWriterPackage}>Export LW Package</button>
-            <button onClick={handleExportScript2ScreenManifest}>Export STS Manifest</button>
-          </div>
         </div>
       )}
 
-      {activeTab !== "settings" && (
+      {showGeneration && activeTab !== "settings" && (
         <div className="asset-list">
         <h3>Project Assets ({assets.length})</h3>
         {assets.length === 0 && <p className="asset-empty">No generated/staged assets yet.</p>}

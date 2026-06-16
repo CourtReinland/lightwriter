@@ -115,7 +115,7 @@ export default function App() {
   const [cardAiDescs, setCardAiDescs] = useState<Record<number, string>>({});
   const [cardAiEnabled, setCardAiEnabled] = useState(false);
   const [showKB, setShowKB] = useState(false);
-  const [showAssets, setShowAssets] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [kbFocus, setKbFocus] = useState<"characters" | "scenes" | null>(null);
   const [kbNotice, setKbNotice] = useState("");
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(() =>
@@ -381,7 +381,7 @@ export default function App() {
     if (kind === "character" || kind === "scene_set") {
       setKbFocus(kind === "character" ? "characters" : "scenes");
       setKbNotice(`Done — ${generated.length} ${kind === "character" ? "character" : "scene"} image${generated.length === 1 ? "" : "s"} generated and added to the Knowledge Base view.`);
-      setShowAssets(false);
+      setShowSettings(false);
       setShowKB(true);
       setShowSuggestions(false);
     }
@@ -401,7 +401,7 @@ export default function App() {
             setShowSuggestions(!showSuggestions);
             if (!showSuggestions) {
               setShowKB(false);
-              setShowAssets(false);
+              setShowSettings(false);
             }
           }}
           showKB={showKB}
@@ -409,14 +409,14 @@ export default function App() {
             setShowKB(!showKB);
             if (!showKB) {
               setShowSuggestions(false);
-              setShowAssets(false);
+              setShowSettings(false);
               setKbNotice("");
             }
           }}
-          showAssets={showAssets}
-          onToggleAssets={() => {
-            setShowAssets(!showAssets);
-            if (!showAssets) {
+          showSettings={showSettings}
+          onToggleSettings={() => {
+            setShowSettings(!showSettings);
+            if (!showSettings) {
               setShowKB(false);
               setShowSuggestions(false);
               setKbNotice("");
@@ -506,17 +506,20 @@ export default function App() {
               onKBChange={setKnowledgeBase}
               styleProfile={styleProfile}
               onStyleChange={setStyleProfile}
+              project={project}
               scriptContent={project.content}
               projectId={project.id}
               assets={assets}
               onAssetsChange={setAssets}
+              onGenerationComplete={handleAssetGenerationComplete}
               focusSection={kbFocus}
               notice={kbNotice}
               onClearNotice={() => setKbNotice("")}
             />
           )}
-          {activeView === "editor" && showAssets && (
+          {activeView === "editor" && showSettings && (
             <AssetPanel
+              mode="settings"
               project={project}
               assets={assets}
               onAssetsChange={setAssets}
