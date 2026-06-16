@@ -48,6 +48,26 @@ const assets: GeneratedAsset[] = [
     },
     metadata: { promptVersion: 1, aspectRatio: "2:3" },
   },
+  {
+    id: "shot-asset",
+    projectId: "project-1",
+    kind: "shot",
+    provider: "gemini-nano-banana",
+    model: "gemini-2.5-flash-image",
+    name: "s0_sh1_alex_closeup",
+    prompt: "CU on ALEX as she steels herself",
+    mimeType: "image/png",
+    filePath: "/tmp/lightwriter/assets/images/s0_sh1_alex_closeup.png",
+    createdAt: 102,
+    updatedAt: 102,
+    scriptRef: {
+      scriptHash: "script-hash",
+      sceneHeading: "INT. COFFEE SHOP - DAY",
+      sceneIndex: 0,
+      characterName: "ALEX",
+    },
+    metadata: { promptVersion: 1, aspectRatio: "16:9", script2ScreenShotKey: "s0_sh1" },
+  },
 ];
 
 describe("asset manifest export", () => {
@@ -65,29 +85,66 @@ describe("asset manifest export", () => {
     expect(pkg.characters.ALEX.reference_image_path).toBe("/tmp/lightwriter/assets/characters/alex.png");
   });
 
-  it("builds Script2Screen manifest entries compatible with existing generated_media schema", () => {
+  it("routes scene backgrounds into locations and real shots into generated_media", () => {
     const manifest = buildScript2ScreenManifest({
       resolveProjectName: "Pilot Resolve",
       assets,
     });
 
     expect(manifest.version).toBe(1);
-    expect(manifest.generated_media["s0_sh0_coffee.png"]).toMatchObject({
-      type: "image",
-      shot_key: "s0_sh0",
-      provider: "gemini",
+
+    // Scene background (scene_set) -> locations keyed by 0-based scene index, NOT generated_media.
+    expect(manifest.generated_media["s0_sh0_coffee.png"]).toBeUndefined();
+    expect(manifest.locations["0"]).toMatchObject({
       file_path: "/tmp/lightwriter/assets/images/s0_sh0_coffee.png",
       style_reference_path: "",
-      character_refs: {},
+      description: "INT. COFFEE SHOP - DAY",
+      reference_image_paths: ["/tmp/lightwriter/assets/images/s0_sh0_coffee.png"],
     });
-    expect(manifest.generated_media["s0_sh0_coffee.png"].provider_settings).toMatchObject({
-      model: "gemini-2.5-flash-image",
-      source_provider: "gemini-nano-banana",
-      lightwriter_asset_id: "scene-asset",
+
+    // Real shot asset -> generated_media keyed by filename.
+    expect(manifest.generated_media["s0_sh1_alex_closeup.png"]).toMatchObject({
+      type: "image",
+      shot_key: "s0_sh1",
+      provider: "gemini",
+      file_path: "/tmp/lightwriter/assets/images/s0_sh1_alex_closeup.png",
     });
+    expect(manifest.generated_media["s0_sh1_alex_closeup.png"].character_refs).toMatchObject({
+      ALEX: "/tmp/lightwriter/assets/images/s0_sh1_alex_closeup.png",
+    });
+
+    // Characters still round-trip.
     expect(manifest.characters.ALEX).toMatchObject({
       reference_image_path: "/tmp/lightwriter/assets/characters/alex.png",
       visual_prompt: "Character portrait for ALEX",
     });
+  });
+
+  it("surfaces a warning instead of silently dropping browser-mode assets with no file path", () => {
+    const manifest = buildScript2ScreenManifest({
+      resolveProjectName: "Pilot Resolve",
+      assets: [
+        {
+          id: "browser-scene",
+          projectId: "project-1",
+          kind: "scene_set",
+          provider: "gemini-nano-banana",
+          model: "gemini-2.5-flash-image",
+          name: "No Path Scene",
+          prompt: "A windswept cliff at dusk",
+          mimeType: "image/png",
+          imageDataUrl: "data:image/png;base64,AAAA",
+          createdAt: 200,
+          updatedAt: 200,
+          scriptRef: { scriptHash: "h", sceneHeading: "EXT. CLIFF - DUSK", sceneIndex: 1 },
+          metadata: { promptVersion: 1 },
+        },
+      ],
+    });
+
+    expect(Object.keys(manifest.locations)).toHaveLength(0);
+    expect(manifest._lightwriter_warnings?.length).toBe(1);
+    expect(manifest._lightwriter_warnings?.[0]).toContain("skipped");
+    expect(manifest._lightwriter_warnings?.[0]).toContain("EXT. CLIFF - DUSK");
   });
 });

@@ -35,8 +35,10 @@ export interface Script2ScreenManifest {
   version: 1;
   resolve_project_name: string;
   characters: Record<string, { reference_image_path?: string; visual_prompt?: string; voice_id?: string; voice_provider?: string; voice_samples: string[] }>;
-  locations: Record<string, unknown>;
+  locations: Record<string, Record<string, unknown>>;
   generated_media: Record<string, Record<string, unknown>>;
+  /** Non-canonical: assets that could not be exported (e.g. browser-mode with no durable file path). ScriptToScreen ignores unknown keys. */
+  _lightwriter_warnings?: string[];
 }
 
 function shotKeyFor(asset: GeneratedAsset): string | undefined {
@@ -45,6 +47,14 @@ function shotKeyFor(asset: GeneratedAsset): string | undefined {
     : asset.scriptRef.sceneIndex !== undefined
       ? `s${asset.scriptRef.sceneIndex}_sh0`
       : undefined;
+}
+
+/** 0-based scene index as a string — the form ScriptToScreen's importer normalizes most cleanly into scene_style_reference_paths. */
+function sceneKeyFor(asset: GeneratedAsset): string {
+  if (typeof asset.metadata.script2ScreenSceneKey === "string" && asset.metadata.script2ScreenSceneKey) {
+    return asset.metadata.script2ScreenSceneKey;
+  }
+  return String(asset.scriptRef.sceneIndex ?? 0);
 }
 
 function characterNamesFor(asset: GeneratedAsset): string[] {
@@ -119,9 +129,14 @@ export function buildScript2ScreenManifest(args: {
     locations: {},
     generated_media: {},
   };
+  const warnings: string[] = [];
 
   for (const asset of args.assets) {
     if (asset.kind === "character" && asset.scriptRef.characterName) {
+      if (!asset.filePath) {
+        warnings.push(`Character "${asset.scriptRef.characterName}" skipped: no durable image file path (generate/persist it in the desktop app before export).`);
+        continue;
+      }
       manifest.characters[asset.scriptRef.characterName.toUpperCase()] = {
         reference_image_path: asset.filePath,
         visual_prompt: asset.prompt,
@@ -130,8 +145,35 @@ export function buildScript2ScreenManifest(args: {
       continue;
     }
 
+    // Scene backgrounds (scene_set) are per-scene LOCATION references, not shot start-frames.
+    // ScriptToScreen reads manifest.locations into scene_style_reference_paths; routing a scene
+    // background into generated_media with a full sN_sh0 shot key would wrongly bind it to shot 0.
+    if (asset.kind === "scene_set") {
+      const sceneLabel = asset.metadata.locationName || asset.scriptRef.sceneHeading || asset.name;
+      if (!asset.filePath) {
+        warnings.push(`Scene background "${sceneLabel}" skipped: no durable image file path (generate/persist it in the desktop app before export).`);
+        continue;
+      }
+      const sceneKey = sceneKeyFor(asset);
+      const stylePath = typeof asset.metadata.styleReferencePath === "string" ? asset.metadata.styleReferencePath : "";
+      manifest.locations[sceneKey] = {
+        reference_image_paths: [asset.filePath],
+        file_path: asset.filePath,
+        style_reference_path: stylePath,
+        description: sceneLabel,
+        lightwriter_asset_id: asset.id,
+        lightwriter_script_ref: asset.scriptRef,
+      };
+      continue;
+    }
+
     const shotKey = shotKeyFor(asset);
-    if (!shotKey || !asset.filePath) continue;
+    if (!shotKey || !asset.filePath) {
+      if (shotKey && !asset.filePath) {
+        warnings.push(`Shot "${asset.name}" (${shotKey}) skipped: no durable image file path (generate/persist it in the desktop app before export).`);
+      }
+      continue;
+    }
 
     const filename = filenameForPath(asset.filePath);
     manifest.generated_media[filename] = {
@@ -156,7 +198,20 @@ export function buildScript2ScreenManifest(args: {
     };
   }
 
+  if (warnings.length > 0) {
+    manifest._lightwriter_warnings = warnings;
+  }
+
   return manifest;
+}
+
+/** Count assets that would be skipped on export because they lack a durable file path (browser mode). */
+export function countUnexportableAssets(assets: GeneratedAsset[]): number {
+  return assets.filter(
+    (asset) =>
+      (asset.kind === "character" || asset.kind === "scene_set" || asset.kind === "shot" || asset.kind === "prop") &&
+      !asset.filePath,
+  ).length;
 }
 
 export function exportJsonDownload(data: unknown, filename: string): void {

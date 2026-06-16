@@ -22,6 +22,12 @@ export interface AssetGenerationMetadata {
   providerRequestId?: string;
   safetyInfo?: string;
   script2ScreenShotKey?: string;
+  /** Scene-level key for ScriptToScreen locations{} (0-based scene index as string). Used for scene_set backgrounds. */
+  script2ScreenSceneKey?: string;
+  /** Human-facing location/scene name carried into the ScriptToScreen locations entry description. */
+  locationName?: string;
+  /** Durable filesystem path of the style reference used to generate this asset (Electron only). */
+  styleReferencePath?: string;
   handoffStatus?: "local" | "exported" | "imported-by-script2screen";
   script2ScreenExportedAt?: number;
   [key: string]: unknown;

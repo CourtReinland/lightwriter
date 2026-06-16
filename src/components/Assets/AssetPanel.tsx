@@ -617,6 +617,17 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const handleExportScript2ScreenManifest = () => {
     const manifest = buildScript2ScreenManifest({ resolveProjectName: project.name, assets });
     exportJsonDownload(manifest, `${project.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.script2screen-manifest.json`);
+    const sceneCount = Object.keys(manifest.locations).length;
+    const charCount = Object.keys(manifest.characters).length;
+    const shotCount = Object.keys(manifest.generated_media).length;
+    const skipped = manifest._lightwriter_warnings?.length ?? 0;
+    const parts = [
+      `Exported Script2Screen manifest: ${sceneCount} scene background${sceneCount === 1 ? "" : "s"}, ${charCount} character${charCount === 1 ? "" : "s"}, ${shotCount} shot${shotCount === 1 ? "" : "s"}.`,
+    ];
+    if (skipped > 0) {
+      parts.push(`Skipped ${skipped} asset${skipped === 1 ? "" : "s"} with no saved image file — generate/persist them in the desktop app to include them.`);
+    }
+    setSettingsMessage(parts.join(" "));
   };
 
   return (
