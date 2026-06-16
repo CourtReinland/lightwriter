@@ -410,3 +410,106 @@
 .script-doctor-status.optional {
   color: #facc15;
 }
+
+/* AI panel grouping: Scorecard Wizard vs À la carte tools */
+.ai-group {
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.ai-group .full-shot-pass {
+  border-bottom: none;
+}
+
+.ai-group-label {
+  padding: 8px 12px 2px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8b8b8b;
+}
+
+/* Whole-script tool preview (Expand Descriptions / Clean Up) */
+.tool-preview {
+  margin: 8px;
+  border: 1px solid #3a3f4a;
+  border-radius: 6px;
+  background: #14181f;
+  overflow: hidden;
+}
+
+.tool-preview-title {
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  border-bottom: 1px solid #2a2f38;
+}
+
+.tool-preview-metrics {
+  padding: 6px 10px;
+  font-size: 9px;
+  color: #94a3b8;
+  border-bottom: 1px solid #2a2f38;
+}
+
+.tool-preview-body {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #b8c0cc;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-preview-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid #2a2f38;
+}
+
+.tool-preview-discard,
+.tool-preview-apply {
+  flex: 1;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 7px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid;
+}
+
+.tool-preview-discard {
+  background: #20242c;
+  border-color: #3a3f4a;
+  color: #94a3b8;
+}
+
+.tool-preview-discard:hover:not(:disabled) {
+  background: #2a2f38;
+  color: #cbd5e1;
+}
+
+.tool-preview-apply {
+  background: #14361f;
+  border-color: #2f7d4f;
+  color: #4ade80;
+}
+
+.tool-preview-apply:hover:not(:disabled) {
+  background: #195029;
+  border-color: #34a35f;
+}
+
+.tool-preview-discard:disabled,
+.tool-preview-apply:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

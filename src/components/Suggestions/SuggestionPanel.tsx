@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
-import { getSelectedTextAiProviderSettings, textAiProviderLabel } from "../../services/textAiSettingsService";
+import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
+import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
+import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import {
   generate,
@@ -93,6 +95,7 @@ export default function SuggestionPanel({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [charSelect, setCharSelect] = useState<string>("");
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
+  const [toolPreview, setToolPreview] = useState<{ label: string; beforeScript: string; afterScript: string; diff: RewriteDiffSummary } | null>(null);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
   const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
@@ -135,6 +138,76 @@ export default function SuggestionPanel({
       setShotPassProgress(null);
     }
   }, [fullScript, knowledgeBase, onReplaceScript]);
+
+  // Shared runner for whole-script à la carte tool passes that PREVIEW before applying.
+  const runWholeScriptTool = useCallback(
+    async (
+      label: string,
+      confirmMsg: string,
+      run: (settings: TextAiProviderSettings, onProgress: (p: ShotPassProgress) => void) => Promise<string>,
+    ) => {
+      const currentSettings = getSelectedTextAiProviderSettings();
+      setTextAiSettings(currentSettings);
+      if (!currentSettings.apiKey.trim()) {
+        setShowKeyDialog(true);
+        return;
+      }
+      if (!fullScript.trim()) {
+        setError("No script content to rewrite.");
+        return;
+      }
+      if (!window.confirm(confirmMsg)) return;
+
+      setLoading(true);
+      setError(null);
+      setSuggestion(null);
+      setLastMode(null);
+      setToolPreview(null);
+      setShotPassProgress({ completed: 0, total: 1, label: `Starting ${label}...` });
+      try {
+        const rewritten = await run(currentSettings, setShotPassProgress);
+        const diff = summarizeRewriteDiff(fullScript, rewritten);
+        setToolPreview({ label, beforeScript: fullScript, afterScript: rewritten, diff });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : `${label} failed`);
+      } finally {
+        setLoading(false);
+        setShotPassProgress(null);
+      }
+    },
+    [fullScript],
+  );
+
+  const handleExpandDescriptions = useCallback(
+    () =>
+      runWholeScriptTool(
+        "Expand Descriptions",
+        "Run Expand Descriptions across the whole script? This deepens scene, action, and character descriptions scene-by-scene (no shot lines added) and shows a preview before changing the editor.",
+        (settings, onProgress) => rewriteScriptWithExpandedDescriptions(fullScript, settings, knowledgeBase, styleProfile, onProgress),
+      ),
+    [runWholeScriptTool, fullScript, knowledgeBase, styleProfile],
+  );
+
+  const handleCleanUp = useCallback(
+    () =>
+      runWholeScriptTool(
+        "Clean Up",
+        "Run Clean Up across the whole script? This fixes grammar, spelling, and redundant duplications (like back-to-back shots with no action between) scene-by-scene and shows a preview before changing the editor.",
+        (settings, onProgress) => rewriteScriptWithCleanup(fullScript, settings, knowledgeBase, onProgress),
+      ),
+    [runWholeScriptTool, fullScript, knowledgeBase],
+  );
+
+  const applyToolPreview = useCallback(() => {
+    if (!toolPreview) return;
+    onReplaceScript(toolPreview.afterScript);
+    setSuggestion(`${toolPreview.label} applied to the draft.`);
+    setToolPreview(null);
+  }, [toolPreview, onReplaceScript]);
+
+  const discardToolPreview = useCallback(() => {
+    setToolPreview(null);
+  }, []);
 
   const handleSuggest = useCallback(
     async (mode: OrchestratorMode, prompt?: string, characterName?: string) => {
@@ -475,33 +548,86 @@ export default function SuggestionPanel({
         {styleProfile && <span className="ctx-badge style">Style</span>}
       </div>
 
-      <div className="full-shot-pass">
-        <button
-          className="full-shot-pass-btn report-card-btn"
-          onClick={handleReportCard}
-          disabled={loading || !fullScript.trim()}
-          title="Score the whole script against structure frameworks, style match, character consistency, and pacing"
-        >
-          Run Script Report Card
-        </button>
-        <div className="full-shot-pass-hint">
-          Scores Hero's Journey, Save the Cat, Propp, Aristotle, Dan Harmon, style match, characters, and pacing.
+      {/* Scorecard wizard */}
+      <div className="ai-group">
+        <div className="ai-group-label">Scorecard Wizard</div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn report-card-btn"
+            onClick={handleReportCard}
+            disabled={loading || !fullScript.trim()}
+            title="Score the whole script against structure frameworks, style match, character consistency, and pacing"
+          >
+            Run Script Report Card
+          </button>
+          <div className="full-shot-pass-hint">
+            Diagnose, plan a fix, and preview targeted/framework rewrites. Scores Hero's Journey, Save the Cat, Propp, Aristotle, Dan Harmon, style, characters, and pacing.
+          </div>
         </div>
       </div>
 
-      <div className="full-shot-pass">
-        <button
-          className="full-shot-pass-btn"
-          onClick={handleFullShotPass}
-          disabled={loading || !fullScript.trim()}
-          title="Analyze the whole script scene-by-scene and automatically add professional shot direction lines"
-        >
-          Full Script Shot Pass
-        </button>
-        <div className="full-shot-pass-hint">
-          Adds WS/MS/CU coverage, OTS dialogue shots, inserts, reactions, and action beats across the whole script.
+      {/* À la carte tools — whole-script passes */}
+      <div className="ai-group">
+        <div className="ai-group-label">À la carte tools</div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn"
+            onClick={handleFullShotPass}
+            disabled={loading || !fullScript.trim()}
+            title="Analyze the whole script scene-by-scene and automatically add professional shot direction lines"
+          >
+            Expand Shots
+          </button>
+          <div className="full-shot-pass-hint">
+            Adds WS/MS/CU coverage, OTS dialogue shots, inserts, reactions, and action beats across the whole script.
+          </div>
+        </div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn"
+            onClick={handleExpandDescriptions}
+            disabled={loading || !fullScript.trim()}
+            title="Deepen scene, action, and character descriptions across the whole script so nothing is blank for downstream AI rendering"
+          >
+            Expand Descriptions
+          </button>
+          <div className="full-shot-pass-hint">
+            Deepens scene visuals, character intros, and action so none are blank — giving the downstream rendering AI something concrete. Preview before applying.
+          </div>
+        </div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn"
+            onClick={handleCleanUp}
+            disabled={loading || !fullScript.trim()}
+            title="Fix grammar, spelling, and redundant duplications across the whole script"
+          >
+            Clean Up
+          </button>
+          <div className="full-shot-pass-hint">
+            Fixes grammar, spelling, and unnecessary duplications (like back-to-back shots with no action between). Preview before applying.
+          </div>
         </div>
       </div>
+
+      {toolPreview && (
+        <div className="tool-preview">
+          <div className="tool-preview-title">{toolPreview.label} — Preview</div>
+          <div className="tool-preview-metrics">
+            Lines {toolPreview.diff.beforeLines} → {toolPreview.diff.afterLines} ·
+            {" "}Scenes {toolPreview.diff.beforeSceneHeadings} → {toolPreview.diff.afterSceneHeadings} ·
+            {" "}{toolPreview.diff.changedLineCount} changed
+          </div>
+          <pre className="tool-preview-body">
+            {toolPreview.afterScript.slice(0, 4000)}
+            {toolPreview.afterScript.length > 4000 ? "\n\n… preview truncated. Apply to see the full result in the editor." : ""}
+          </pre>
+          <div className="tool-preview-actions">
+            <button className="tool-preview-discard" onClick={discardToolPreview} disabled={loading}>Discard</button>
+            <button className="tool-preview-apply" onClick={applyToolPreview} disabled={loading}>Apply To Draft</button>
+          </div>
+        </div>
+      )}
 
       {!selectedText.trim() && (
         <div className="suggestion-hint">
