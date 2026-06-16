@@ -120,6 +120,42 @@ Incorrect legacy shape:
 
 That legacy key is not a filename, so STS filename lookup cannot find it.
 
+### Scene background (location) entries
+
+Scene backgrounds (AI Assets of kind `scene_set`) export into `locations`, keyed by the
+0-based scene index — **not** into `generated_media` as a fake `sN_sh0` shot. ScriptToScreen's
+importer (`lightwriter_handoff.py`) reads `locations` into `scene_style_reference_paths`, so a
+scene background becomes a reusable per-scene visual treatment instead of being wrongly bound to
+shot 0 of the scene.
+
+```json
+{
+  "locations": {
+    "0": {
+      "reference_image_paths": ["/absolute/path/to/s0_sh0_coffee.png"],
+      "file_path": "/absolute/path/to/s0_sh0_coffee.png",
+      "style_reference_path": "",
+      "description": "INT. COFFEE SHOP - DAY",
+      "lightwriter_asset_id": "scene-asset"
+    }
+  }
+}
+```
+
+- The importer matches `0`, `s0`, and `scene_0` key variants, so the plain 0-based index is safest.
+- It reads `style_reference_path` first, then `file_path` — both are exported so either resolves.
+- Real per-shot images (kind `shot`) still flow into `generated_media` keyed by filename, unchanged.
+
+### Browser-mode export limit (no silent drops)
+
+An asset only exports if it has a durable `filePath`. In the desktop (Electron) app, generated
+images are persisted to `~/Library/Application Support/.../assets` via IPC and get a real path.
+In the browser build there is no durable path (only an in-memory data URL), so such assets cannot
+be referenced by ScriptToScreen. Rather than dropping them silently, the exporter collects a
+non-canonical `_lightwriter_warnings` array (ScriptToScreen ignores unknown keys) and the AI Assets
+panel reports how many assets were skipped. To include scene/character images in a handoff, generate
+or persist them in the desktop app before exporting.
+
 ## Provider ID mapping
 
 LightWriter UI names are product-facing. STS provider IDs are pipeline-facing. Export maps them as:
@@ -202,6 +238,34 @@ Verified by code inspection and tests:
 - LightWriter character assets export fields that STS manifest accepts.
 - LightWriter generated image entries now use filename keys, which is how STS writes and looks up generated media.
 - LightWriter STS manifest includes STS image metadata fields: `type`, `shot_key`, `prompt`, `provider`, `provider_settings`, `style_reference_path`, `character_refs`, `file_path`, and `generated_at`.
+- Scene backgrounds (`scene_set`) export into `locations` keyed by 0-based scene index and import into STS `scene_style_reference_paths` (round-trip test on both sides).
+- The shot pass constrains the first token after `!!` to a parser-recognized type (WS/MS/CU/ECU/LS/OTS/POV) so generated shot lines always parse as STS shots.
+
+## Recent changes (2026-06) — LightWriter <-> ScriptToScreen hardening pass
+
+Branch `experimental/s2s-handoff-hardening`. Mapped to the integration asks:
+
+- **Scene backgrounds round-trip (ask #5):** `buildScript2ScreenManifest` routes `scene_set`
+  assets to `locations[sceneIndex]` instead of `generated_media[sN_sh0]`. Keyed on `asset.kind`,
+  so already-staged assets with a legacy `s0_sh0` key are corrected on export.
+- **No silent drops (ask #5):** assets without a durable `filePath` are reported via
+  `_lightwriter_warnings` + an AI-Assets-panel skip count.
+- **Framework-targeted rewrites (ask #2):** `scriptReportCardService` injects a single chosen
+  framework's beat ladder ("land each beat in its page range") into `buildMetricRewritePrompt`
+  (per-framework "Rewrite Metric") and `buildFillGapsRewritePrompt` (via `targetFrameworkId`,
+  defaulted from the sole active overlay framework).
+- **Render-ready descriptions (ask #3):** `scriptStructure` augments real scene descriptions with
+  tone-derived visual tokens + composition/depth cues (prompt layer only; Fountain text untouched).
+  `shotDirectionService` hard-constrains the shot-type vocabulary.
+- **Concurrent testing (ask #4):** `script2screen/tests/__init__.py` + `scripts/test-both.sh`.
+
+### Known follow-ups (not yet done)
+
+- **G5 (low priority):** `llmAssetPromptService` Pass-2 strips character names from `shot`-kind
+  image prompts; blocking phrases like "OVER MARA'S SHOULDER ON AIDEN" can lose their subject.
+  This affects only LightWriter's *own* shot-image prompt, NOT the Fountain shot text STS parses
+  for character attachment, so it does not affect the handoff contract. Fix later by scoping the
+  name-stripping to prose references and preserving names inside camera/blocking phrases.
 
 ## Known limits
 
