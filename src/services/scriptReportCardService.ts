@@ -60,6 +60,8 @@ export interface ImproveMetricPromptInput extends ScriptReportPromptInput {
 export interface FillGapsRewritePromptInput extends ScriptReportPromptInput {
   reportCard: ScriptReportCard;
   mode: "missing_beats" | "target_pages";
+  /** Optional: focus the gap-fill on a single framework's beat ladder (e.g. "save-the-cat"). */
+  targetFrameworkId?: string;
 }
 
 export interface ScriptRewriteResult {
@@ -123,6 +125,31 @@ function frameworkBlueprint(framework: FrameworkDefinition, targetPages: number,
     `${framework.name} (${framework.id})`,
     ...computed.map((beat) => `- ${beat.name} (pages ${beat.startPage}-${beat.endPage}): ${beat.description}`),
   ].join("\n");
+}
+
+/**
+ * When a rewrite targets ONE specific framework (Hero's Journey, Save the Cat, etc.),
+ * return that single framework's beat ladder so the model is told exactly which beats
+ * to land at which pages — instead of blending all frameworks' beats at once.
+ */
+function selectedFrameworkBlueprint(metricId: string, targetPages: number, totalLines: number): string | null {
+  const framework = ALL_FRAMEWORKS.find((item) => item.id === metricId);
+  if (!framework) return null;
+  return frameworkBlueprint(framework, targetPages, totalLines);
+}
+
+function targetStructureBlock(blueprint: string | null, frameworkName: string): string {
+  if (!blueprint) return "";
+  return `
+
+TARGET STRUCTURE — refine the draft toward ${frameworkName}. Land each beat within its page range:
+${blueprint}
+
+Structural rules:
+- Treat the beats above as the structural spine. Ensure every beat is present and falls within its page range.
+- Strengthen or add the missing/weak beats; do NOT relocate or dilute beats that already work.
+- Keep beats causally connected (this happened, therefore that) — no filler to hit a page count.
+- Stay focused on ${frameworkName}; do not reshape the draft to satisfy other frameworks at the same time.`;
 }
 
 export function buildScriptReportCardPrompt(input: ScriptReportPromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
@@ -235,13 +262,16 @@ function rewriteJsonInstructions(): string {
 export function buildMetricRewritePrompt(input: ImproveMetricPromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
   const base = buildScriptReportCardPrompt(input);
   const metricPayload = selectedMetricPayload(input);
+  const totalLines = input.script.split("\n").length;
+  const blueprint = selectedFrameworkBlueprint(input.metricId, input.targetPages || estimatePages(totalLines), totalLines);
+  const structureBlock = targetStructureBlock(blueprint, input.metricName);
   return {
     system: `You are LightWriter's controlled screenplay rewrite engine. Return ONLY valid JSON. Preserve Fountain/plain screenplay formatting. Preserve the writer's style contract, character voices, plot facts, and existing good material. Do not summarize. Do not omit scenes unless explicitly cutting dead weight.`,
     user: `${base.user}
 
 SELECTED REWRITE METRIC: ${input.metricName} (${input.metricId})
 CURRENT REPORT DETAIL:
-${JSON.stringify(metricPayload, null, 2)}
+${JSON.stringify(metricPayload, null, 2)}${structureBlock}
 
 Rewrite the current script to improve ONLY this selected metric while preserving the rest of the draft.
 Rules:
@@ -259,8 +289,9 @@ ${rewriteJsonInstructions()}`,
   };
 }
 
-function missingBeatSummary(reportCard: ScriptReportCard): string {
+function missingBeatSummary(reportCard: ScriptReportCard, targetFrameworkId?: string): string {
   return reportCard.frameworkScores
+    .filter((framework) => !targetFrameworkId || framework.frameworkId === targetFrameworkId)
     .flatMap((framework) => framework.beatScores
       .filter((beat) => beat.missing || beat.score < 55)
       .map((beat) => `${framework.frameworkName}: ${beat.beatName} (${beat.expectedPageRange || "no range"}) score ${beat.score}${beat.missing ? " MISSING" : ""}. Suggestions: ${beat.suggestions.join("; ")}`))
@@ -270,16 +301,21 @@ function missingBeatSummary(reportCard: ScriptReportCard): string {
 export function buildFillGapsRewritePrompt(input: FillGapsRewritePromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
   const base = buildScriptReportCardPrompt(input);
   const modeLabel = input.mode === "target_pages" ? "complete toward the target page count" : "fill missing/weak structural beats";
+  const totalLines = input.script.split("\n").length;
+  const targetFramework = input.targetFrameworkId ? ALL_FRAMEWORKS.find((item) => item.id === input.targetFrameworkId) : undefined;
+  const structureBlock = targetFramework
+    ? targetStructureBlock(selectedFrameworkBlueprint(targetFramework.id, input.targetPages || estimatePages(totalLines), totalLines), targetFramework.name)
+    : "";
   return {
     system: `You are LightWriter's gap-filling screenplay rewrite engine. Return ONLY valid JSON. Preserve screenplay/Fountain formatting, existing strengths, the writer's style contract, KB continuity, and character voices.`,
     user: `${base.user}
 
 FILL GAPS / COMPLETE TO TARGET PAGES
 Mode: ${modeLabel}
-Target pages: ${input.targetPages}
+Target pages: ${input.targetPages}${structureBlock}
 
 Priority missing beats / weak beats:
-${missingBeatSummary(input.reportCard)}
+${missingBeatSummary(input.reportCard, input.targetFrameworkId)}
 
 Top report-card fixes:
 ${input.reportCard.topFixes.map((fix, index) => `${index + 1}. ${fix}`).join("\n") || "No top fixes supplied."}

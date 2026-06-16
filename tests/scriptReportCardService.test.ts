@@ -164,6 +164,10 @@ describe("script rewrite execution prompts", () => {
     expect(prompt.user).toContain("rewrittenScript");
     expect(prompt.user).toContain("STYLE CONTRACT");
     expect(prompt.user).toContain("Add a false victory");
+    // G3: targeting a framework injects its beat ladder as an explicit structural guardrail.
+    expect(prompt.user).toContain("TARGET STRUCTURE");
+    expect(prompt.user).toContain("refine the draft toward Save the Cat");
+    expect(prompt.user).toContain("Opening Image");
   });
 
   it("builds a fill-gaps prompt focused on missing beats and target page completion", () => {
@@ -180,6 +184,24 @@ describe("script rewrite execution prompts", () => {
     expect(prompt.user).toContain("Target pages: 120");
     expect(prompt.user).toContain("missing beats");
     expect(prompt.user).toContain("rewrittenScript");
+    // No target framework supplied -> broad gap fill, no single-framework structure block.
+    expect(prompt.user).not.toContain("TARGET STRUCTURE");
+  });
+
+  it("focuses fill-gaps on a single framework's beat ladder when targetFrameworkId is supplied", () => {
+    const prompt = buildFillGapsRewritePrompt({
+      script: "INT. LIBRARY - NIGHT\n\nALIYAH finds a glowing book.",
+      knowledgeBase: kb,
+      styleProfile,
+      targetPages: 120,
+      reportCard,
+      mode: "missing_beats",
+      targetFrameworkId: "heros-journey",
+    });
+
+    expect(prompt.user).toContain("TARGET STRUCTURE");
+    expect(prompt.user).toContain("refine the draft toward Hero's Journey");
+    expect(prompt.user).toContain("do not reshape the draft to satisfy other frameworks");
   });
 
   it("parses rewrite JSON and strips fenced output", () => {

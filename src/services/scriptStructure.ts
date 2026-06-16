@@ -124,9 +124,42 @@ function inferredBackgroundResult(scene: ScriptSceneRef, fullScriptContent?: str
   return `${base}, empty background, architecture, props, set dressing, lighting, atmosphere, color palette, texture, era cues, cinematic production design, 16:9.`;
 }
 
+/**
+ * Concrete, render-ready visual tokens for a tone — lighting, set dressing, palette, texture.
+ * Used to make BOTH inferred (empty) and real scene descriptions specific enough for an
+ * image generator, without rewriting the human-readable screenplay text.
+ */
+function toneRenderTokens(primaryTone: string): string {
+  switch (primaryTone) {
+    case "children's cartoon":
+      return "bright playful interior, rounded cartoon shapes, colorful storybook props, soft daylight, cheerful production design";
+    case "gothic romance":
+      return "candlelit architecture, moody period set dressing, aged textures, deep shadows, atmospheric fog, ornate props, dramatic cinematic palette";
+    case "romantic drama":
+      return "warm practical lighting, intimate set dressing, soft color palette, lived-in props, cinematic interior atmosphere";
+    case "science fiction":
+      return "futuristic architecture, controlled light panels, advanced props, sleek surfaces, atmospheric depth";
+    case "fantasy":
+      return "enchanted architecture, textured handmade props, atmospheric lighting, magical environment detail";
+    case "crime thriller":
+      return "tense practical lighting, noir shadows, gritty set dressing, suspenseful atmosphere";
+    case "grounded contemporary drama":
+      return "realistic modern set dressing, natural light, believable props, lived-in surfaces";
+    default:
+      return "cinematic production design, set dressing, atmospheric lighting, color palette, texture, era cues";
+  }
+}
+
 function backgroundDetailOrInference(scene: ScriptSceneRef, fullScriptContent?: string): string {
   const detail = cleanBackgroundDescription(scene.description);
-  if (detail) return `Scene background: ${detail}`;
+  if (detail) {
+    // Keep the writer's real description, but make it render-ready by appending concrete
+    // tone-derived visual tokens, time of day, and composition/depth cues for image generation.
+    const primaryTone = inferScriptTone(fullScriptContent).split(",")[0].trim();
+    const time = (scene.timeOfDay || "").trim().toLowerCase();
+    const timePhrase = time ? ` Time of day: ${time}.` : "";
+    return `Scene background: ${detail}${timePhrase} Render as an empty set with render-ready detail: ${toneRenderTokens(primaryTone)}, cinematic composition, depth layering (foreground, midground, background), 16:9.`;
+  }
   return inferredBackgroundResult(scene, fullScriptContent);
 }
 

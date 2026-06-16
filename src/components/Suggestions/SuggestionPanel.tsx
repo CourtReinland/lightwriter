@@ -27,6 +27,7 @@ interface SuggestionPanelProps {
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
   targetPages: number;
+  activeFrameworks?: string[];
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
@@ -77,6 +78,7 @@ export default function SuggestionPanel({
   knowledgeBase,
   styleProfile,
   targetPages,
+  activeFrameworks,
   onApply,
   onInsertBelow,
   onReplaceScript,
@@ -331,6 +333,9 @@ export default function SuggestionPanel({
     setSuggestion(null);
     setScriptDoctorStage("requesting");
     try {
+      // If the writer has exactly one framework overlay active, complete toward THAT framework's
+      // beat ladder; otherwise consider all frameworks (broad gap fill).
+      const targetFrameworkId = activeFrameworks && activeFrameworks.length === 1 ? activeFrameworks[0] : undefined;
       const result = await fillScriptGaps({
         script: fullScript,
         knowledgeBase,
@@ -338,16 +343,18 @@ export default function SuggestionPanel({
         targetPages,
         reportCard,
         mode,
+        targetFrameworkId,
       });
       setScriptDoctorStage("validating");
-      stageRewritePreview(result, mode === "target_pages" ? "Target-page completion" : "Missing-beat fill", fullScript, reportCard);
+      const focusSuffix = targetFrameworkId ? " (focused on active framework)" : "";
+      stageRewritePreview(result, (mode === "target_pages" ? "Target-page completion" : "Missing-beat fill") + focusSuffix, fullScript, reportCard);
     } catch (e) {
       setScriptDoctorStage(reportCard ? "treatment" : "idle");
       setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
     } finally {
       setLoading(false);
     }
-  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;

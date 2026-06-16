@@ -81,6 +81,7 @@ CRITICAL OUTPUT RULES:
 - Keep existing shot lines that start with !! unless they are clearly malformed.
 - Add missing shot direction lines before the action/dialogue beats they cover.
 - Every added shot line MUST start with !! so it is parsed as a Fountain shot.
+- The FIRST token after !! MUST be exactly one of: WS, MS, CU, ECU, LS, OTS, POV. These are the only shot types the downstream image/video parser recognizes. Any other opener (ESTABLISHING, INSERT, ANGLE, TRACKING, AERIAL, WIDE) will NOT be parsed as a shot — express those as plain words AFTER the required token, e.g. !!WS AERIAL OVER THE CITY or !!CU INSERT ON THE LETTER.
 - Use the compact shot vocabulary primarily as: WS, MS, CU.
 - Use OTS coverage by spelling it inside an MS shot, e.g. !!MS OVER MARA'S SHOULDER ON AIDEN AS HE HESITATES.
 - Use camera movement or composition in natural language after the shot size when useful, e.g. !!WS TRACKING WITH AIDEN THROUGH THE CROWD.

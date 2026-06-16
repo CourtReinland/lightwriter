@@ -90,6 +90,14 @@ ALIYAH looks toward him disbelievingly.
     expect(buildAssetPrompt({ kind: "scene_set", scene })).toContain("Empty scene background");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("ALEX");
     expect(buildAssetPrompt({ kind: "character", character })).toContain("30s, restless eyes");
+
+    // G4: a real (non-empty) scene description is kept verbatim but made render-ready with
+    // concrete visual/composition tokens for downstream image generation.
+    const sceneSetPrompt = buildAssetPrompt({ kind: "scene_set", scene });
+    expect(sceneSetPrompt).toContain("cozy neighborhood cafe");
+    expect(sceneSetPrompt).toContain("render-ready detail");
+    expect(sceneSetPrompt).toContain("depth layering (foreground, midground, background)");
+    expect(sceneSetPrompt).toContain("16:9");
   });
 
   it("removes character mentions from scene background prompts and infers missing set detail from whole-script tone", () => {

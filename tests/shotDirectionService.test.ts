@@ -39,6 +39,7 @@ describe("buildShotRewritePrompt", () => {
 
     expect(prompt.system).toContain("screenplay-to-image/video generation workflow");
     expect(prompt.system).toContain("Every added shot line MUST start with !!");
+    expect(prompt.system).toContain("The FIRST token after !! MUST be exactly one of: WS, MS, CU, ECU, LS, OTS, POV");
     expect(prompt.system).toContain("Use the compact shot vocabulary primarily as: WS, MS, CU");
     expect(prompt.system).toContain("over-the-shoulder singles");
     expect(prompt.system).toContain("rapid camera changes");

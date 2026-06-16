@@ -494,6 +494,7 @@ export default function App() {
               knowledgeBase={knowledgeBase}
               styleProfile={styleProfile}
               targetPages={project.targetPages}
+              activeFrameworks={project.activeFrameworks}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleReplaceScript}
