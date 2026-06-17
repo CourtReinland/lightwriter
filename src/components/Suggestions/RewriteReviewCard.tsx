@@ -15,6 +15,7 @@ interface RewriteReviewCardProps {
   onAccept: () => void;
   onRevert: () => void;
   onCopyScript: () => void;
+  onEditScript: (text: string) => void;
   accepted?: boolean;
   applied?: boolean;
   validation: RewriteValidationResult;
@@ -34,6 +35,7 @@ export default function RewriteReviewCard({
   onAccept,
   onRevert,
   onCopyScript,
+  onEditScript,
   accepted = false,
   applied = false,
   validation,
@@ -59,8 +61,18 @@ export default function RewriteReviewCard({
       </div>
 
       <div className="rewrite-preview-buffer">
-        <div className="rewrite-review-section-title">Revised Draft Preview</div>
-        <pre>{result.rewrittenScript.slice(0, 5000)}{result.rewrittenScript.length > 5000 ? "\n\n... preview truncated; use Copy Revised for the full draft." : ""}</pre>
+        <div className="rewrite-review-section-title">{applied ? "Applied Draft" : "Revised Draft — Editable"}</div>
+        {applied ? (
+          <pre>{result.rewrittenScript.slice(0, 5000)}{result.rewrittenScript.length > 5000 ? "\n\n... preview truncated; use Copy Revised for the full draft." : ""}</pre>
+        ) : (
+          <textarea
+            className="rewrite-edit"
+            value={result.rewrittenScript}
+            onChange={(e) => onEditScript(e.target.value)}
+            spellCheck={false}
+            disabled={loading}
+          />
+        )}
       </div>
 
       <div className="rewrite-review-grid">

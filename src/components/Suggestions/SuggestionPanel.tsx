@@ -96,7 +96,9 @@ export default function SuggestionPanel({
   const [charSelect, setCharSelect] = useState<string>("");
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
   const [toolPreview, setToolPreview] = useState<{ label: string; beforeScript: string; afterScript: string; diff: RewriteDiffSummary } | null>(null);
+  const [toolEditText, setToolEditText] = useState("");
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
+  const [reportCollapsed, setReportCollapsed] = useState(false);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
   const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
 
@@ -168,6 +170,7 @@ export default function SuggestionPanel({
         const rewritten = await run(currentSettings, setShotPassProgress);
         const diff = summarizeRewriteDiff(fullScript, rewritten);
         setToolPreview({ label, beforeScript: fullScript, afterScript: rewritten, diff });
+        setToolEditText(rewritten);
       } catch (e) {
         setError(e instanceof Error ? e.message : `${label} failed`);
       } finally {
@@ -200,13 +203,15 @@ export default function SuggestionPanel({
 
   const applyToolPreview = useCallback(() => {
     if (!toolPreview) return;
-    onReplaceScript(toolPreview.afterScript);
+    onReplaceScript(toolEditText);
     setSuggestion(`${toolPreview.label} applied to the draft.`);
     setToolPreview(null);
-  }, [toolPreview, onReplaceScript]);
+    setToolEditText("");
+  }, [toolPreview, toolEditText, onReplaceScript]);
 
   const discardToolPreview = useCallback(() => {
     setToolPreview(null);
+    setToolEditText("");
   }, []);
 
   const handleSuggest = useCallback(
@@ -514,6 +519,17 @@ export default function SuggestionPanel({
     navigator.clipboard.writeText(rewriteReview.afterScript);
   }, [rewriteReview]);
 
+  // Let the writer tweak the proposed rewrite before applying; re-validate + re-diff live.
+  const handleEditRewriteScript = useCallback((text: string) => {
+    setRewriteReview((cur) => cur && !cur.applied ? {
+      ...cur,
+      afterScript: text,
+      result: { ...cur.result, rewrittenScript: text },
+      validation: validateRewriteScript(text),
+      diff: summarizeRewriteDiff(cur.beforeScript, text),
+    } : cur);
+  }, []);
+
   const characters = knowledgeBase?.characters ?? [];
 
   return (
@@ -612,16 +628,26 @@ export default function SuggestionPanel({
 
       {toolPreview && (
         <div className="tool-preview">
-          <div className="tool-preview-title">{toolPreview.label} — Preview</div>
+          <div className="tool-preview-title">{toolPreview.label} — Editable Preview</div>
           <div className="tool-preview-metrics">
             Lines {toolPreview.diff.beforeLines} → {toolPreview.diff.afterLines} ·
             {" "}Scenes {toolPreview.diff.beforeSceneHeadings} → {toolPreview.diff.afterSceneHeadings} ·
             {" "}{toolPreview.diff.changedLineCount} changed
           </div>
-          <pre className="tool-preview-body">
-            {toolPreview.afterScript.slice(0, 4000)}
-            {toolPreview.afterScript.length > 4000 ? "\n\n… preview truncated. Apply to see the full result in the editor." : ""}
-          </pre>
+          {toolPreview.afterScript === toolPreview.beforeScript ? (
+            <div className="tool-preview-nochange">
+              {toolPreview.label} returned no changes. The AI may have judged the script already complete for this pass, or no scene headings were found. Try adjusting the script or running a different tool.
+            </div>
+          ) : (
+            <div className="tool-preview-hint">The editor is unchanged. Edit the full result below if you like, then Apply To Draft.</div>
+          )}
+          <textarea
+            className="tool-preview-edit"
+            value={toolEditText}
+            onChange={(e) => setToolEditText(e.target.value)}
+            spellCheck={false}
+            disabled={loading}
+          />
           <div className="tool-preview-actions">
             <button className="tool-preview-discard" onClick={discardToolPreview} disabled={loading}>Discard</button>
             <button className="tool-preview-apply" onClick={applyToolPreview} disabled={loading}>Apply To Draft</button>
@@ -754,13 +780,30 @@ export default function SuggestionPanel({
       )}
 
       {reportCard && (
-        <ReportCard
-          report={reportCard}
-          onImproveMetric={handleImproveMetric}
-          onRewriteMetric={handleRewriteMetric}
-          onFillGaps={handleFillGaps}
-          loading={loading}
-        />
+        <div className="report-card-shell">
+          <div className="report-card-bar">
+            <button
+              className="report-card-toggle"
+              onClick={() => setReportCollapsed((c) => !c)}
+              title={reportCollapsed ? "Show scorecard" : "Hide scorecard"}
+            >
+              {reportCollapsed ? "▸" : "▾"} Scorecard
+              <span className={`report-card-chip ${reportCard.overallScore >= 80 ? "high" : reportCard.overallScore >= 60 ? "mid" : "low"}`}>
+                {reportCard.overallScore}/100
+              </span>
+            </button>
+            <button className="report-card-clear" onClick={() => { setReportCard(null); setReportCollapsed(false); }} title="Dismiss scorecard">✕</button>
+          </div>
+          {!reportCollapsed && (
+            <ReportCard
+              report={reportCard}
+              onImproveMetric={handleImproveMetric}
+              onRewriteMetric={handleRewriteMetric}
+              onFillGaps={handleFillGaps}
+              loading={loading}
+            />
+          )}
+        </div>
       )}
 
       {rewriteReview && (
@@ -781,6 +824,7 @@ export default function SuggestionPanel({
           onAccept={handleAcceptRewrite}
           onRevert={handleRevertRewrite}
           onCopyScript={handleCopyRewriteScript}
+          onEditScript={handleEditRewriteScript}
         />
       )}
 

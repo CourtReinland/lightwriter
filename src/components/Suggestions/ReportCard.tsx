@@ -24,9 +24,13 @@ export default function ReportCard({ report, onImproveMetric, onRewriteMetric, o
         <div className="report-recommendation">{report.recommendedNextAction}</div>
       )}
 
+      <div className="report-howto">
+        Apply improvements with AI: <strong>Plan</strong> explains the fix (no rewrite); <strong>Rewrite w/ AI</strong> generates an editable revised draft you approve before it touches the editor.
+      </div>
+
       <div className="report-action-row">
-        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("missing_beats")}>Fill Missing Beats</button>
-        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("target_pages")}>Complete To Target Pages</button>
+        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("missing_beats")}>Rewrite: Fill Missing Beats</button>
+        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("target_pages")}>Rewrite: Complete To Target Pages</button>
       </div>
 
       <div className="report-section-title">Frameworks</div>
@@ -70,7 +74,7 @@ function FrameworkRow({ framework, disabled, onImproveMetric, onRewriteMetric }:
           Plan Fix
         </button>
         <button className="report-rewrite-btn small" disabled={disabled} onClick={() => onRewriteMetric(framework.frameworkId, framework.frameworkName)}>
-          Preview Rewrite
+          Rewrite w/ AI
         </button>
       </div>
     </div>
@@ -90,7 +94,7 @@ function CraftRow({ id, name, score, summary, disabled, onImproveMetric, onRewri
           Plan Fix
         </button>
         <button className="report-rewrite-btn small" disabled={disabled} onClick={() => onRewriteMetric(id, name)}>
-          Preview Rewrite
+          Rewrite w/ AI
         </button>
       </div>
     </div>
