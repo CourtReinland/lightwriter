@@ -506,6 +506,14 @@ export default function SuggestionPanel({
     navigator.clipboard.writeText(rewriteReview.afterScript);
   }, [rewriteReview]);
 
+  // Dismiss the rewrite-review overlay in any state (an applied change stays in
+  // the editor; this just closes the panel).
+  const handleCloseRewriteReview = useCallback(() => {
+    setRewriteReview(null);
+    setScriptDoctorStage(reportCard ? "treatment" : "idle");
+    setLastMode(null);
+  }, [reportCard]);
+
   // Let the writer tweak the proposed rewrite before applying; re-validate + re-diff live.
   const handleEditRewriteScript = useCallback((text: string) => {
     setRewriteReview((cur) => cur && !cur.applied ? {
@@ -765,25 +773,30 @@ export default function SuggestionPanel({
       )}
 
       {rewriteReview && (
-        <RewriteReviewCard
-          label={rewriteReview.label}
-          result={rewriteReview.result}
-          diff={rewriteReview.diff}
-          beforeReport={rewriteReview.beforeReport}
-          afterReport={rewriteReview.afterReport}
-          comparison={rewriteReview.comparison}
-          loading={loading}
-          accepted={rewriteReview.accepted}
-          applied={rewriteReview.applied}
-          validation={rewriteReview.validation}
-          onApplyToDraft={handleApplyRewriteToDraft}
-          onDiscard={handleDiscardRewritePreview}
-          onRescore={handleReScoreRewrite}
-          onAccept={handleAcceptRewrite}
-          onRevert={handleRevertRewrite}
-          onCopyScript={handleCopyRewriteScript}
-          onEditScript={handleEditRewriteScript}
-        />
+        <div className="rewrite-review-overlay">
+          <div className="rewrite-review-overlay-inner">
+            <button className="rewrite-review-overlay-close" onClick={handleCloseRewriteReview} title="Close review">✕</button>
+            <RewriteReviewCard
+              label={rewriteReview.label}
+              result={rewriteReview.result}
+              diff={rewriteReview.diff}
+              beforeReport={rewriteReview.beforeReport}
+              afterReport={rewriteReview.afterReport}
+              comparison={rewriteReview.comparison}
+              loading={loading}
+              accepted={rewriteReview.accepted}
+              applied={rewriteReview.applied}
+              validation={rewriteReview.validation}
+              onApplyToDraft={handleApplyRewriteToDraft}
+              onDiscard={handleDiscardRewritePreview}
+              onRescore={handleReScoreRewrite}
+              onAccept={handleAcceptRewrite}
+              onRevert={handleRevertRewrite}
+              onCopyScript={handleCopyRewriteScript}
+              onEditScript={handleEditRewriteScript}
+            />
+          </div>
+        </div>
       )}
 
       {suggestion && lastMode && isAnalysisMode(lastMode) && (

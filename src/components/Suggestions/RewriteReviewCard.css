@@ -9,6 +9,56 @@
   flex-shrink: 0;
 }
 
+/* Show the metric/gap rewrite review as a big centered overlay so it can't be
+   missed below the scorecard (the "Rewrite w/ AI did nothing" report). */
+.rewrite-review-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  overflow: auto;
+}
+
+.rewrite-review-overlay-inner {
+  position: relative;
+  width: min(820px, 94vw);
+}
+
+.rewrite-review-overlay-inner .rewrite-review-card {
+  margin: 0;
+  width: 100%;
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+
+.rewrite-review-overlay-close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #20242c;
+  border: 1px solid #3a3f4a;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rewrite-review-overlay-close:hover {
+  background: #2a2f38;
+  color: #fff;
+}
+
 .rewrite-review-header {
   display: flex;
   justify-content: space-between;
