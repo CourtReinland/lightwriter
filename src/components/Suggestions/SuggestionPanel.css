@@ -436,6 +436,9 @@
   border-radius: 6px;
   background: #14181f;
   overflow: hidden;
+  /* Keep natural height inside the flex-column panel; otherwise it is squished
+     to a sliver and overflow:hidden clips the metrics/textarea/actions. */
+  flex-shrink: 0;
 }
 
 .tool-preview-title {
@@ -584,6 +587,8 @@
   border: 1px solid #2a2f38;
   border-radius: 6px;
   overflow: hidden;
+  /* Same fix as .tool-preview: don't let the flex column squish + clip it. */
+  flex-shrink: 0;
 }
 
 .report-card-bar {

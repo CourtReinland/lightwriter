@@ -5,6 +5,8 @@
   border-radius: 4px;
   padding: 10px;
   color: #bbb;
+  /* Don't let the flex-column panel squish this output card. */
+  flex-shrink: 0;
 }
 
 .rewrite-review-header {
