@@ -184,7 +184,7 @@ export default function SuggestionPanel({
     () =>
       runWholeScriptTool(
         "Expand Descriptions",
-        "Run Expand Descriptions across the whole script? This deepens scene, action, and character descriptions scene-by-scene (no shot lines added) and shows a preview before changing the editor.",
+        "Run Expand Descriptions across the whole script? This deepens scene, action, and character descriptions scene-by-scene (no shot lines added) and opens a Review pane with the changes highlighted before anything touches the editor.",
         (settings, onProgress) => rewriteScriptWithExpandedDescriptions(fullScript, settings, knowledgeBase, styleProfile, onProgress),
       ),
     [runWholeScriptTool, fullScript, knowledgeBase, styleProfile],
@@ -194,7 +194,7 @@ export default function SuggestionPanel({
     () =>
       runWholeScriptTool(
         "Clean Up",
-        "Run Clean Up across the whole script? This fixes grammar, spelling, and redundant duplications (like back-to-back shots with no action between) scene-by-scene and shows a preview before changing the editor.",
+        "Run Clean Up across the whole script? This fixes grammar, spelling, and redundant duplications (like back-to-back shots with no action between) scene-by-scene and opens a Review pane with the changes highlighted before anything touches the editor.",
         (settings, onProgress) => rewriteScriptWithCleanup(fullScript, settings, knowledgeBase, onProgress),
       ),
     [runWholeScriptTool, fullScript, knowledgeBase],
