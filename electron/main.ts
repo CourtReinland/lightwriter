@@ -11,6 +11,12 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 // Path to the bundled renderer (Vite build output)
 const DIST = path.join(__dirname, "..", "dist");
 
+// Pin BOTH the dev build (app name "lightwriter-app") and the packaged build
+// (productName "LightWriter") to one stable data directory, so the user's
+// projects and saved API keys persist across either entry point instead of
+// silently splitting into two separate localStorage stores.
+app.setPath("userData", path.join(app.getPath("appData"), "lightwriter-app"));
+
 let mainWindow: BrowserWindow | null = null;
 
 function extensionForMimeType(mimeType: string): string {
@@ -196,15 +202,30 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(() => {
-  registerAssetIpc();
-  buildMenu();
-  createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Prevent multiple simultaneous instances from racing on the same localStorage
+// (which silently drops the saved API key and shows stale data). A second launch
+// just focuses the window that already exists.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    registerAssetIpc();
+    buildMenu();
+    createWindow();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
