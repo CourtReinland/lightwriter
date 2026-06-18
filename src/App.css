@@ -22,6 +22,7 @@ html, body, #root {
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative; /* anchor for the full-width tool Review pane overlay */
 }
 
 .workspace-main {

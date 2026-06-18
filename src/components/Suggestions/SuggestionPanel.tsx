@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
@@ -33,6 +33,7 @@ interface SuggestionPanelProps {
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
+  onOpenToolReview: (review: { label: string; beforeScript: string; afterScript: string }) => void;
 }
 
 interface RewriteReviewState {
@@ -84,6 +85,7 @@ export default function SuggestionPanel({
   onApply,
   onInsertBelow,
   onReplaceScript,
+  onOpenToolReview,
 }: SuggestionPanelProps) {
   const [textAiSettings, setTextAiSettings] = useState(() => getSelectedTextAiProviderSettings());
   const [showKeyDialog, setShowKeyDialog] = useState(false);
@@ -95,17 +97,6 @@ export default function SuggestionPanel({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [charSelect, setCharSelect] = useState<string>("");
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
-  const [toolPreview, setToolPreview] = useState<{ label: string; beforeScript: string; afterScript: string; diff: RewriteDiffSummary } | null>(null);
-  const [toolEditText, setToolEditText] = useState("");
-  const toolPreviewRef = useRef<HTMLDivElement | null>(null);
-
-  // When a whole-script tool stages a preview, bring it into view so it is never
-  // silently rendered below the panel fold (the "ran but nothing appeared" report).
-  useEffect(() => {
-    if (toolPreview) {
-      toolPreviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [toolPreview]);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
   const [reportCollapsed, setReportCollapsed] = useState(false);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
@@ -173,13 +164,12 @@ export default function SuggestionPanel({
       setError(null);
       setSuggestion(null);
       setLastMode(null);
-      setToolPreview(null);
       setShotPassProgress({ completed: 0, total: 1, label: `Starting ${label}...` });
       try {
         const rewritten = await run(currentSettings, setShotPassProgress);
-        const diff = summarizeRewriteDiff(fullScript, rewritten);
-        setToolPreview({ label, beforeScript: fullScript, afterScript: rewritten, diff });
-        setToolEditText(rewritten);
+        // Hand the result to App, which opens a full-width Review pane (big, with a
+        // change diff) and navigates the user to it on completion.
+        onOpenToolReview({ label, beforeScript: fullScript, afterScript: rewritten });
       } catch (e) {
         setError(e instanceof Error ? e.message : `${label} failed`);
       } finally {
@@ -187,7 +177,7 @@ export default function SuggestionPanel({
         setShotPassProgress(null);
       }
     },
-    [fullScript],
+    [fullScript, onOpenToolReview],
   );
 
   const handleExpandDescriptions = useCallback(
@@ -210,18 +200,6 @@ export default function SuggestionPanel({
     [runWholeScriptTool, fullScript, knowledgeBase],
   );
 
-  const applyToolPreview = useCallback(() => {
-    if (!toolPreview) return;
-    onReplaceScript(toolEditText);
-    setSuggestion(`${toolPreview.label} applied to the draft.`);
-    setToolPreview(null);
-    setToolEditText("");
-  }, [toolPreview, toolEditText, onReplaceScript]);
-
-  const discardToolPreview = useCallback(() => {
-    setToolPreview(null);
-    setToolEditText("");
-  }, []);
 
   const handleSuggest = useCallback(
     async (mode: OrchestratorMode, prompt?: string, characterName?: string) => {
@@ -634,35 +612,6 @@ export default function SuggestionPanel({
           </div>
         </div>
       </div>
-
-      {toolPreview && (
-        <div className="tool-preview" ref={toolPreviewRef}>
-          <div className="tool-preview-title">{toolPreview.label} — Editable Preview</div>
-          <div className="tool-preview-metrics">
-            Lines {toolPreview.diff.beforeLines} → {toolPreview.diff.afterLines} ·
-            {" "}Scenes {toolPreview.diff.beforeSceneHeadings} → {toolPreview.diff.afterSceneHeadings} ·
-            {" "}{toolPreview.diff.changedLineCount} changed
-          </div>
-          {toolPreview.afterScript === toolPreview.beforeScript ? (
-            <div className="tool-preview-nochange">
-              {toolPreview.label} returned no changes. The AI may have judged the script already complete for this pass, or no scene headings were found. Try adjusting the script or running a different tool.
-            </div>
-          ) : (
-            <div className="tool-preview-hint">The editor is unchanged. Edit the full result below if you like, then Apply To Draft.</div>
-          )}
-          <textarea
-            className="tool-preview-edit"
-            value={toolEditText}
-            onChange={(e) => setToolEditText(e.target.value)}
-            spellCheck={false}
-            disabled={loading}
-          />
-          <div className="tool-preview-actions">
-            <button className="tool-preview-discard" onClick={discardToolPreview} disabled={loading}>Discard</button>
-            <button className="tool-preview-apply" onClick={applyToolPreview} disabled={loading}>Apply To Draft</button>
-          </div>
-        </div>
-      )}
 
       {!selectedText.trim() && (
         <div className="suggestion-hint">

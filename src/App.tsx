@@ -18,6 +18,7 @@ import ElementBar, {
 import KBPanel from "./components/KnowledgeBase/KBPanel";
 import AssetPanel from "./components/Assets/AssetPanel";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
+import ToolReviewPane, { type ToolReviewData } from "./components/Suggestions/ToolReviewPane";
 import { useFountainParser } from "./hooks/useFountainParser";
 import { exportFountain, exportFdx, exportPdf } from "./services/fountainExporter";
 import {
@@ -107,6 +108,9 @@ export default function App() {
   const [selectedText, setSelectedText] = useState("");
   const [contextText, setContextText] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  // Whole-script tool (Expand Descriptions / Clean Up) review, shown in a big pane.
+  const [toolReview, setToolReview] = useState<ToolReviewData | null>(null);
+  const [toolReviewEdit, setToolReviewEdit] = useState("");
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const [currentElement, setCurrentElement] = useState<ElementType>("action");
@@ -323,6 +327,22 @@ export default function App() {
     [handleContentChange],
   );
 
+  const handleOpenToolReview = useCallback((review: ToolReviewData) => {
+    setToolReview(review);
+    setToolReviewEdit(review.afterScript);
+  }, []);
+
+  const handleApplyToolReview = useCallback(() => {
+    handleReplaceScript(toolReviewEdit);
+    setToolReview(null);
+    setToolReviewEdit("");
+  }, [handleReplaceScript, toolReviewEdit]);
+
+  const handleDiscardToolReview = useCallback(() => {
+    setToolReview(null);
+    setToolReviewEdit("");
+  }, []);
+
   const handleExportFountain = useCallback(() => {
     const filename = project.name.replace(/[^a-zA-Z0-9_-]/g, "_") + ".fountain";
     exportFountain(project.content, filename);
@@ -429,6 +449,15 @@ export default function App() {
           projectName={project.name}
         />
         <div className="app-workspace">
+          {toolReview && (
+            <ToolReviewPane
+              review={toolReview}
+              editText={toolReviewEdit}
+              onEdit={setToolReviewEdit}
+              onApply={handleApplyToolReview}
+              onDiscard={handleDiscardToolReview}
+            />
+          )}
           <div className="workspace-main">
             {activeView === "editor" && (
               <ElementBar
@@ -498,6 +527,7 @@ export default function App() {
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleReplaceScript}
+              onOpenToolReview={handleOpenToolReview}
             />
           )}
           {activeView === "editor" && showKB && (
