@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
@@ -97,6 +97,15 @@ export default function SuggestionPanel({
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
   const [toolPreview, setToolPreview] = useState<{ label: string; beforeScript: string; afterScript: string; diff: RewriteDiffSummary } | null>(null);
   const [toolEditText, setToolEditText] = useState("");
+  const toolPreviewRef = useRef<HTMLDivElement | null>(null);
+
+  // When a whole-script tool stages a preview, bring it into view so it is never
+  // silently rendered below the panel fold (the "ran but nothing appeared" report).
+  useEffect(() => {
+    if (toolPreview) {
+      toolPreviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [toolPreview]);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
   const [reportCollapsed, setReportCollapsed] = useState(false);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
@@ -627,7 +636,7 @@ export default function SuggestionPanel({
       </div>
 
       {toolPreview && (
-        <div className="tool-preview">
+        <div className="tool-preview" ref={toolPreviewRef}>
           <div className="tool-preview-title">{toolPreview.label} — Editable Preview</div>
           <div className="tool-preview-metrics">
             Lines {toolPreview.diff.beforeLines} → {toolPreview.diff.afterLines} ·
