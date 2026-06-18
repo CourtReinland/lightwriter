@@ -409,7 +409,7 @@ export default function SuggestionPanel({
         reportCard,
         mode,
         targetFrameworkId,
-      });
+      }, setShotPassProgress);
       setScriptDoctorStage("validating");
       const focusSuffix = targetFrameworkId ? " (focused on active framework)" : "";
       stageRewritePreview(result, (mode === "target_pages" ? "Target-page completion" : "Missing-beat fill") + focusSuffix, fullScript, reportCard);
@@ -418,6 +418,7 @@ export default function SuggestionPanel({
       setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
     } finally {
       setLoading(false);
+      setShotPassProgress(null);
     }
   }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks]);
 

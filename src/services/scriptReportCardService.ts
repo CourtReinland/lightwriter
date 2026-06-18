@@ -152,6 +152,24 @@ Structural rules:
 - Stay focused on ${frameworkName}; do not reshape the draft to satisfy other frameworks at the same time.`;
 }
 
+// When the draft is well under its target page count, instruct the model to make
+// a real, quantified expansion (whole new scenes) rather than a light polish.
+// LLMs default to brevity, so the page math has to be explicit and forceful.
+function expansionDirective(script: string, targetPages: number): string {
+  const currentPages = estimatePages(script.split("\n").length);
+  if (!targetPages || targetPages <= currentPages + 1) return "";
+  const addPages = targetPages - currentPages;
+  const addLines = addPages * 56;
+  return `
+
+EXPANSION REQUIREMENT — THIS IS A MAJOR EXPANSION, NOT A POLISH:
+- The current draft is about ${currentPages} page(s); the target is ${targetPages} page(s).
+- You MUST grow the draft to roughly ${targetPages} pages by writing about ${addPages} more page(s) (~${addLines} lines) of NEW screenplay material.
+- Add WHOLE NEW SCENES — sluglines, action, and dialogue — that dramatize the missing or under-developed beats and land within their page ranges. Do NOT just add a line or two to existing scenes.
+- The returned rewrittenScript MUST be substantially longer than the input and must never be shorter. Returning something close to the original length is a failure of the task.
+- Earn every page with causally connected story (this happened, therefore that). Expand boldly — do not hold back — but do not repeat or pad with filler.`;
+}
+
 export function buildScriptReportCardPrompt(input: ScriptReportPromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
   const lines = input.script.split("\n").length;
   const estimatedPages = estimatePages(lines);
@@ -265,27 +283,27 @@ export function buildMetricRewritePrompt(input: ImproveMetricPromptInput): { sys
   const totalLines = input.script.split("\n").length;
   const blueprint = selectedFrameworkBlueprint(input.metricId, input.targetPages || estimatePages(totalLines), totalLines);
   const structureBlock = targetStructureBlock(blueprint, input.metricName);
+  const expansion = expansionDirective(input.script, input.targetPages || estimatePages(totalLines));
   return {
     system: `You are LightWriter's controlled screenplay rewrite engine. Return ONLY valid JSON. Preserve Fountain/plain screenplay formatting. Preserve the writer's style contract, character voices, plot facts, and existing good material. Do not summarize. Do not omit scenes unless explicitly cutting dead weight.`,
     user: `${base.user}
 
 SELECTED REWRITE METRIC: ${input.metricName} (${input.metricId})
 CURRENT REPORT DETAIL:
-${JSON.stringify(metricPayload, null, 2)}${structureBlock}
+${JSON.stringify(metricPayload, null, 2)}${structureBlock}${expansion}
 
-Rewrite the current script to improve ONLY this selected metric while preserving the rest of the draft.
+Rewrite the current script to improve this selected metric, expanding the draft toward its target length.
 Rules:
 - Return the complete revised script, not a patch and not notes.
 - Keep existing scene headings and useful dialogue where they still work.
-- Add, expand, cut, or reorder only what materially improves ${input.metricName}.
+- Add, expand, cut, or reorder what materially improves ${input.metricName}; when below target length, that means writing substantial NEW scenes for the metric's weak/missing beats.
 - Preserve the STYLE CONTRACT and target/director style.
 - Preserve KB continuity and character voice.
-- Keep the target length in mind: ${input.targetPages} pages.
-- If the source is short/partial, expand proportionally; do not pad with filler.
+- Honor the EXPANSION REQUIREMENT above when present: reach roughly ${input.targetPages} pages with real new scenes, not padding.
 
 ${rewriteJsonInstructions()}`,
     temperature: 0.45,
-    maxTokens: 12000,
+    maxTokens: 14000,
   };
 }
 
@@ -306,13 +324,14 @@ export function buildFillGapsRewritePrompt(input: FillGapsRewritePromptInput): {
   const structureBlock = targetFramework
     ? targetStructureBlock(selectedFrameworkBlueprint(targetFramework.id, input.targetPages || estimatePages(totalLines), totalLines), targetFramework.name)
     : "";
+  const expansion = input.mode === "target_pages" ? expansionDirective(input.script, input.targetPages || estimatePages(totalLines)) : "";
   return {
     system: `You are LightWriter's gap-filling screenplay rewrite engine. Return ONLY valid JSON. Preserve screenplay/Fountain formatting, existing strengths, the writer's style contract, KB continuity, and character voices.`,
     user: `${base.user}
 
 FILL GAPS / COMPLETE TO TARGET PAGES
 Mode: ${modeLabel}
-Target pages: ${input.targetPages}${structureBlock}
+Target pages: ${input.targetPages}${structureBlock}${expansion}
 
 Priority missing beats / weak beats:
 ${missingBeatSummary(input.reportCard, input.targetFrameworkId)}
@@ -327,11 +346,11 @@ Rules:
 - Complete toward target pages by adding causally connected scenes, reversals, character choices, and payoffs.
 - Keep the writer's style contract and target/director style visible in the prose.
 - Keep all additions consistent with the KB and current script.
-- Do not pad. If the current script is extremely short relative to target pages, create a stronger partial expansion and explain limits in warnings.
+- Expand fully to the target page count with real new scenes. Use warnings ONLY for a genuine creative constraint — never as an excuse to return a short draft.
 
 ${rewriteJsonInstructions()}`,
     temperature: 0.5,
-    maxTokens: 14000,
+    maxTokens: 16000,
   };
 }
 
@@ -573,12 +592,64 @@ export async function rewriteScriptForMetric(input: ImproveMetricPromptInput): P
   return parseRewriteResponse(response);
 }
 
-export async function fillScriptGaps(input: FillGapsRewritePromptInput): Promise<ScriptRewriteResult> {
-  const prompt = buildFillGapsRewritePrompt(input);
+export interface FillGapsProgress {
+  completed: number;
+  total: number;
+  label: string;
+}
+
+export async function fillScriptGaps(
+  input: FillGapsRewritePromptInput,
+  onProgress?: (progress: FillGapsProgress) => void,
+): Promise<ScriptRewriteResult> {
   const service = new TextAiService();
-  const response = await service.complete(prompt.system, prompt.user, {
-    temperature: prompt.temperature,
-    maxTokens: prompt.maxTokens,
-  });
-  return parseRewriteResponse(response);
+  const targetPages = input.targetPages || estimatePages(input.script.split("\n").length);
+  // Models rarely jump from 13 -> 23 pages in one shot. For target-page completion,
+  // feed the growing draft back in and keep expanding until it nears the target.
+  const maxPasses = input.mode === "target_pages" ? 3 : 1;
+
+  let currentScript = input.script;
+  let lastResult: ScriptRewriteResult | null = null;
+  const allChanges: string[] = [];
+  const allWarnings: string[] = [];
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const currentPages = estimatePages(currentScript.split("\n").length);
+    if (input.mode === "target_pages" && currentPages >= Math.floor(targetPages * 0.95)) break;
+
+    onProgress?.({
+      completed: pass,
+      total: maxPasses,
+      label: input.mode === "target_pages"
+        ? `Expanding toward ${targetPages} pages (pass ${pass + 1}/${maxPasses}, ~${currentPages} so far)`
+        : "Filling missing beats",
+    });
+
+    const prompt = buildFillGapsRewritePrompt({ ...input, script: currentScript });
+    const response = await service.complete(prompt.system, prompt.user, {
+      temperature: prompt.temperature,
+      maxTokens: prompt.maxTokens,
+    });
+    const result = parseRewriteResponse(response);
+
+    const grew = result.rewrittenScript.trim().split("\n").length > currentScript.split("\n").length;
+    if (result.rewrittenScript.trim() && (grew || lastResult === null)) {
+      currentScript = result.rewrittenScript;
+      lastResult = result;
+      allChanges.push(...result.changeSummary);
+      allWarnings.push(...result.warnings);
+    } else {
+      // This pass didn't grow the draft — stop rather than spin.
+      if (!lastResult) lastResult = result;
+      break;
+    }
+  }
+
+  const base = lastResult ?? { rewrittenScript: currentScript, changeSummary: [], warnings: [] };
+  return {
+    ...base,
+    rewrittenScript: currentScript,
+    changeSummary: allChanges.length ? Array.from(new Set(allChanges)) : base.changeSummary,
+    warnings: Array.from(new Set(allWarnings)),
+  };
 }
