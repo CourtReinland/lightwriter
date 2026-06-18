@@ -25,13 +25,16 @@ MARA runs.
 const settings: TextAiProviderSettings = { provider: "grok", apiKey: "test-key", model: "grok-3-mini-fast", updatedAt: 0 };
 
 describe("expand descriptions prompt", () => {
-  it("instructs the model to deepen visuals without adding shots or changing story", () => {
+  it("deepens visuals, invents missing scene-setting, but never adds shots or changes story", () => {
     const { scenes } = extractShotScenes(SCRIPT);
     const prompt = buildExpandDescriptionsPrompt({ scene: scenes[0], knowledgeBase: null, styleProfile: null });
 
     expect(prompt.system).toContain("downstream AI image/video generation");
     expect(prompt.system).toContain("Do NOT add new !! shot lines");
-    expect(prompt.system).toContain("Do NOT invent new plot events");
+    // May invent the visual look where a scene has none...
+    expect(prompt.system).toMatch(/INVENT where missing/i);
+    // ...but must not invent plot, dialogue, or characters.
+    expect(prompt.system).toContain("new plot events");
     expect(prompt.system).toContain("Preserve the scene heading");
     expect(prompt.user).toContain(scenes[0].text);
   });
