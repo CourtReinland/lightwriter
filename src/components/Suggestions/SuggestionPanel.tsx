@@ -4,6 +4,7 @@ import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../se
 import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
+import { runStoryDoctor, isFrameworkMetric } from "../../services/storyDoctorService";
 import {
   generate,
   isAnalysisMode,
@@ -368,15 +369,28 @@ export default function SuggestionPanel({
     setSuggestion(null);
     setScriptDoctorStage("requesting");
     try {
-      const result = await rewriteScriptForMetric({
-        script: fullScript,
-        knowledgeBase,
-        styleProfile,
-        targetPages,
-        reportCard,
-        metricId,
-        metricName,
-      }, setShotPassProgress);
+      // Framework metrics (Dan Harmon, Save the Cat, etc.) get the closed-loop
+      // Story Doctor: restructure -> re-score -> fix -> re-score, keep the best.
+      // Craft metrics (style/character/pacing) use the single-pass rewrite.
+      const result = isFrameworkMetric(metricId)
+        ? await runStoryDoctor({
+            script: fullScript,
+            metricId,
+            metricName,
+            targetPages,
+            reportCard,
+            knowledgeBase,
+            styleProfile,
+          }, setShotPassProgress)
+        : await rewriteScriptForMetric({
+            script: fullScript,
+            knowledgeBase,
+            styleProfile,
+            targetPages,
+            reportCard,
+            metricId,
+            metricName,
+          }, setShotPassProgress);
       setScriptDoctorStage("validating");
       stageRewritePreview(result, `${metricName} rewrite`, fullScript, reportCard);
     } catch (e) {
