@@ -12,6 +12,8 @@ import { runScriptReportCard, parseRewriteResponse, type ScriptReportCard, type 
 
 const MAX_ITERATIONS = 3;
 const TARGET_SCORE = 78;
+// On a tie/near-tie, prefer the later (deduped/restructured) draft over the original.
+const TIE_MARGIN = 3;
 const REWRITE_TIMEOUT_MS = 240_000;
 const REWRITE_MAX_TOKENS = 16000;
 
@@ -176,7 +178,15 @@ export async function runStoryDoctor(
       allWarnings.push(`Pass ${i + 1} rewrite failed: ${errMsg(e)}`);
       break;
     }
-    const rewrite = parseRewriteResponse(response);
+    let rewrite: ScriptRewriteResult;
+    try {
+      rewrite = parseRewriteResponse(response);
+    } catch {
+      // Malformed/truncated output (e.g. the JSON got cut off) — skip this pass
+      // gracefully and keep the best draft so far rather than aborting.
+      allWarnings.push(`Pass ${i + 1}: rewrite output was unusable (likely truncated) — skipped.`);
+      break;
+    }
     if (!rewrite.rewrittenScript.trim()) {
       allWarnings.push(`Pass ${i + 1}: empty rewrite, stopping.`);
       break;
@@ -198,14 +208,20 @@ export async function runStoryDoctor(
     currentReport = report;
     const s = frameworkScoreOf(report, input.metricId);
     trajectory.push(s);
+    // Keep-best, but PREFER the later, more-restructured draft on a tie/near-tie:
+    // each pass cuts duplicates and tightens, so a deduped draft at the same score
+    // beats the bloated original. Never keep a clear regression (beyond the margin).
     if (s > bestScore) {
       bestScore = s;
       bestScript = currentScript;
       bestReport = report;
+    } else if (s >= bestScore - TIE_MARGIN) {
+      bestScript = currentScript;
+      bestReport = report;
     }
 
-    // Stop if we plateaued (a pass that didn't improve on the best by a margin).
-    if (i >= 1 && s <= bestScore - 0 && s <= trajectory[trajectory.length - 2] + 2) break;
+    // Stop if we plateaued (a pass that didn't beat the best, and isn't climbing).
+    if (i >= 1 && s <= bestScore && s <= trajectory[trajectory.length - 2] + 2) break;
   }
 
   return {

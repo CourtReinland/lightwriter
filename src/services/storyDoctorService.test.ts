@@ -74,4 +74,20 @@ describe("runStoryDoctor", () => {
     expect(res.finalScore).toBe(40);
     expect(res.rewrittenScript).toBe("ORIGINAL"); // kept the better original
   });
+
+  it("prefers the deduped restructured draft on a tie", async () => {
+    const metricId = "dan-harmon-story-circle";
+    const mockComplete = async () => JSON.stringify({ rewrittenScript: "DEDUPED\n\nINT. X - DAY\n\nClean.", changeSummary: ["removed duplicates"], warnings: [] });
+    const mockScore = async () => reportWithScore(metricId, 73); // exactly ties the start
+
+    const res = await runStoryDoctor(
+      { script: "ORIGINAL BLOATED", metricId, metricName: "Dan Harmon Story Circle", targetPages: 23, reportCard: reportWithScore(metricId, 73), knowledgeBase: null, styleProfile: null },
+      undefined,
+      mockComplete,
+      mockScore,
+    );
+
+    expect(res.finalScore).toBe(73);
+    expect(res.rewrittenScript).toContain("DEDUPED"); // cleaner draft kept despite the tie
+  });
 });
