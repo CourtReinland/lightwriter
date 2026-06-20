@@ -116,7 +116,9 @@ describe("script report card parsing", () => {
 
     expect(parsed.overallScore).toBe(81);
     const saveTheCat = parsed.frameworkScores.find((score) => score.frameworkId === "save-the-cat");
-    expect(saveTheCat?.score).toBe(72);
+    // Framework score is now derived from the beat-score average (a single beat
+    // at 43 here), not the model's separate holistic guess (72).
+    expect(saveTheCat?.score).toBe(43);
     expect(saveTheCat?.beatScores[0].score).toBe(43);
     expect(parsed.styleScore.score).toBe(88);
     expect(parsed.topFixes).toContain("Strengthen midpoint");

@@ -233,7 +233,9 @@ ${input.script.slice(0, 120000)}
   return {
     system,
     user,
-    temperature: 0.25,
+    // Score deterministically — rubric scoring must be stable run-to-run so the
+    // rewrite loop can trust it (it previously swung ~26 points at temp 0.25).
+    temperature: 0,
     maxTokens: 7000,
   };
 }
@@ -368,21 +370,28 @@ export function normalizeReportCard(card: Partial<ScriptReportCard>): ScriptRepo
   const supplied = Array.isArray(card.frameworkScores) ? card.frameworkScores : [];
   const frameworkScores = ALL_FRAMEWORKS.map((framework) => {
     const found = supplied.find((item) => item.frameworkId === framework.id || item.frameworkName === framework.name);
+    const beatScores = Array.isArray(found?.beatScores)
+      ? found.beatScores.map((beat) => ({
+          beatName: String(beat.beatName || "Unnamed beat"),
+          expectedPageRange: beat.expectedPageRange ? String(beat.expectedPageRange) : undefined,
+          detectedEvidence: String(beat.detectedEvidence || ""),
+          score: clampScore(beat.score),
+          missing: Boolean(beat.missing),
+          suggestions: asStringArray(beat.suggestions),
+        }))
+      : [];
+    // Derive the framework score from the per-beat scores rather than trusting a
+    // separate holistic 0-100 guess. Averaging the beats cancels noise and makes
+    // the framework score a stable function of the (more concrete) beat judgments.
+    const derivedScore = beatScores.length
+      ? Math.round(beatScores.reduce((sum, b) => sum + b.score, 0) / beatScores.length)
+      : clampScore(found?.score);
     return {
       frameworkId: framework.id,
       frameworkName: framework.name,
-      score: clampScore(found?.score),
+      score: derivedScore,
       summary: found?.summary ? String(found.summary) : "Not scored yet.",
-      beatScores: Array.isArray(found?.beatScores)
-        ? found.beatScores.map((beat) => ({
-            beatName: String(beat.beatName || "Unnamed beat"),
-            expectedPageRange: beat.expectedPageRange ? String(beat.expectedPageRange) : undefined,
-            detectedEvidence: String(beat.detectedEvidence || ""),
-            score: clampScore(beat.score),
-            missing: Boolean(beat.missing),
-            suggestions: asStringArray(beat.suggestions),
-          }))
-        : [],
+      beatScores,
     };
   });
 
