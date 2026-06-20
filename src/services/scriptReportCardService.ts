@@ -3,6 +3,7 @@ import type { FrameworkDefinition } from "../frameworks";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import { TextAiService } from "./textAiService";
+import { expandScriptToTargetPages, type ExpandProgress } from "./scriptExpansionService";
 
 export interface ReportBeatScore {
   beatName: string;
@@ -582,74 +583,98 @@ export async function generateMetricImprovementPlan(input: ImproveMetricPromptIn
   });
 }
 
-export async function rewriteScriptForMetric(input: ImproveMetricPromptInput): Promise<ScriptRewriteResult> {
+export type FillGapsProgress = ExpandProgress;
+
+// Format the weak/missing beats of the chosen framework as guidance for the
+// scene-insertion expansion engine.
+function beatGuidanceFor(reportCard: ScriptReportCard, frameworkId: string | undefined): string {
+  const fw = frameworkId ? reportCard.frameworkScores.find((f) => f.frameworkId === frameworkId) : undefined;
+  if (!fw || !fw.beatScores.length) {
+    return reportCard.topFixes.slice(0, 6).map((fix, i) => `${i + 1}. ${fix}`).join("\n");
+  }
+  return fw.beatScores
+    .map((b) => `- ${b.beatName}${b.expectedPageRange ? ` (pages ${b.expectedPageRange})` : ""}: score ${b.score}${b.missing ? " — MISSING, write full scenes" : b.score < 60 ? " — WEAK, expand with new scenes" : " — present"}`)
+    .join("\n");
+}
+
+// After a quality rewrite, if the draft is still well under the target page
+// count, grow it to target by inserting whole new scenes (reliable expansion).
+async function expandToTargetIfNeeded(
+  result: ScriptRewriteResult,
+  opts: { targetPages: number; frameworkId?: string; reportCard: ScriptReportCard; knowledgeBase: KnowledgeBase | null; styleProfile: StyleProfile | null },
+  onProgress?: (p: ExpandProgress) => void,
+): Promise<ScriptRewriteResult> {
+  if (!opts.targetPages) return result;
+  const currentPages = estimatePages(result.rewrittenScript.split("\n").length);
+  if (currentPages >= Math.floor(opts.targetPages * 0.9)) return result;
+
+  const framework = opts.frameworkId ? ALL_FRAMEWORKS.find((f) => f.id === opts.frameworkId) : undefined;
+  const expanded = await expandScriptToTargetPages(
+    result.rewrittenScript,
+    {
+      targetPages: opts.targetPages,
+      frameworkName: framework?.name,
+      beatGuidance: beatGuidanceFor(opts.reportCard, opts.frameworkId),
+      knowledgeBase: opts.knowledgeBase,
+      styleProfile: opts.styleProfile,
+    },
+    onProgress,
+  );
+  return {
+    ...result,
+    rewrittenScript: expanded.script,
+    changeSummary: Array.from(new Set([...result.changeSummary, ...expanded.changeSummary])),
+    warnings: Array.from(new Set([...result.warnings, ...expanded.warnings])),
+  };
+}
+
+export async function rewriteScriptForMetric(
+  input: ImproveMetricPromptInput,
+  onProgress?: (progress: ExpandProgress) => void,
+): Promise<ScriptRewriteResult> {
   const prompt = buildMetricRewritePrompt(input);
   const service = new TextAiService();
+  onProgress?.({ completed: 0, total: 1, label: `Rewriting for ${input.metricName}...` });
   const response = await service.complete(prompt.system, prompt.user, {
     temperature: prompt.temperature,
     maxTokens: prompt.maxTokens,
   });
-  return parseRewriteResponse(response);
-}
-
-export interface FillGapsProgress {
-  completed: number;
-  total: number;
-  label: string;
+  const result = parseRewriteResponse(response);
+  return expandToTargetIfNeeded(
+    result,
+    {
+      targetPages: input.targetPages || estimatePages(input.script.split("\n").length),
+      frameworkId: input.metricId,
+      reportCard: input.reportCard,
+      knowledgeBase: input.knowledgeBase,
+      styleProfile: input.styleProfile,
+    },
+    onProgress,
+  );
 }
 
 export async function fillScriptGaps(
   input: FillGapsRewritePromptInput,
-  onProgress?: (progress: FillGapsProgress) => void,
+  onProgress?: (progress: ExpandProgress) => void,
 ): Promise<ScriptRewriteResult> {
+  const prompt = buildFillGapsRewritePrompt(input);
   const service = new TextAiService();
-  const targetPages = input.targetPages || estimatePages(input.script.split("\n").length);
-  // Models rarely jump from 13 -> 23 pages in one shot. For target-page completion,
-  // feed the growing draft back in and keep expanding until it nears the target.
-  const maxPasses = input.mode === "target_pages" ? 3 : 1;
-
-  let currentScript = input.script;
-  let lastResult: ScriptRewriteResult | null = null;
-  const allChanges: string[] = [];
-  const allWarnings: string[] = [];
-
-  for (let pass = 0; pass < maxPasses; pass++) {
-    const currentPages = estimatePages(currentScript.split("\n").length);
-    if (input.mode === "target_pages" && currentPages >= Math.floor(targetPages * 0.95)) break;
-
-    onProgress?.({
-      completed: pass,
-      total: maxPasses,
-      label: input.mode === "target_pages"
-        ? `Expanding toward ${targetPages} pages (pass ${pass + 1}/${maxPasses}, ~${currentPages} so far)`
-        : "Filling missing beats",
-    });
-
-    const prompt = buildFillGapsRewritePrompt({ ...input, script: currentScript });
-    const response = await service.complete(prompt.system, prompt.user, {
-      temperature: prompt.temperature,
-      maxTokens: prompt.maxTokens,
-    });
-    const result = parseRewriteResponse(response);
-
-    const grew = result.rewrittenScript.trim().split("\n").length > currentScript.split("\n").length;
-    if (result.rewrittenScript.trim() && (grew || lastResult === null)) {
-      currentScript = result.rewrittenScript;
-      lastResult = result;
-      allChanges.push(...result.changeSummary);
-      allWarnings.push(...result.warnings);
-    } else {
-      // This pass didn't grow the draft — stop rather than spin.
-      if (!lastResult) lastResult = result;
-      break;
-    }
-  }
-
-  const base = lastResult ?? { rewrittenScript: currentScript, changeSummary: [], warnings: [] };
-  return {
-    ...base,
-    rewrittenScript: currentScript,
-    changeSummary: allChanges.length ? Array.from(new Set(allChanges)) : base.changeSummary,
-    warnings: Array.from(new Set(allWarnings)),
-  };
+  onProgress?.({ completed: 0, total: 1, label: input.mode === "target_pages" ? "Completing structure..." : "Filling missing beats..." });
+  const response = await service.complete(prompt.system, prompt.user, {
+    temperature: prompt.temperature,
+    maxTokens: prompt.maxTokens,
+  });
+  const result = parseRewriteResponse(response);
+  if (input.mode !== "target_pages") return result;
+  return expandToTargetIfNeeded(
+    result,
+    {
+      targetPages: input.targetPages || estimatePages(input.script.split("\n").length),
+      frameworkId: input.targetFrameworkId,
+      reportCard: input.reportCard,
+      knowledgeBase: input.knowledgeBase,
+      styleProfile: input.styleProfile,
+    },
+    onProgress,
+  );
 }

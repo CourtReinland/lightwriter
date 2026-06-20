@@ -376,7 +376,7 @@ export default function SuggestionPanel({
         reportCard,
         metricId,
         metricName,
-      });
+      }, setShotPassProgress);
       setScriptDoctorStage("validating");
       stageRewritePreview(result, `${metricName} rewrite`, fullScript, reportCard);
     } catch (e) {
@@ -384,6 +384,7 @@ export default function SuggestionPanel({
       setError(e instanceof Error ? e.message : "Metric rewrite failed");
     } finally {
       setLoading(false);
+      setShotPassProgress(null);
     }
   }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
 
