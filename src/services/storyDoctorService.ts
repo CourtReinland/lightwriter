@@ -10,8 +10,8 @@ import { runScriptReportCard, parseRewriteResponse, type ScriptReportCard, type 
 // itself and feeds the gaps back into another pass, keeping the best draft. This
 // runs before the user sees the result.
 
-const MAX_ITERATIONS = 3;
-const TARGET_SCORE = 78;
+const MAX_ITERATIONS = 4;
+const TARGET_SCORE = 80;
 // On a tie/near-tie, prefer the later (deduped/restructured) draft over the original.
 const TIE_MARGIN = 3;
 const REWRITE_TIMEOUT_MS = 240_000;
@@ -108,6 +108,7 @@ RULES:
 - Place each beat in its page range, IN ORDER. The final beat must land at the very END of the script.
 - ADD any genuinely missing beat as a new, distinct scene; CUT or MERGE filler, repeats, and digressions.
 - Net the length to about ${args.targetPages} pages by BALANCING cuts and additions — do not pad with repetition, and do not pad with restated material to hit the count.
+- CRAFT (this is what earns a high score): each beat must turn on a clear character CHOICE with visible stakes, and connect causally to the beats before and after it (this happened, THEREFORE that — not "and then"). Escalate the consequences from You through Take. End on a Change beat that mirrors the opening You beat with a new emotional charge. Mere presence of a beat is not enough; it must do real dramatic work.
 - Preserve the writer's voice, the existing characters, and all established plot facts. Do not invent unrelated characters or events.
 - Return the COMPLETE revised screenplay (every scene in order), not notes or a diff.
 ${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}

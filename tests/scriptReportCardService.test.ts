@@ -114,7 +114,10 @@ describe("script report card parsing", () => {
     ].join("\n");
     const parsed = parseReportCardResponse(response, "save-the-cat");
 
-    expect(parsed.overallScore).toBe(81);
+    // overallScore is now a deterministic rollup (0.7*best-framework + 0.3*craft-avg),
+    // not the model's holistic 81. Best framework = Save the Cat beat-avg 43; craft avg
+    // = round((88+76+69)/3)=78 -> round(0.7*43 + 0.3*78) = 54.
+    expect(parsed.overallScore).toBe(54);
     const saveTheCat = parsed.frameworkScores.find((score) => score.frameworkId === "save-the-cat");
     // Framework score is now derived from the beat-score average (a single beat
     // at 43 here), not the model's separate holistic guess (72).

@@ -59,6 +59,25 @@ describe("runStoryDoctor", () => {
     expect(res.iterations).toBe(1);
   });
 
+  it("does not stop at 79 but does stop once it clears the 80 target", async () => {
+    const metricId = "dan-harmon-story-circle";
+    const scores = [79, 81];
+    let scoreCall = 0;
+    const mockComplete = async () => JSON.stringify({ rewrittenScript: `REVISED ${scoreCall}\n\nINT. X - DAY\n\nA.`, changeSummary: [], warnings: [] });
+    const mockScore = async () => reportWithScore(metricId, scores[scoreCall++] ?? 81);
+
+    const res = await runStoryDoctor(
+      { script: "ORIGINAL", metricId, metricName: "Dan Harmon Story Circle", targetPages: 23, reportCard: reportWithScore(metricId, 40), knowledgeBase: null, styleProfile: null },
+      undefined,
+      mockComplete,
+      mockScore,
+    );
+
+    expect(res.trajectory).toEqual([40, 79, 81]); // ran past 79
+    expect(res.finalScore).toBe(81);
+    expect(res.iterations).toBeGreaterThanOrEqual(2);
+  });
+
   it("never regresses below the starting draft if rewrites get worse", async () => {
     const metricId = "save-the-cat";
     const mockComplete = async () => JSON.stringify({ rewrittenScript: "WORSE\n\nINT. Y - DAY\n\nB.", changeSummary: [], warnings: [] });

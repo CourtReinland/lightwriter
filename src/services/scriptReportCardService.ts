@@ -200,6 +200,14 @@ Evaluate additional craft metrics:
 - CHARACTER CONSISTENCY against KB characters, arcs, voice, and relationships.
 - PACING against target page length, scene density, escalation, and payoff timing.
 
+BEAT SCORING RUBRIC (score each beat 0-100 on TWO axes — does it land in its page range, AND is it dramatized with craft):
+- 90-100: present, within its page range, AND strongly dramatized — a clear character choice, escalating stakes, and a causal link to the beats before and after it. Reserve 90+ for beats that are both present AND genuinely strong.
+- 78-89: present, in range, and competently dramatized; only minor weaknesses in stakes or causality.
+- 60-77: present but underdeveloped, rushed, vague, or placed outside its page range.
+- 40-59: only faint or partial evidence, or conflated with another beat.
+- 0-39: missing or functionally absent (set missing: true).
+ANTI-INFLATION: a beat that merely appears on the page without a clear dramatic choice, stakes, or causal connection to its neighbors is at most 77 — do NOT award 78+ for mere presence. Use the SAME two-axis judgment (present-in-range AND craft) for the style, character, and pacing scores.
+
 Return this exact JSON shape:
 {
   "overallScore": 0,
@@ -395,25 +403,38 @@ export function normalizeReportCard(card: Partial<ScriptReportCard>): ScriptRepo
     };
   });
 
+  const styleScore = {
+    score: clampScore(card.styleScore?.score),
+    matchedTraits: asStringArray(card.styleScore?.matchedTraits),
+    drift: asStringArray(card.styleScore?.drift),
+    suggestions: asStringArray(card.styleScore?.suggestions),
+  };
+  const characterScore = {
+    score: clampScore(card.characterScore?.score),
+    summary: String(card.characterScore?.summary || ""),
+    suggestions: asStringArray(card.characterScore?.suggestions),
+  };
+  const pacingScore = {
+    score: clampScore(card.pacingScore?.score),
+    summary: String(card.pacingScore?.summary || ""),
+    suggestions: asStringArray(card.pacingScore?.suggestions),
+  };
+
+  // overallScore is a DETERMINISTIC rollup of the evidence-based sub-scores, not
+  // the model's separate (rubric-less) holistic guess. Weight the BEST-matching
+  // framework — a script written toward one framework cannot also satisfy the
+  // others (e.g. Propp's 31 functions), so averaging all five would cap it far
+  // below the truth. 70% best framework + 30% craft average.
+  const bestFramework = frameworkScores.length ? Math.max(...frameworkScores.map((f) => f.score)) : 0;
+  const craftAvg = Math.round((styleScore.score + characterScore.score + pacingScore.score) / 3);
+  const overallScore = clampScore(Math.round(0.7 * bestFramework + 0.3 * craftAvg));
+
   return {
-    overallScore: clampScore(card.overallScore),
+    overallScore,
     frameworkScores,
-    styleScore: {
-      score: clampScore(card.styleScore?.score),
-      matchedTraits: asStringArray(card.styleScore?.matchedTraits),
-      drift: asStringArray(card.styleScore?.drift),
-      suggestions: asStringArray(card.styleScore?.suggestions),
-    },
-    characterScore: {
-      score: clampScore(card.characterScore?.score),
-      summary: String(card.characterScore?.summary || ""),
-      suggestions: asStringArray(card.characterScore?.suggestions),
-    },
-    pacingScore: {
-      score: clampScore(card.pacingScore?.score),
-      summary: String(card.pacingScore?.summary || ""),
-      suggestions: asStringArray(card.pacingScore?.suggestions),
-    },
+    styleScore,
+    characterScore,
+    pacingScore,
     topFixes: asStringArray(card.topFixes),
     recommendedNextAction: String(card.recommendedNextAction || ""),
   };
