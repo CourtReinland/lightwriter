@@ -12,8 +12,6 @@ import { runScriptReportCard, parseRewriteResponse, type ScriptReportCard, type 
 
 const MAX_ITERATIONS = 4;
 const TARGET_SCORE = 80;
-// On a tie/near-tie, prefer the later (deduped/restructured) draft over the original.
-const TIE_MARGIN = 3;
 const REWRITE_TIMEOUT_MS = 240_000;
 const REWRITE_MAX_TOKENS = 16000;
 
@@ -150,10 +148,8 @@ export async function runStoryDoctor(
   let bestScript = input.script;
   let bestReport = input.reportCard;
   let bestScore = startScore;
-
-  let currentScript = input.script;
-  let currentReport = input.reportCard;
   let iterations = 0;
+  let noImprove = 0;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     if (bestScore >= TARGET_SCORE) break;
@@ -161,68 +157,62 @@ export async function runStoryDoctor(
 
     onProgress?.({ completed: i * 2, total: MAX_ITERATIONS * 2, label: `Story Doctor pass ${i + 1}/${MAX_ITERATIONS}: restructuring (${input.metricName} at ${bestScore}/100)` });
 
-    const blueprint = beatBlueprintFor(input.metricId, input.targetPages, currentScript.split("\n").length);
+    // Always restructure from the BEST draft so a single bad/truncated pass never
+    // poisons the next one (each pass tries to improve the best, not the latest).
+    const blueprint = beatBlueprintFor(input.metricId, input.targetPages, bestScript.split("\n").length);
     const { system, user } = buildRestructurePrompt({
-      script: currentScript,
+      script: bestScript,
       metricName: input.metricName,
       blueprint,
-      fixBrief: fixBriefFor(currentReport, input.metricId),
+      fixBrief: fixBriefFor(bestReport, input.metricId),
       targetPages: input.targetPages,
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
     });
 
-    let response: string;
+    let rewrite: ScriptRewriteResult | null = null;
     try {
-      response = await complete(system, user, { temperature: 0.5, maxTokens: REWRITE_MAX_TOKENS, timeoutMs: REWRITE_TIMEOUT_MS });
-    } catch (e) {
-      allWarnings.push(`Pass ${i + 1} rewrite failed: ${errMsg(e)}`);
-      break;
-    }
-    let rewrite: ScriptRewriteResult;
-    try {
+      const response = await complete(system, user, { temperature: 0.5, maxTokens: REWRITE_MAX_TOKENS, timeoutMs: REWRITE_TIMEOUT_MS });
       rewrite = parseRewriteResponse(response);
     } catch {
-      // Malformed/truncated output (e.g. the JSON got cut off) — skip this pass
-      // gracefully and keep the best draft so far rather than aborting.
-      allWarnings.push(`Pass ${i + 1}: rewrite output was unusable (likely truncated) — skipped.`);
-      break;
+      allWarnings.push(`Pass ${i + 1}: rewrite failed or was truncated — retrying from best.`);
     }
-    if (!rewrite.rewrittenScript.trim()) {
-      allWarnings.push(`Pass ${i + 1}: empty rewrite, stopping.`);
-      break;
+    if (!rewrite || !rewrite.rewrittenScript.trim()) {
+      if (++noImprove >= 2) break;
+      continue;
     }
-    allChanges.push(...rewrite.changeSummary);
-    allWarnings.push(...rewrite.warnings);
-    currentScript = rewrite.rewrittenScript;
+    const candidate = rewrite.rewrittenScript;
 
     onProgress?.({ completed: i * 2 + 1, total: MAX_ITERATIONS * 2, label: `Story Doctor pass ${i + 1}/${MAX_ITERATIONS}: re-scoring` });
     let report: ScriptReportCard;
     try {
-      report = await score(currentScript);
-    } catch (e) {
-      allWarnings.push(`Pass ${i + 1} re-score failed: ${errMsg(e)}`);
-      // Can't compare; keep this rewrite as best if we have nothing better.
-      if (bestScore <= startScore) { bestScript = currentScript; }
-      break;
+      report = await score(candidate);
+    } catch {
+      allWarnings.push(`Pass ${i + 1}: re-score failed — retrying from best.`);
+      if (++noImprove >= 2) break;
+      continue;
     }
-    currentReport = report;
     const s = frameworkScoreOf(report, input.metricId);
     trajectory.push(s);
-    // Keep-best, but PREFER the later, more-restructured draft on a tie/near-tie:
-    // each pass cuts duplicates and tightens, so a deduped draft at the same score
-    // beats the bloated original. Never keep a clear regression (beyond the margin).
-    if (s > bestScore) {
-      bestScore = s;
-      bestScript = currentScript;
-      bestReport = report;
-    } else if (s >= bestScore - TIE_MARGIN) {
-      bestScript = currentScript;
-      bestReport = report;
-    }
 
-    // Stop if we plateaued (a pass that didn't beat the best, and isn't climbing).
-    if (i >= 1 && s <= bestScore && s <= trajectory[trajectory.length - 2] + 2) break;
+    if (s > bestScore) {
+      // Real improvement — adopt it as the new best to build on.
+      bestScore = s;
+      bestScript = candidate;
+      bestReport = report;
+      allChanges.push(...rewrite.changeSummary);
+      allWarnings.push(...rewrite.warnings);
+      noImprove = 0;
+    } else {
+      // No gain. On an exact tie, prefer the later (deduped/tightened) draft; on a
+      // regression or broken (low) pass, keep the prior best and retry.
+      if (s === bestScore) {
+        bestScript = candidate;
+        bestReport = report;
+        allChanges.push(...rewrite.changeSummary);
+      }
+      if (++noImprove >= 2) break;
+    }
   }
 
   return {

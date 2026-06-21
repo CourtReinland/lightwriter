@@ -202,8 +202,8 @@ Evaluate additional craft metrics:
 
 BEAT SCORING RUBRIC (score each beat 0-100 on TWO axes — does it land in its page range, AND is it dramatized with craft):
 - 90-100: present, within its page range, AND strongly dramatized — a clear character choice, escalating stakes, and a causal link to the beats before and after it. Reserve 90+ for beats that are both present AND genuinely strong.
-- 78-89: present, in range, and competently dramatized; only minor weaknesses in stakes or causality.
-- 60-77: present but underdeveloped, rushed, vague, or placed outside its page range.
+- 78-89: present, in its page range, turning on a clear character choice and connected causally to its neighbors. This is COMPETENT, functional Story Circle execution — award this band freely for beats that genuinely work; do NOT under-score a competent, functional beat down into the 60s. Competent is good.
+- 60-77: present but underdeveloped, rushed, vague, lacking a clear choice/stakes, or placed outside its page range.
 - 40-59: only faint or partial evidence, or conflated with another beat.
 - 0-39: missing or functionally absent (set missing: true).
 ANTI-INFLATION: a beat that merely appears on the page without a clear dramatic choice, stakes, or causal connection to its neighbors is at most 77 — do NOT award 78+ for mere presence. Use the SAME two-axis judgment (present-in-range AND craft) for the style, character, and pacing scores.
