@@ -63,7 +63,7 @@ export function buildCharacterAssetPrompt(character: ScriptCharacterRef): string
   ].filter(Boolean).join(" ");
 }
 
-export async function parseCharactersWithTextAi(script: string, service = new TextAiService()): Promise<ScriptCharacterRef[]> {
+export async function parseCharactersWithTextAi(script: string, service = TextAiService.forAnalyst()): Promise<ScriptCharacterRef[]> {
   const truncated = script.length > 60000 ? script.slice(0, 60000) : script;
   const system = `You are a screenplay character parser. Extract ONLY real speaking or described story characters from the screenplay.
 Return ONLY valid JSON with this shape:

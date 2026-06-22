@@ -27,8 +27,10 @@ import { generateReviewedAssetPrompt, generateReviewedAssetPrompts } from "../..
 import type { Project } from "../../services/storageService";
 import { StyleReferenceService, type ScriptStyleReference, type StyleReferenceScope } from "../../services/styleReferenceService";
 import {
+  getAnalystProviderSettings,
   getTextAiProviderSettings,
   getTextAiSettings,
+  saveAnalystOverride,
   saveTextAiProviderSettings,
   saveTextAiSettings,
   textAiProviderLabel,
@@ -88,6 +90,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const [textAiModelDrafts, setTextAiModelDrafts] = useState<Record<TextAiProvider, string>>(() =>
     Object.fromEntries(textAiProviderOptions().map((item) => [item, getTextAiProviderSettings(item).model])) as Record<TextAiProvider, string>,
   );
+  // The analyst (scoring/parsing) model — an override on the writing model.
+  const [analystProvider, setAnalystProvider] = useState<TextAiProvider>(() => getAnalystProviderSettings().provider);
+  const [analystModel, setAnalystModel] = useState<string>(() => getAnalystProviderSettings().model);
   const [settingsMessage, setSettingsMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
@@ -691,12 +696,12 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
         <div className="asset-tab-pane">
           <section className="asset-settings-box">
             <div className="asset-settings-heading">
-              <h3>Writing AI / Parser</h3>
+              <h3>Writing &amp; Analysis Models</h3>
               <span>Auto-saved</span>
             </div>
-            <p className="asset-muted">Global provider for AI script parsing, prompt drafting, and text-generation tools across LightWriter.</p>
+            <p className="asset-muted">Pick the model that WRITES (rewrites, expansion, suggestions) and, separately, the one that ANALYZES (report-card scoring, character parsing, style). A creative model can write while a disciplined model scores.</p>
             <label>
-              Provider
+              Writing model — provider
               <select value={textAiProvider} onChange={(event) => setTextAiProvider(event.target.value as TextAiProvider)}>
                 {textAiProviderOptions().map((item) => (
                   <option key={item} value={item}>{textAiProviderLabel(item)}</option>
@@ -704,9 +709,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
               </select>
             </label>
             <label>
-              Model ({textAiProviderLabel(textAiProvider)})
+              Writing model ({textAiProviderLabel(textAiProvider)})
               <ModelPicker
-                key={textAiProvider}
+                key={`writer-${textAiProvider}`}
                 provider={textAiProvider}
                 apiKey={textAiKeyDrafts[textAiProvider] || ""}
                 value={textAiModelDrafts[textAiProvider] || ""}
@@ -716,6 +721,37 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
                 }}
               />
             </label>
+            <label>
+              Scoring &amp; analysis model — provider
+              <select
+                value={analystProvider}
+                onChange={(event) => {
+                  const next = event.target.value as TextAiProvider;
+                  const nextModel = getTextAiProviderSettings(next).model;
+                  setAnalystProvider(next);
+                  setAnalystModel(nextModel);
+                  saveAnalystOverride(next, nextModel);
+                }}
+              >
+                {textAiProviderOptions().map((item) => (
+                  <option key={item} value={item}>{textAiProviderLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Scoring &amp; analysis model ({textAiProviderLabel(analystProvider)})
+              <ModelPicker
+                key={`analyst-${analystProvider}`}
+                provider={analystProvider}
+                apiKey={textAiKeyDrafts[analystProvider] || ""}
+                value={analystModel}
+                onChange={(model) => {
+                  setAnalystModel(model);
+                  saveAnalystOverride(analystProvider, model);
+                }}
+              />
+            </label>
+            <p className="asset-muted">Used for the report card, character parsing, and style/KB analysis. Keep this on a precise model (e.g. grok) even when writing uses a creative one.</p>
             {textAiProviderOptions().map((item) => (
               <label key={item}>
                 {textAiProviderLabel(item)} API key

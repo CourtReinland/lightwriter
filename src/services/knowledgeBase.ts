@@ -366,7 +366,7 @@ export class KnowledgeBaseService {
 }
 Return ONLY the JSON. No markdown. No explanation.`;
 
-    const text = await new TextAiService().complete(
+    const text = await TextAiService.forAnalyst().complete(
       system,
       `Analyze this screenplay and extract all characters, world rules, plot threads, and tone:\n\n${truncated}`,
       { temperature: 0.3, maxTokens: 4096 },

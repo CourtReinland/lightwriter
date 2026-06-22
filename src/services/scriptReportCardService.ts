@@ -4,6 +4,7 @@ import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { expandScriptToTargetPages, type ExpandProgress } from "./scriptExpansionService";
+import { normalizeShotLines } from "./fountainShotNormalizer";
 
 type Completion = (system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
 
@@ -593,7 +594,7 @@ export function parseRewriteResponse(text: string): ScriptRewriteResult {
     }
     const recoveredWarnings = candidate.field === "rewrittenScript" ? [] : [`Recovered screenplay from provider field "${candidate.field}"; preferred field is "rewrittenScript".`];
     return {
-      rewrittenScript: candidate.script,
+      rewrittenScript: normalizeShotLines(candidate.script),
       changeSummary: rewriteSummaryFromParsed(parsed),
       warnings: [...recoveredWarnings, ...asStringArray(parsed.warnings)],
       rawResponsePreview: preview,
@@ -605,7 +606,7 @@ export function parseRewriteResponse(text: string): ScriptRewriteResult {
   const validation = validateRewriteScript(plainText);
   if (validation.canApply) {
     return {
-      rewrittenScript: plainText,
+      rewrittenScript: normalizeShotLines(plainText),
       changeSummary: ["Recovered plain screenplay text from a non-JSON provider response."],
       warnings: [`Provider response was not valid JSON (${jsonError instanceof Error ? jsonError.message : "parse failed"}); recovered because it looked like screenplay text.`],
       rawResponsePreview: preview,
@@ -685,7 +686,9 @@ export async function runScriptReportCard(
   options?: { samples?: number; completeOverride?: Completion },
 ): Promise<ScriptReportCard> {
   const prompt = buildScriptReportCardPrompt(input);
-  const service = new TextAiService();
+  // Scoring is an ANALYST task — use the analyst model (e.g. grok), not the
+  // creative writer model, which tends to score loose and high.
+  const service = TextAiService.forAnalyst();
   const complete: Completion = options?.completeOverride ?? service.complete.bind(service);
   const runOnce = () =>
     complete(prompt.system, prompt.user, { temperature: prompt.temperature, maxTokens: prompt.maxTokens }).then((r) =>
@@ -709,7 +712,7 @@ export async function runScriptReportCard(
 
 export async function generateMetricImprovementPlan(input: ImproveMetricPromptInput): Promise<string> {
   const prompt = buildImproveMetricPrompt(input);
-  const service = new TextAiService();
+  const service = TextAiService.forAnalyst();
   return service.complete(prompt.system, prompt.user, {
     temperature: prompt.temperature,
     maxTokens: prompt.maxTokens,

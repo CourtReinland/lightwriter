@@ -1,6 +1,7 @@
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { estimatePages } from "../frameworks/utils";
 import { extractShotScenes } from "./shotDirectionService";
+import { normalizeShotLines } from "./fountainShotNormalizer";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 
@@ -207,5 +208,7 @@ export async function expandScriptToTargetPages(
     warnings.push(`Expanded to ~${endPages} of ${ctx.targetPages} target pages. Run the rewrite again to add more.`);
   }
 
-  return { script: working, changeSummary, warnings, passes, startPages, endPages };
+  // Backstop: ensure any inserted camera lines use the "!!" shot prefix so they
+  // don't render in the character/dialogue slots even if the model forgot.
+  return { script: normalizeShotLines(working), changeSummary, warnings, passes, startPages, endPages };
 }

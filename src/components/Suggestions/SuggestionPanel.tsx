@@ -3,6 +3,7 @@ import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProv
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
+import { normalizeShotLines } from "../../services/fountainShotNormalizer";
 import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import { runStoryDoctor, isFrameworkMetric } from "../../services/storyDoctorService";
 import {
@@ -200,6 +201,24 @@ export default function SuggestionPanel({
       ),
     [runWholeScriptTool, fullScript, knowledgeBase],
   );
+
+  // Deterministic, instant (no LLM): re-prefix bare ALL-CAPS shot lines with "!!"
+  // so camera shots stop rendering in the character/dialogue slots.
+  const handleFixShotLines = useCallback(() => {
+    if (!fullScript.trim()) {
+      setError("No script content to fix.");
+      return;
+    }
+    const fixed = normalizeShotLines(fullScript);
+    if (fixed === fullScript) {
+      setError(null);
+      setLastMode(null);
+      setSuggestion("All camera shots already use the !! prefix — nothing to fix.");
+      return;
+    }
+    setError(null);
+    onOpenToolReview({ label: "Fix shot lines", beforeScript: fullScript, afterScript: fixed });
+  }, [fullScript, onOpenToolReview]);
 
 
   const handleSuggest = useCallback(
@@ -633,6 +652,19 @@ export default function SuggestionPanel({
           </button>
           <div className="full-shot-pass-hint">
             Fixes grammar, spelling, and unnecessary duplications (like back-to-back shots with no action between). Preview before applying.
+          </div>
+        </div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn"
+            onClick={handleFixShotLines}
+            disabled={loading || !fullScript.trim()}
+            title="Re-prefix bare camera-shot lines with !! so they render as shots, not character cues"
+          >
+            Fix Shot Lines
+          </button>
+          <div className="full-shot-pass-hint">
+            Instant, no AI: any camera shot written as plain CAPS (e.g. "WS LIVING ROOM") gets the "!!" prefix so it stops landing in the character/dialogue slot. Preview before applying.
           </div>
         </div>
       </div>

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getAnalystOverride,
+  getAnalystProviderSettings,
   getCachedTextModelOptions,
   getTextAiProviderSettings,
   getTextAiSettings,
@@ -7,6 +9,7 @@ import {
   listGrokTextModels,
   listOpenAiTextModels,
   listTextModelsForProvider,
+  saveAnalystOverride,
   saveTextAiProviderSettings,
   saveTextAiSettings,
   textAiKeyPlaceholder,
@@ -193,6 +196,37 @@ describe("live text-model listing", () => {
       headers: { Authorization: "Bearer sk-key" },
     });
     expect(models.map((m) => m.id)).toEqual(["kimi-latest", "moonshot-v1-128k"]);
+  });
+});
+
+describe("analyst (scoring/parsing) role override", () => {
+  beforeEach(() => {
+    vi.stubGlobal("localStorage", makeLocalStorage());
+    vi.spyOn(Date, "now").mockReturnValue(123456);
+  });
+
+  it("falls back to the writer selection when no analyst override is set", () => {
+    saveTextAiProviderSettings("openrouter", { apiKey: "sk-or", model: "sao10k/l3.3-euryale-70b" });
+    saveTextAiSettings({ selectedProvider: "openrouter" });
+
+    expect(getAnalystOverride()).toBeNull();
+    const analyst = getAnalystProviderSettings();
+    expect(analyst.provider).toBe("openrouter");
+    expect(analyst.model).toBe("sao10k/l3.3-euryale-70b");
+  });
+
+  it("uses the analyst override (with the provider's shared key) when set", () => {
+    saveTextAiProviderSettings("grok", { apiKey: "xai-key", model: "grok-3-mini-fast" });
+    saveTextAiProviderSettings("openrouter", { apiKey: "sk-or", model: "sao10k/l3.3-euryale-70b" });
+    saveTextAiSettings({ selectedProvider: "openrouter" });
+    saveAnalystOverride("grok", "grok-4.3");
+
+    const analyst = getAnalystProviderSettings();
+    expect(analyst.provider).toBe("grok"); // scorer stays grok...
+    expect(analyst.model).toBe("grok-4.3");
+    expect(analyst.apiKey).toBe("xai-key"); // ...using the shared per-provider key
+    // ...while the writer selection is untouched.
+    expect(getTextAiSettings().selectedProvider).toBe("openrouter");
   });
 });
 

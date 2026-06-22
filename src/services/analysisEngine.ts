@@ -452,7 +452,7 @@ export async function runFullAnalysis(
   apiKey: string,
   onProgress: (progress: AnalysisProgress, partialResult: Partial<AnalysisResult>) => void,
 ): Promise<AnalysisResult> {
-  const service = new TextAiService();
+  const service = TextAiService.forAnalyst();
   const scenes = extractScenes(content);
   const totalLines = content.split("\n").length;
 

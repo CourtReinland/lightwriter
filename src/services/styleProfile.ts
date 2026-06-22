@@ -160,7 +160,7 @@ Return this exact JSON shape:
 }
 Return ONLY JSON. No markdown. No explanation.`;
 
-    const text = await new TextAiService().complete(
+    const text = await TextAiService.forAnalyst().complete(
       system,
       `Analyze these writing samples and create the style contract:\n\n${combined}`,
       { temperature: 0.25, maxTokens: 2600 },

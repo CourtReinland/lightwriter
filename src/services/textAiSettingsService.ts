@@ -130,6 +130,56 @@ export function getSelectedTextAiProviderSettings(): TextAiProviderSettings {
   return getTextAiProviderSettings(getTextAiSettings().selectedProvider);
 }
 
+const ANALYST_SETTINGS_KEY = "lw-text-ai-analyst";
+
+export interface TextAiRoleSelection {
+  provider: TextAiProvider;
+  model: string;
+}
+
+// The "analyst" role handles analytical tasks — report-card scoring, character
+// parsing, KB scanning, style analysis — where rubric discipline and clean
+// structured output matter more than prose voice. It's an OPTIONAL override on
+// the main (writer) selection: unset → analysis uses the same model as writing.
+// This lets the writer be a creative fine-tune (e.g. Sao10K) while the scorer
+// stays a disciplined analytical model (e.g. grok-4.3).
+export function getAnalystOverride(): TextAiRoleSelection | null {
+  try {
+    const raw = localStorage.getItem(ANALYST_SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TextAiRoleSelection>;
+    if (!parsed.provider || !parsed.model) return null;
+    return { provider: parsed.provider, model: String(parsed.model) };
+  } catch {
+    return null;
+  }
+}
+
+export function saveAnalystOverride(provider: TextAiProvider, model: string): void {
+  localStorage.setItem(ANALYST_SETTINGS_KEY, JSON.stringify({ provider, model: model.trim() }));
+}
+
+export function clearAnalystOverride(): void {
+  localStorage.removeItem(ANALYST_SETTINGS_KEY);
+}
+
+export function isAnalystOverrideSet(): boolean {
+  return getAnalystOverride() !== null;
+}
+
+// Resolved settings for the analyst role: the override if set, otherwise the
+// writer (main) selection. The API key always comes from the per-provider store.
+export function getAnalystProviderSettings(): TextAiProviderSettings {
+  const override = getAnalystOverride();
+  if (!override) return getSelectedTextAiProviderSettings();
+  return {
+    provider: override.provider,
+    apiKey: getTextAiProviderSettings(override.provider).apiKey,
+    model: override.model,
+    updatedAt: 0,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Live model listing — mirrors imageGenerationService: query each provider's
 // /models endpoint, filter to chat/text models, cache the result, and fall

@@ -1,5 +1,6 @@
 import { GrokService, type SuggestionMode } from "./grokService";
 import {
+  getAnalystProviderSettings,
   getSelectedTextAiProviderSettings,
   getTextAiProviderSettings,
   textAiProviderLabel,
@@ -59,6 +60,12 @@ export class TextAiService {
 
   static forProvider(provider: TextAiProvider): TextAiService {
     return new TextAiService(getTextAiProviderSettings(provider));
+  }
+
+  // The model used for analytical tasks (scoring, parsing, analysis) — the
+  // analyst override if set, otherwise the same model as writing.
+  static forAnalyst(): TextAiService {
+    return new TextAiService(getAnalystProviderSettings());
   }
 
   async complete(systemPrompt: string, userMessage: string, options?: TextCompleteOptions): Promise<string> {
