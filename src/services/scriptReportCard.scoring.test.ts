@@ -93,6 +93,17 @@ describe("scorer stabilization (median-of-N sampling)", () => {
     expect(agg.overallScore).toBe(66); // deterministic rollup: round(0.7*60 + 0.3*80)
   });
 
+  it("falls back to the median framework score (never 0) when no sample returned beats", () => {
+    // Simulate a framework that came back with only a holistic score and no
+    // beats in every sample — e.g. a truncated scoring pass that dropped it.
+    const holistic = (score: number) => normalizeReportCard({
+      frameworkScores: [{ frameworkId: "propps-functions", frameworkName: "Propp's Functions", score, summary: "s", beatScores: [] }],
+    } as never);
+    const agg = aggregateReportCards([holistic(30), holistic(34), holistic(32)]);
+    const propp = agg.frameworkScores.find((f) => f.frameworkId === "propps-functions");
+    expect(propp?.score).toBe(32); // median(30,34,32), not a collapse to 0
+  });
+
   it("takes the majority vote on whether a beat is missing", () => {
     const withMissing = (missing: boolean) => normalizeReportCard({
       frameworkScores: [

@@ -246,7 +246,11 @@ ${input.script.slice(0, 120000)}
     // Score deterministically — rubric scoring must be stable run-to-run so the
     // rewrite loop can trust it (it previously swung ~26 points at temp 0.25).
     temperature: 0,
-    maxTokens: 7000,
+    // Five frameworks × ~8 beats (with evidence + suggestions) + craft is a large
+    // JSON payload. A reasoning model also spends tokens thinking BEFORE emitting
+    // it, so a tight budget truncates the later frameworks (they came back 0).
+    // Give it ample room to emit the whole card.
+    maxTokens: 16000,
   };
 }
 
@@ -493,7 +497,11 @@ export function aggregateReportCards(cards: ScriptReportCard[]): ScriptReportCar
     return {
       frameworkId: framework.id,
       frameworkName: framework.name,
-      score: 0, // re-derived by normalizeReportCard from the medianed beats
+      // When beats are present, normalizeReportCard re-derives this from the
+      // medianed beats. When a sample set has NO beats for this framework (a
+      // truncated/omitted scoring pass), fall back to the median framework
+      // score rather than collapsing to 0.
+      score: fwScoreMedian,
       summary: repFw?.summary ?? "",
       beatScores,
     };
