@@ -64,9 +64,14 @@ export class TextAiService {
   async complete(systemPrompt: string, userMessage: string, options?: TextCompleteOptions): Promise<string> {
     const apiKey = this.settings.apiKey.trim();
     if (!apiKey) throw new Error(`Add a ${textAiProviderLabel(this.settings.provider)} API key before using AI text features.`);
-    if (this.settings.provider === "grok") return new GrokService(apiKey, this.settings.model).complete(systemPrompt, userMessage, options);
-    if (this.settings.provider === "openai") return this.completeOpenAi(systemPrompt, userMessage, options);
-    return this.completeClaude(systemPrompt, userMessage, options);
+    const provider = this.settings.provider;
+    if (provider === "grok") return new GrokService(apiKey, this.settings.model).complete(systemPrompt, userMessage, options);
+    if (provider === "claude") return this.completeClaude(systemPrompt, userMessage, options);
+    // OpenAI, OpenRouter, and Kimi/Moonshot all speak the OpenAI chat API.
+    if (provider === "openai") return this.completeOpenAiCompatible("https://api.openai.com/v1", systemPrompt, userMessage, options);
+    if (provider === "openrouter") return this.completeOpenAiCompatible("https://openrouter.ai/api/v1", systemPrompt, userMessage, options, { "HTTP-Referer": "https://lightwriter.app", "X-Title": "LightWriter" });
+    if (provider === "kimi") return this.completeOpenAiCompatible("https://api.moonshot.ai/v1", systemPrompt, userMessage, options);
+    throw new Error(`Unsupported text AI provider: ${provider}`);
   }
 
   async suggest(selectedText: string, surroundingContext: string, mode: SuggestionMode, customPrompt?: string): Promise<string> {
@@ -77,12 +82,21 @@ export class TextAiService {
     return this.complete(systemPrompt, userMessage, { temperature: 0.8, maxTokens: 2048 });
   }
 
-  private async completeOpenAi(systemPrompt: string, userMessage: string, options?: TextCompleteOptions): Promise<string> {
-    const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
+  // Shared OpenAI-compatible chat call used by OpenAI, OpenRouter, and Kimi —
+  // they differ only in base URL and a couple of optional headers.
+  private async completeOpenAiCompatible(
+    baseUrl: string,
+    systemPrompt: string,
+    userMessage: string,
+    options?: TextCompleteOptions,
+    extraHeaders?: Record<string, string>,
+  ): Promise<string> {
+    const response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.settings.apiKey}`,
+        ...(extraHeaders || {}),
       },
       body: JSON.stringify({
         model: this.settings.model,
@@ -94,7 +108,7 @@ export class TextAiService {
         max_tokens: options?.maxTokens ?? 2048,
       }),
     }, options?.timeoutMs);
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status} — ${await response.text()}`);
+    if (!response.ok) throw new Error(`${textAiProviderLabel(this.settings.provider)} API error: ${response.status} — ${await response.text()}`);
     const data = await response.json();
     return stripLLMPreamble(data.choices?.[0]?.message?.content ?? "");
   }

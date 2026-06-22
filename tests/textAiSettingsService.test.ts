@@ -9,6 +9,9 @@ import {
   listTextModelsForProvider,
   saveTextAiProviderSettings,
   saveTextAiSettings,
+  textAiKeyPlaceholder,
+  textAiProviderLabel,
+  textAiProviderOptions,
 } from "../src/services/textAiSettingsService";
 
 function makeLocalStorage() {
@@ -150,5 +153,55 @@ describe("live text-model listing", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: "Unauthorized" }));
 
     await expect(listGrokTextModels("bad-key")).rejects.toThrow(/401/);
+  });
+
+  it("lists OpenRouter chat models (slug ids, names as labels, embeds dropped, sorted)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "openai/gpt-4o", name: "OpenAI: GPT-4o" },
+          { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet" },
+          { id: "openai/text-embedding-3-large", name: "Embeddings" }, // dropped
+          { id: "moonshotai/kimi-k2", name: "MoonshotAI: Kimi K2" },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listTextModelsForProvider("openrouter", "sk-or-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", expect.any(Object));
+    expect(models.map((m) => m.id)).toEqual([
+      "anthropic/claude-3.5-sonnet",
+      "moonshotai/kimi-k2",
+      "openai/gpt-4o",
+    ]); // embedding dropped, sorted by id
+    expect(models[0].label).toBe("Anthropic: Claude 3.5 Sonnet");
+  });
+
+  it("lists Kimi (Moonshot) models from the moonshot endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "kimi-latest" }, { id: "moonshot-v1-128k" }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listTextModelsForProvider("kimi", "sk-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.moonshot.ai/v1/models", {
+      headers: { Authorization: "Bearer sk-key" },
+    });
+    expect(models.map((m) => m.id)).toEqual(["kimi-latest", "moonshot-v1-128k"]);
+  });
+});
+
+describe("provider metadata", () => {
+  it("exposes all five providers with labels and key placeholders", () => {
+    expect(textAiProviderOptions()).toEqual(["grok", "openai", "claude", "openrouter", "kimi"]);
+    expect(textAiProviderLabel("openrouter")).toMatch(/OpenRouter/);
+    expect(textAiProviderLabel("kimi")).toMatch(/Kimi/);
+    expect(textAiKeyPlaceholder("openrouter")).toBe("sk-or-...");
+    expect(textAiKeyPlaceholder("grok")).toBe("xai-...");
   });
 });

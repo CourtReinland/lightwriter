@@ -5,6 +5,7 @@ import {
   saveTextAiProviderSettings,
   saveTextAiSettings,
   textAiProviderLabel,
+  textAiKeyPlaceholder,
   textAiProviderOptions,
   getCachedTextModelOptions,
   listTextModelsForProvider,
@@ -115,7 +116,7 @@ export default function ApiKeyDialog({ onSave, onClose }: ApiKeyDialogProps) {
           className="dialog-input"
           value={key}
           onChange={(e) => setKey(e.target.value)}
-          placeholder={provider === "grok" ? "xai-..." : provider === "openai" ? "sk-..." : "sk-ant-..."}
+          placeholder={textAiKeyPlaceholder(provider)}
           onKeyDown={(e) => e.key === "Enter" && handleSave()}
           autoFocus
         />

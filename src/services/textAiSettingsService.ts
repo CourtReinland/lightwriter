@@ -1,4 +1,4 @@
-export type TextAiProvider = "grok" | "openai" | "claude";
+export type TextAiProvider = "grok" | "openai" | "claude" | "openrouter" | "kimi";
 
 export interface TextAiProviderSettings {
   provider: TextAiProvider;
@@ -20,16 +20,37 @@ const DEFAULT_MODELS: Record<TextAiProvider, string> = {
   grok: "grok-3-mini-fast",
   openai: "gpt-4o-mini",
   claude: "claude-3-5-sonnet-latest",
+  openrouter: "anthropic/claude-3.5-sonnet",
+  kimi: "kimi-latest",
+};
+
+const PROVIDER_LABELS: Record<TextAiProvider, string> = {
+  grok: "Grok (xAI)",
+  openai: "OpenAI",
+  claude: "Claude (Anthropic)",
+  openrouter: "OpenRouter",
+  kimi: "Kimi (Moonshot)",
 };
 
 export function textAiProviderLabel(provider: TextAiProvider): string {
-  if (provider === "grok") return "Grok";
-  if (provider === "openai") return "OpenAI";
-  return "Claude";
+  return PROVIDER_LABELS[provider] ?? provider;
+}
+
+// Shown as the API-key field placeholder so the user knows which key to paste.
+const KEY_PLACEHOLDERS: Record<TextAiProvider, string> = {
+  grok: "xai-...",
+  openai: "sk-...",
+  claude: "sk-ant-...",
+  openrouter: "sk-or-...",
+  kimi: "sk-...",
+};
+
+export function textAiKeyPlaceholder(provider: TextAiProvider): string {
+  return KEY_PLACEHOLDERS[provider] ?? "API key";
 }
 
 export function textAiProviderOptions(): TextAiProvider[] {
-  return ["grok", "openai", "claude"];
+  return ["grok", "openai", "claude", "openrouter", "kimi"];
 }
 
 function readSettings(): Partial<TextAiSettings> {
@@ -141,12 +162,27 @@ const FALLBACK_MODELS: Record<TextAiProvider, TextModelOption[]> = {
     { id: "claude-3-5-haiku-latest", label: "claude-3-5-haiku-latest" },
     { id: "claude-3-opus-latest", label: "claude-3-opus-latest" },
   ],
+  openrouter: [
+    { id: "anthropic/claude-3.5-sonnet", label: "anthropic/claude-3.5-sonnet" },
+    { id: "openai/gpt-4o", label: "openai/gpt-4o" },
+    { id: "google/gemini-2.0-flash-001", label: "google/gemini-2.0-flash-001" },
+    { id: "moonshotai/kimi-k2", label: "moonshotai/kimi-k2" },
+    { id: "deepseek/deepseek-chat", label: "deepseek/deepseek-chat" },
+  ],
+  kimi: [
+    { id: "kimi-latest", label: "kimi-latest" },
+    { id: "moonshot-v1-128k", label: "moonshot-v1-128k" },
+    { id: "moonshot-v1-32k", label: "moonshot-v1-32k" },
+    { id: "moonshot-v1-8k", label: "moonshot-v1-8k" },
+  ],
 };
 
 const MODEL_CACHE: Record<TextAiProvider, TextModelOption[]> = {
   grok: [],
   openai: [],
   claude: [],
+  openrouter: [],
+  kimi: [],
 };
 
 function dedupeModelOptions(options: TextModelOption[]): TextModelOption[] {
@@ -222,8 +258,40 @@ export async function listClaudeTextModels(apiKey: string): Promise<TextModelOpt
   return cacheModelOptions("claude", options);
 }
 
+export async function listOpenRouterTextModels(apiKey: string): Promise<TextModelOption[]> {
+  const key = apiKey.trim();
+  // OpenRouter's catalogue is public; the key is optional for listing.
+  const response = await fetch("https://openrouter.ai/api/v1/models", {
+    headers: key ? { Authorization: `Bearer ${key}` } : {},
+  });
+  if (!response.ok) throw new Error(`OpenRouter model list failed: ${response.status} ${response.statusText}`);
+  const data = (await response.json()) as { data?: Array<{ id?: string; name?: string }> };
+  const options = (data.data || [])
+    .map((model) => ({ id: String(model.id || "").trim(), label: String(model.name || model.id || "").trim() }))
+    .filter((option) => option.id && !NON_TEXT_MODEL.test(option.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return cacheModelOptions("openrouter", options);
+}
+
+export async function listKimiTextModels(apiKey: string): Promise<TextModelOption[]> {
+  const key = apiKey.trim();
+  if (!key) return getCachedTextModelOptions("kimi");
+  const response = await fetch("https://api.moonshot.ai/v1/models", {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) throw new Error(`Kimi model list failed: ${response.status} ${response.statusText}`);
+  const data = (await response.json()) as { data?: Array<{ id?: string }> };
+  const options = (data.data || [])
+    .map((model) => String(model.id || "").trim())
+    .filter((id) => id && !NON_TEXT_MODEL.test(id))
+    .map((id) => ({ id, label: id }));
+  return cacheModelOptions("kimi", options);
+}
+
 export function listTextModelsForProvider(provider: TextAiProvider, apiKey: string): Promise<TextModelOption[]> {
   if (provider === "grok") return listGrokTextModels(apiKey);
   if (provider === "openai") return listOpenAiTextModels(apiKey);
+  if (provider === "openrouter") return listOpenRouterTextModels(apiKey);
+  if (provider === "kimi") return listKimiTextModels(apiKey);
   return listClaudeTextModels(apiKey);
 }

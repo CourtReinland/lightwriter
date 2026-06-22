@@ -81,11 +81,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const [sceneStyleReference, setSceneStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id, "scene"));
   const [characterStyleReference, setCharacterStyleReference] = useState<ScriptStyleReference | null>(() => StyleReferenceService.get(project.id, "character"));
   const [textAiProvider, setTextAiProvider] = useState<TextAiProvider>(() => getTextAiSettings().selectedProvider);
-  const [textAiKeyDrafts, setTextAiKeyDrafts] = useState<Record<TextAiProvider, string>>(() => ({
-    grok: getTextAiProviderSettings("grok").apiKey,
-    openai: getTextAiProviderSettings("openai").apiKey,
-    claude: getTextAiProviderSettings("claude").apiKey,
-  }));
+  const [textAiKeyDrafts, setTextAiKeyDrafts] = useState<Record<TextAiProvider, string>>(() =>
+    Object.fromEntries(textAiProviderOptions().map((item) => [item, getTextAiProviderSettings(item).apiKey])) as Record<TextAiProvider, string>,
+  );
   const [settingsMessage, setSettingsMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
