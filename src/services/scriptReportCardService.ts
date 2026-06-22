@@ -2,8 +2,10 @@ import { ALL_FRAMEWORKS, computeBeatRanges, estimatePages } from "../frameworks"
 import type { FrameworkDefinition } from "../frameworks";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
-import { TextAiService } from "./textAiService";
+import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { expandScriptToTargetPages, type ExpandProgress } from "./scriptExpansionService";
+
+type Completion = (system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
 
 export interface ReportBeatScore {
   beatName: string;
@@ -629,10 +631,11 @@ function beatGuidanceFor(reportCard: ScriptReportCard, frameworkId: string | und
 
 // After a quality rewrite, if the draft is still well under the target page
 // count, grow it to target by inserting whole new scenes (reliable expansion).
-async function expandToTargetIfNeeded(
+export async function expandToTargetIfNeeded(
   result: ScriptRewriteResult,
   opts: { targetPages: number; frameworkId?: string; reportCard: ScriptReportCard; knowledgeBase: KnowledgeBase | null; styleProfile: StyleProfile | null },
   onProgress?: (p: ExpandProgress) => void,
+  completeOverride?: Completion,
 ): Promise<ScriptRewriteResult> {
   if (!opts.targetPages) return result;
   const currentPages = estimatePages(result.rewrittenScript.split("\n").length);
@@ -649,6 +652,7 @@ async function expandToTargetIfNeeded(
       styleProfile: opts.styleProfile,
     },
     onProgress,
+    completeOverride,
   );
   return {
     ...result,

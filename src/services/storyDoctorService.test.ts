@@ -113,4 +113,27 @@ describe("runStoryDoctor", () => {
     expect(res.finalScore).toBe(73);
     expect(res.rewrittenScript).toContain("DEDUPED"); // cleaner draft kept despite the tie
   });
+
+  it("expands the rewritten draft toward the page target with new scenes", async () => {
+    const metricId = "dan-harmon-story-circle";
+    const bigScene = "INT. NEW BEAT SCENE - DAY\n" + Array.from({ length: 300 }, (_, i) => `Action line ${i}.`).join("\n");
+    // The same model handles both jobs; discriminate by the engine's system prompt.
+    const mockComplete = async (system: string) =>
+      /expansion engine/i.test(system)
+        ? JSON.stringify({ scenes: [{ insert_after: "START", beat: "Take", fountain: bigScene }] })
+        : JSON.stringify({ rewrittenScript: "INT. OPENING - DAY\n\nAliyah enters.", changeSummary: ["restructured"], warnings: [] });
+    const mockScore = async () => reportWithScore(metricId, 70); // beats the start, so a real rewrite is kept
+
+    const res = await runStoryDoctor(
+      { script: "INT. OLD - DAY\n\nShort.", metricId, metricName: "Dan Harmon Story Circle", targetPages: 5, reportCard: reportWithScore(metricId, 40), knowledgeBase: null, styleProfile: null },
+      undefined,
+      mockComplete,
+      mockScore,
+    );
+
+    // The loop's tiny restructured draft was grown to the page target.
+    expect(res.rewrittenScript.split("\n").length).toBeGreaterThan(100);
+    expect(res.rewrittenScript).toContain("INT. NEW BEAT SCENE - DAY");
+    expect(res.changeSummary.join(" ")).toMatch(/Added scene/i);
+  });
 });

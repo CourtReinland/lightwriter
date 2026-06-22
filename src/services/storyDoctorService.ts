@@ -2,7 +2,7 @@ import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { ALL_FRAMEWORKS, computeBeatRanges } from "../frameworks";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
-import { runScriptReportCard, parseRewriteResponse, type ScriptReportCard, type ScriptRewriteResult } from "./scriptReportCardService";
+import { runScriptReportCard, parseRewriteResponse, expandToTargetIfNeeded, type ScriptReportCard, type ScriptRewriteResult } from "./scriptReportCardService";
 
 // "Story Doctor": a closed-loop, SUBTRACTIVE rewrite. Instead of one shot (or
 // blind additive padding, which duplicates scenes), it restructures the draft
@@ -251,6 +251,45 @@ export async function runStoryDoctor(
     allWarnings.unshift(
       `No pass beat your current ${input.metricName} score (best attempt ${bestRewrite.score} vs ${startScore}/100). Showing the strongest rewrite so you can review the changes — apply only if you prefer it.`,
     );
+  }
+
+  // Grow the surfaced draft up to the page target with whole new scenes. The
+  // loop above restructures and can CONTRACT (cut duplicates), but a framework
+  // rewrite is also meant to expand a short draft toward its target page count
+  // — the same expand step the metric rewrite path runs. (The restructure
+  // prompt asks for length, but models rarely add enough on their own.)
+  if (finalScript.trim() && input.targetPages) {
+    try {
+      const expanded = await expandToTargetIfNeeded(
+        { rewrittenScript: finalScript, changeSummary: [], warnings: [] },
+        {
+          targetPages: input.targetPages,
+          frameworkId: input.metricId,
+          reportCard: finalReport,
+          knowledgeBase: input.knowledgeBase,
+          styleProfile: input.styleProfile,
+        },
+        onProgress,
+        complete,
+      );
+      const grew = expanded.rewrittenScript !== finalScript;
+      finalScript = expanded.rewrittenScript;
+      allChanges.push(...expanded.changeSummary);
+      allWarnings.push(...expanded.warnings);
+      if (grew) {
+        // Re-score the expanded draft so the reported score matches what the
+        // user actually sees (best-effort — keep the loop's score if it fails).
+        try {
+          finalReport = await score(finalScript);
+          finalScore = frameworkScoreOf(finalReport, input.metricId);
+          trajectory.push(finalScore);
+        } catch {
+          allWarnings.push("Could not re-score after page expansion; the score shown is for the pre-expansion draft.");
+        }
+      }
+    } catch (e) {
+      allWarnings.push(`Page expansion to ${input.targetPages} pages failed: ${errMsg(e)}`);
+    }
   }
 
   return {
