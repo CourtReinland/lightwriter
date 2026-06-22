@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getCachedTextModelOptions,
   getTextAiProviderSettings,
   getTextAiSettings,
+  listClaudeTextModels,
+  listGrokTextModels,
+  listOpenAiTextModels,
+  listTextModelsForProvider,
   saveTextAiProviderSettings,
   saveTextAiSettings,
 } from "../src/services/textAiSettingsService";
@@ -39,5 +44,111 @@ describe("text AI provider settings", () => {
 
     expect(getTextAiSettings().selectedProvider).toBe("grok");
     expect(getTextAiProviderSettings("grok").apiKey).toBe("legacy-xai-key");
+  });
+});
+
+describe("live text-model listing", () => {
+  beforeEach(() => {
+    vi.stubGlobal("localStorage", makeLocalStorage());
+  });
+
+  it("lists Grok chat models and drops image/video/embedding endpoints", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "grok-4.3" },
+          { id: "grok-4.20-0309-reasoning" },
+          { id: "grok-3-mini-fast" },
+          { id: "grok-imagine-latest" },
+          { id: "grok-2-image" },
+          { id: "grok-2-vision-1212" }, // vision still a chat model — kept
+          { id: "text-embedding-3" },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listGrokTextModels("xai-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.x.ai/v1/models", {
+      headers: { Authorization: "Bearer xai-key" },
+    });
+    const ids = models.map((m) => m.id);
+    expect(ids).toContain("grok-4.3");
+    expect(ids).toContain("grok-4.20-0309-reasoning");
+    expect(ids).toContain("grok-3-mini-fast");
+    expect(ids).not.toContain("grok-imagine-latest");
+    expect(ids).not.toContain("grok-2-image");
+    expect(ids).not.toContain("text-embedding-3");
+  });
+
+  it("lists only OpenAI chat models", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "gpt-4o" },
+          { id: "gpt-4o-mini" },
+          { id: "o3" },
+          { id: "gpt-3.5-turbo-instruct" }, // completion-only — dropped
+          { id: "text-embedding-3-large" },
+          { id: "dall-e-3" },
+          { id: "whisper-1" },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ids = (await listOpenAiTextModels("sk-key")).map((m) => m.id);
+
+    expect(ids).toEqual(["gpt-4o", "gpt-4o-mini", "o3"]);
+  });
+
+  it("lists Claude models using their display names", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "claude-3-5-sonnet-latest", display_name: "Claude 3.5 Sonnet" },
+          { id: "claude-3-5-haiku-latest", display_name: "Claude 3.5 Haiku" },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listClaudeTextModels("sk-ant-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.anthropic.com/v1/models", {
+      headers: { "x-api-key": "sk-ant-key", "anthropic-version": "2023-06-01" },
+    });
+    expect(models[0]).toEqual({ id: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" });
+  });
+
+  it("returns the curated fallback list when there is no key (no network call)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listTextModelsForProvider("grok", "   ");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(models).toEqual(getCachedTextModelOptions("grok"));
+    expect(models.map((m) => m.id)).toContain("grok-4.3");
+  });
+
+  it("dispatches to the requested provider's endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ id: "gpt-4o" }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listTextModelsForProvider("openai", "sk-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.openai.com/v1/models", expect.any(Object));
+    expect(models.map((m) => m.id)).toEqual(["gpt-4o"]);
+  });
+
+  it("throws a clear error when the provider rejects the key", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: "Unauthorized" }));
+
+    await expect(listGrokTextModels("bad-key")).rejects.toThrow(/401/);
   });
 });

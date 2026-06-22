@@ -6,6 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "dev:web": "LW_WEB_ONLY=1 vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "preview": "vite preview",

@@ -49,6 +49,40 @@
   border-color: #666;
 }
 
+.dialog-field-label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.dialog-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+
+.dialog-model-row .dialog-input {
+  flex: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.dialog-model-row .dialog-btn {
+  white-space: nowrap;
+}
+
+.dialog-status {
+  font-size: 11px;
+  color: #888;
+  margin: 0 0 16px;
+  min-height: 14px;
+  line-height: 1.4;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
