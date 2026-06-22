@@ -442,6 +442,76 @@ export function normalizeReportCard(card: Partial<ScriptReportCard>): ScriptRepo
   };
 }
 
+function median(values: number[]): number {
+  const xs = values.filter((n) => typeof n === "number" && !Number.isNaN(n)).sort((a, b) => a - b);
+  if (!xs.length) return 0;
+  const mid = Math.floor(xs.length / 2);
+  return xs.length % 2 ? xs[mid] : Math.round((xs[mid - 1] + xs[mid]) / 2);
+}
+
+// Combine several independent score samples of the SAME draft into one stable
+// card. Reasoning models are noisy even at temperature 0, so a single pass can
+// swing a framework several points run-to-run. We denoise at the BEAT level —
+// take the median of each beat across samples, then let normalizeReportCard
+// re-derive framework + overall scores from those medianed beats with the exact
+// same deterministic formula a single-sample card uses. Beat-level medians
+// compound: a framework's ~8 medianed beats are far steadier than 3 medianed
+// framework totals. Text (summaries, evidence, fixes) comes from the sample
+// nearest the median so the prose matches the numbers.
+export function aggregateReportCards(cards: ScriptReportCard[]): ScriptReportCard {
+  if (cards.length <= 1) return cards[0];
+
+  const overallMedian = median(cards.map((c) => c.overallScore));
+  const repCard = cards.reduce((best, c) =>
+    Math.abs(c.overallScore - overallMedian) < Math.abs(best.overallScore - overallMedian) ? c : best, cards[0]);
+
+  const frameworkScores = ALL_FRAMEWORKS.map((framework) => {
+    const peers = cards
+      .map((c) => c.frameworkScores.find((f) => f.frameworkId === framework.id))
+      .filter((f): f is FrameworkReportScore => Boolean(f));
+    const beatCount = peers.reduce((max, p) => Math.max(max, p.beatScores.length), 0);
+    const beatScores = Array.from({ length: beatCount }, (_, i) => {
+      const beatPeers = peers.map((p) => p.beatScores[i]).filter((b): b is ReportBeatScore => Boolean(b));
+      const scoreMedian = median(beatPeers.map((b) => b.score));
+      // Representative beat = the sampled beat whose score is closest to the
+      // median, so evidence/suggestions describe the score we actually report.
+      const rep = beatPeers.reduce((best, b) =>
+        Math.abs(b.score - scoreMedian) < Math.abs(best.score - scoreMedian) ? b : best, beatPeers[0]);
+      const missingVotes = beatPeers.filter((b) => b.missing).length;
+      return {
+        beatName: rep?.beatName ?? "Unnamed beat",
+        expectedPageRange: rep?.expectedPageRange,
+        detectedEvidence: rep?.detectedEvidence ?? "",
+        score: scoreMedian,
+        missing: missingVotes * 2 > beatPeers.length,
+        suggestions: rep?.suggestions ?? [],
+      };
+    });
+    const fwScoreMedian = median(peers.map((p) => p.score));
+    const repFw = peers.reduce((best, p) =>
+      Math.abs(p.score - fwScoreMedian) < Math.abs(best.score - fwScoreMedian) ? p : best, peers[0]);
+    return {
+      frameworkId: framework.id,
+      frameworkName: framework.name,
+      score: 0, // re-derived by normalizeReportCard from the medianed beats
+      summary: repFw?.summary ?? "",
+      beatScores,
+    };
+  });
+
+  // Re-normalize so framework totals (mean of medianed beats) and overallScore
+  // (the 0.7 best-framework + 0.3 craft rollup) are computed identically to a
+  // single-sample card — only the inputs are denoised.
+  return normalizeReportCard({
+    frameworkScores,
+    styleScore: { ...repCard.styleScore, score: median(cards.map((c) => c.styleScore.score)) },
+    characterScore: { ...repCard.characterScore, score: median(cards.map((c) => c.characterScore.score)) },
+    pacingScore: { ...repCard.pacingScore, score: median(cards.map((c) => c.pacingScore.score)) },
+    topFixes: repCard.topFixes,
+    recommendedNextAction: repCard.recommendedNextAction,
+  });
+}
+
 export function parseReportCardResponse(text: string, fallbackFrameworkId?: string): ScriptReportCard {
   const parsed = JSON.parse(extractJson(text)) as Partial<ScriptReportCard>;
   if (fallbackFrameworkId && Array.isArray(parsed.frameworkScores)) {
@@ -596,14 +666,37 @@ export function compareReportCards(before: ScriptReportCard, after: ScriptReport
   };
 }
 
-export async function runScriptReportCard(input: ScriptReportPromptInput): Promise<ScriptReportCard> {
+// How many independent score samples to take and median together. Reasoning
+// models bounce a few points run-to-run even at temperature 0; medianing a
+// handful of samples (run in parallel, so wall-clock stays ~one call) makes the
+// score stable enough that "did the rewrite improve it?" is a real signal.
+export const SCORING_SAMPLES = 3;
+
+export async function runScriptReportCard(
+  input: ScriptReportPromptInput,
+  options?: { samples?: number; completeOverride?: Completion },
+): Promise<ScriptReportCard> {
   const prompt = buildScriptReportCardPrompt(input);
   const service = new TextAiService();
-  const response = await service.complete(prompt.system, prompt.user, {
-    temperature: prompt.temperature,
-    maxTokens: prompt.maxTokens,
-  });
-  return parseReportCardResponse(response);
+  const complete: Completion = options?.completeOverride ?? service.complete.bind(service);
+  const runOnce = () =>
+    complete(prompt.system, prompt.user, { temperature: prompt.temperature, maxTokens: prompt.maxTokens }).then((r) =>
+      parseReportCardResponse(r));
+
+  const n = Math.max(1, options?.samples ?? SCORING_SAMPLES);
+  if (n === 1) return runOnce();
+
+  // Run the samples concurrently and median whatever comes back. A flaky
+  // sample (network/parse) is dropped; we only fail if every sample fails.
+  const settled = await Promise.allSettled(Array.from({ length: n }, runOnce));
+  const cards = settled
+    .filter((s): s is PromiseFulfilledResult<ScriptReportCard> => s.status === "fulfilled")
+    .map((s) => s.value);
+  if (!cards.length) {
+    const firstRejection = settled.find((s) => s.status === "rejected") as PromiseRejectedResult | undefined;
+    throw firstRejection?.reason ?? new Error("Report card scoring failed for every sample.");
+  }
+  return aggregateReportCards(cards);
 }
 
 export async function generateMetricImprovementPlan(input: ImproveMetricPromptInput): Promise<string> {
