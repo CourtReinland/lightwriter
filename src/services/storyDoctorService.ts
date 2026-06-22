@@ -108,6 +108,7 @@ RULES:
 - Net the length to about ${args.targetPages} pages by BALANCING cuts and additions — do not pad with repetition, and do not pad with restated material to hit the count.
 - CRAFT (this is what earns a high score): each beat must turn on a clear character CHOICE with visible stakes, and connect causally to the beats before and after it (this happened, THEREFORE that — not "and then"). Escalate the consequences from You through Take. End on a Change beat that mirrors the opening You beat with a new emotional charge. Mere presence of a beat is not enough; it must do real dramatic work.
 - Preserve the writer's voice, the existing characters, and all established plot facts. Do not invent unrelated characters or events.
+- PRESERVE FOUNTAIN FORMAT exactly: keep camera shots prefixed with "!!" (e.g. "!!WS LIVING ROOM", "!!CU ALIYAH'S FACE") — a shot WITHOUT the "!!" is mis-parsed as a character name. Character cues are ALL CAPS with a blank line before and dialogue on the next line; action is sentence-case prose (never ALL CAPS); keep a blank line between elements. Any NEW scene you add must follow these same conventions.
 - Return the COMPLETE revised screenplay (every scene in order), not notes or a diff.
 ${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}
 CURRENT DRAFT:

@@ -95,8 +95,15 @@ function buildInsertionPrompt(script: string, ctx: ExpandContext): { system: str
 DEVELOP THESE BEATS (write full dramatized scenes for the missing/weak ones, landing in their page ranges):
 ${beatGuidance}
 
-RULES:
-- Write COMPLETE Fountain scenes: a slugline (INT./EXT. LOCATION - TIME), action lines, and dialogue with ALL-CAPS character cues. Each scene is a real dramatized beat, not a summary or outline.
+FOUNTAIN FORMAT — match the existing draft EXACTLY. Each line type renders in a fixed screenplay position, so getting this wrong puts shots in the character slot and action in the dialogue slot:
+- SCENE HEADING: a line starting with INT. or EXT. — e.g. "INT. LIVING ROOM, HOME, DAY".
+- ACTION / description: plain sentence-case prose. NEVER write action in ALL CAPS (an ALL-CAPS line above a text line is read as a character name).
+- CHARACTER CUE: the speaking character's name in ALL CAPS, alone on its line, with a BLANK LINE before it; the spoken line(s) go on the very next line(s) with NO blank line between cue and dialogue.
+- CAMERA SHOT: MUST begin with "!!" then immediately one of WS, MS, CU, ECU, LS, OTS, POV, then an uppercase description — e.g. "!!WS LIVING ROOM", "!!MS ALIYAH OPENS THE TRUNK", "!!CU ALIYAH'S FACE". A camera line WITHOUT the leading "!!" is mis-parsed as a character name and the line under it becomes dialogue, so EVERY shot must start with "!!". Do not use bare "ANGLE ON…", "WIDE", "INSERT" — express those after the required token (e.g. "!!WS AERIAL OVER THE HOUSE").
+- Put a BLANK LINE between every element (between stacked shots and the action under them, between action and the next character cue, between a character's dialogue and the next element).
+
+CONTENT RULES:
+- Write COMPLETE dramatized scenes (real action and dialogue), not summaries or outlines. Mirror the existing draft's shot-heavy coverage style using the "!!" shot syntax above.
 - Match the existing draft's voice, characters, tone, and world. Never contradict established plot facts or introduce unrelated characters/events.
 - Do NOT repeat or restate existing scenes. Only ADD new material that advances the story causally (this happened, therefore that).
 - Add MULTIPLE scenes this pass, totaling close to ${deficitPages} pages. Write generously — real page growth is the goal.
