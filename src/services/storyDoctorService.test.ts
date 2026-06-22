@@ -78,9 +78,9 @@ describe("runStoryDoctor", () => {
     expect(res.iterations).toBeGreaterThanOrEqual(2);
   });
 
-  it("never regresses below the starting draft if rewrites get worse", async () => {
+  it("surfaces the strongest rewrite attempt (with a warning) when no pass beats the start", async () => {
     const metricId = "save-the-cat";
-    const mockComplete = async () => JSON.stringify({ rewrittenScript: "WORSE\n\nINT. Y - DAY\n\nB.", changeSummary: [], warnings: [] });
+    const mockComplete = async () => JSON.stringify({ rewrittenScript: "WORSE\n\nINT. Y - DAY\n\nB.", changeSummary: ["restructured"], warnings: [] });
     const mockScore = async () => reportWithScore(metricId, 10); // always worse than start 40
 
     const res = await runStoryDoctor(
@@ -90,8 +90,12 @@ describe("runStoryDoctor", () => {
       mockScore,
     );
 
-    expect(res.finalScore).toBe(40);
-    expect(res.rewrittenScript).toBe("ORIGINAL"); // kept the better original
+    // Returns a real revision to review rather than the untouched original...
+    expect(res.rewrittenScript).toContain("WORSE");
+    expect(res.rewrittenScript).not.toBe("ORIGINAL");
+    expect(res.finalScore).toBe(10); // honestly reports the attempt's score
+    // ...and warns clearly that it did not beat the starting draft.
+    expect(res.warnings.join(" ")).toMatch(/No pass beat your current/i);
   });
 
   it("prefers the deduped restructured draft on a tie", async () => {

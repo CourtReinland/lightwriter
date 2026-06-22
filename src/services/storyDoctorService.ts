@@ -151,6 +151,18 @@ export async function runStoryDoctor(
   let iterations = 0;
   let noImprove = 0;
 
+  // The strongest actual REWRITE produced (never the untouched original). We
+  // keep this so that when no pass strictly beats the starting draft we can
+  // still show the user a real revision to review, instead of silently
+  // returning their original (which reads as "the rewrite did nothing").
+  let bestRewrite: {
+    script: string;
+    report: ScriptReportCard;
+    score: number;
+    changes: string[];
+    warnings: string[];
+  } | null = null;
+
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     if (bestScore >= TARGET_SCORE) break;
     iterations = i + 1;
@@ -195,6 +207,14 @@ export async function runStoryDoctor(
     const s = frameworkScoreOf(report, input.metricId);
     trajectory.push(s);
 
+    // Remember the best rewrite attempt regardless of whether it clears the
+    // starting score — scorer noise (especially with reasoning models at
+    // temp 0) can rate a perfectly good revision a couple of points under the
+    // original, and we never want that to collapse into "no changes".
+    if (!bestRewrite || s > bestRewrite.score) {
+      bestRewrite = { script: candidate, report, score: s, changes: rewrite.changeSummary, warnings: rewrite.warnings };
+    }
+
     if (s > bestScore) {
       // Real improvement — adopt it as the new best to build on.
       bestScore = s;
@@ -215,17 +235,35 @@ export async function runStoryDoctor(
     }
   }
 
+  // Decide what to hand back. If a pass beat (or tied) the starting draft,
+  // bestScript already holds a real revision. If nothing beat it, surface the
+  // strongest rewrite attempt anyway, with an honest warning — the user
+  // reviews every change before applying, so this never silently worsens their
+  // script, it just stops the tool from appearing to do nothing.
+  let finalScript = bestScript;
+  let finalReport = bestReport;
+  let finalScore = bestScore;
+  if (bestScript === input.script && bestRewrite) {
+    finalScript = bestRewrite.script;
+    finalReport = bestRewrite.report;
+    finalScore = bestRewrite.score;
+    allChanges.push(...bestRewrite.changes);
+    allWarnings.unshift(
+      `No pass beat your current ${input.metricName} score (best attempt ${bestRewrite.score} vs ${startScore}/100). Showing the strongest rewrite so you can review the changes — apply only if you prefer it.`,
+    );
+  }
+
   return {
-    rewrittenScript: bestScript,
+    rewrittenScript: finalScript,
     changeSummary: Array.from(new Set([
-      `Story Doctor: ${input.metricName} ${startScore} -> ${bestScore}/100 over ${iterations} pass(es) [${trajectory.join(" -> ")}]`,
+      `Story Doctor: ${input.metricName} ${startScore} -> ${finalScore}/100 over ${iterations} pass(es) [${trajectory.join(" -> ")}]`,
       ...allChanges,
     ])),
     warnings: Array.from(new Set(allWarnings)),
     startScore,
-    finalScore: bestScore,
+    finalScore,
     trajectory,
-    finalReport: bestReport,
+    finalReport,
     iterations,
   };
 }

@@ -138,7 +138,14 @@ export class GrokService {
     }
 
     const data = await response.json();
-    const raw = data.choices?.[0]?.message?.content ?? "";
+    const choice = data.choices?.[0];
+    const raw = choice?.message?.content ?? "";
+    // Reasoning models (e.g. grok-4.x) spend tokens thinking before they emit
+    // any answer. If the budget runs out first, content comes back empty with
+    // finish_reason "length" — surface that clearly instead of returning "".
+    if (!raw.trim() && choice?.finish_reason === "length") {
+      throw new Error(`Grok hit the ${options?.maxTokens ?? 2048}-token output limit before returning any text (reasoning likely consumed the budget). Raise the token budget or use a non-reasoning model.`);
+    }
     return stripLLMPreamble(raw);
   }
 
