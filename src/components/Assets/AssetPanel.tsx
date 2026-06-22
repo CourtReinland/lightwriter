@@ -35,6 +35,7 @@ import {
   textAiProviderOptions,
   type TextAiProvider,
 } from "../../services/textAiSettingsService";
+import ModelPicker from "../ModelPicker";
 import { parseCharactersWithTextAi, buildCharacterAssetPrompt } from "../../services/characterParserService";
 import "./AssetPanel.css";
 
@@ -83,6 +84,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const [textAiProvider, setTextAiProvider] = useState<TextAiProvider>(() => getTextAiSettings().selectedProvider);
   const [textAiKeyDrafts, setTextAiKeyDrafts] = useState<Record<TextAiProvider, string>>(() =>
     Object.fromEntries(textAiProviderOptions().map((item) => [item, getTextAiProviderSettings(item).apiKey])) as Record<TextAiProvider, string>,
+  );
+  const [textAiModelDrafts, setTextAiModelDrafts] = useState<Record<TextAiProvider, string>>(() =>
+    Object.fromEntries(textAiProviderOptions().map((item) => [item, getTextAiProviderSettings(item).model])) as Record<TextAiProvider, string>,
   );
   const [settingsMessage, setSettingsMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -698,6 +702,19 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
                   <option key={item} value={item}>{textAiProviderLabel(item)}</option>
                 ))}
               </select>
+            </label>
+            <label>
+              Model ({textAiProviderLabel(textAiProvider)})
+              <ModelPicker
+                key={textAiProvider}
+                provider={textAiProvider}
+                apiKey={textAiKeyDrafts[textAiProvider] || ""}
+                value={textAiModelDrafts[textAiProvider] || ""}
+                onChange={(model) => {
+                  setTextAiModelDrafts((current) => ({ ...current, [textAiProvider]: model }));
+                  saveTextAiProviderSettings(textAiProvider, { model });
+                }}
+              />
             </label>
             {textAiProviderOptions().map((item) => (
               <label key={item}>

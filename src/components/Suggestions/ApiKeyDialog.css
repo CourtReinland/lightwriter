@@ -83,6 +83,10 @@
   line-height: 1.4;
 }
 
+.dialog .model-picker {
+  margin-bottom: 16px;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
