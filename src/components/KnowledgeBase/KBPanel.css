@@ -1,3 +1,15 @@
+.kb-field-label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin: 2px 0;
+}
+
+.kb-detected {
+  color: #6aa988;
+  font-style: italic;
+}
+
 .kb-panel {
   background: #1a1a1a;
   border-left: 1px solid #333;

@@ -95,20 +95,20 @@ export default function EditorToolbar({
             Settings
           </button>
         )}
-        {activeView === "editor" && onToggleKB && (
-          <button
-            className={`view-tab kb-toggle ${showKB ? "active" : ""}`}
-            onClick={onToggleKB}
-          >
-            KB
-          </button>
-        )}
         {activeView === "editor" && onToggleSuggestions && (
           <button
             className={`view-tab ai-toggle ${showSuggestions ? "active" : ""}`}
             onClick={onToggleSuggestions}
           >
             AI
+          </button>
+        )}
+        {activeView === "editor" && onToggleKB && (
+          <button
+            className={`view-tab kb-toggle ${showKB ? "active" : ""}`}
+            onClick={onToggleKB}
+          >
+            KB
           </button>
         )}
         <div className="export-dropdown">

@@ -28,6 +28,13 @@ import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
 import "./KBPanel.css";
 
+const COMMON_GENRES = [
+  "Drama", "Comedy", "Dramedy", "Coming-of-age", "Romance", "Romantic comedy",
+  "Thriller", "Mystery", "Crime", "Noir", "Horror", "Sci-Fi", "Fantasy",
+  "Family", "Adventure", "Action", "Animation", "Musical", "Documentary",
+  "Slice of life", "Historical", "Western",
+];
+
 interface KBPanelProps {
   kb: KnowledgeBase;
   onKBChange: (kb: KnowledgeBase) => void;
@@ -65,6 +72,7 @@ export default function KBPanel({
   onClearNotice,
 }: KBPanelProps) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
+  const [genreCustom, setGenreCustom] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -568,7 +576,23 @@ export default function KBPanel({
         </div>
         {expandedSections.tone && (
           <div className="kb-tone-fields">
-            <input className="kb-input-sm" placeholder="Genre" value={kb.toneStyle.genre} onChange={e => handleToneChange("genre", e.target.value)} />
+            <label className="kb-field-label">Genre {kb.toneStyle.genre ? <span className="kb-detected">(AI: {kb.toneStyle.genre})</span> : <span className="kb-detected">— Scan Script to detect</span>}</label>
+            <select
+              className="kb-input-sm"
+              value={(genreCustom || (!!kb.toneStyle.genre && !COMMON_GENRES.includes(kb.toneStyle.genre))) ? "__custom__" : kb.toneStyle.genre}
+              onChange={e => {
+                const v = e.target.value;
+                if (v === "__custom__") { setGenreCustom(true); }
+                else { setGenreCustom(false); handleToneChange("genre", v); }
+              }}
+            >
+              <option value="">Genre… (pick or Scan Script)</option>
+              {COMMON_GENRES.map(g => <option key={g} value={g}>{g}</option>)}
+              <option value="__custom__">Custom…</option>
+            </select>
+            {(genreCustom || (!!kb.toneStyle.genre && !COMMON_GENRES.includes(kb.toneStyle.genre))) && (
+              <input className="kb-input-sm" placeholder="Custom genre" value={kb.toneStyle.genre} onChange={e => handleToneChange("genre", e.target.value)} />
+            )}
             <input className="kb-input-sm" placeholder="Mood" value={kb.toneStyle.mood} onChange={e => handleToneChange("mood", e.target.value)} />
             <input className="kb-input-sm" placeholder="Target/director style (e.g. Kubrick restraint, Pixar emotional clarity)" value={kb.toneStyle.targetStyle} onChange={e => handleToneChange("targetStyle", e.target.value)} />
             <textarea className="kb-textarea-sm" placeholder="Pacing notes" value={kb.toneStyle.pacingNotes} onChange={e => handleToneChange("pacingNotes", e.target.value)} rows={2} />
