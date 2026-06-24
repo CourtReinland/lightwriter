@@ -3,6 +3,8 @@ import {
   buildExpandDescriptionsPrompt,
   rewriteScriptWithExpandedDescriptions,
   formatExpandError,
+  fillSceneDescriptions,
+  sceneNeedsDescription,
 } from "../src/services/expandDescriptionsService";
 import { extractShotScenes } from "../src/services/shotDirectionService";
 import type { TextAiProviderSettings } from "../src/services/textAiSettingsService";
@@ -66,5 +68,73 @@ describe("expand descriptions whole-script pass", () => {
     const { scenes } = extractShotScenes(SCRIPT);
     const err = formatExpandError(scenes[1], 2, 2, new Error("model exploded"));
     expect(err.message).toBe("Expand descriptions failed on scene 2/2 (EXT. STREET - DAY): model exploded");
+  });
+});
+
+describe("sceneNeedsDescription", () => {
+  const names = new Set(["MARA"]);
+  const sceneOf = (text: string) => extractShotScenes(text).scenes[0];
+
+  it("flags scenes that open with a shot, a cue, or character action", () => {
+    expect(sceneNeedsDescription(sceneOf("INT. KITCHEN - DAY\n\n!!WS KITCHEN\nThings happen."), names)).toBe(true);
+    expect(sceneNeedsDescription(sceneOf("INT. KITCHEN - DAY\n\nMARA\nHi."), names)).toBe(true);
+    expect(sceneNeedsDescription(sceneOf("INT. KITCHEN - DAY\n\nMara opens the fridge."), names)).toBe(true);
+    expect(sceneNeedsDescription(sceneOf("INT. KITCHEN - DAY"), names)).toBe(true); // empty scene
+  });
+
+  it("leaves scenes that already open with a setting description", () => {
+    expect(sceneNeedsDescription(sceneOf("INT. KITCHEN - DAY\n\nThe kitchen is small, bright, and spotless."), names)).toBe(false);
+  });
+});
+
+describe("fillSceneDescriptions (scoped scene-setting fill)", () => {
+  it("detects genre once, then inserts a location description under scenes that lack one", async () => {
+    const systems: string[] = [];
+    const result = await fillSceneDescriptions(
+      SCRIPT,
+      settings,
+      null,
+      null,
+      undefined,
+      async (system, user) => {
+        systems.push(system);
+        if (/identify the genre/i.test(system)) return "quirky indie drama";
+        if (/establishing scene descriptions/i.test(system)) {
+          const ids = [...user.matchAll(/"id":\s*(\d+)/g)].map((m) => Number(m[1]));
+          return JSON.stringify({ descriptions: ids.map((id) => ({ id, description: `Location ${id}: warm clutter and afternoon light.` })) });
+        }
+        return "";
+      },
+    );
+
+    // Genre detected, then a batched description call (not one call per scene).
+    expect(systems.filter((s) => /identify the genre/i.test(s))).toHaveLength(1);
+    expect(systems.filter((s) => /establishing scene descriptions/i.test(s))).toHaveLength(1);
+
+    // Each scene heading is now immediately followed by its setting description.
+    const lines = result.split("\n");
+    const intIdx = lines.indexOf("INT. ROOM - DAY");
+    expect(lines[intIdx + 2]).toBe("Location 0: warm clutter and afternoon light.");
+    expect(result).toContain("Location 1: warm clutter and afternoon light.");
+    // The original action is preserved, after the new description.
+    expect(result).toContain("MARA enters.");
+    expect(result).toContain("Title: Test");
+  });
+
+  it("skips the genre call when the KB already has a genre", async () => {
+    const systems: string[] = [];
+    await fillSceneDescriptions(
+      SCRIPT,
+      settings,
+      { projectId: "p", characters: [], scenes: [], worldRules: [], plotThreads: [], toneStyle: { genre: "horror", mood: "", pacingNotes: "", targetStyle: "", styleNotes: "" }, customNotes: [], updatedAt: 0 } as never,
+      null,
+      undefined,
+      async (system, user) => {
+        systems.push(system);
+        const ids = [...user.matchAll(/"id":\s*(\d+)/g)].map((m) => Number(m[1]));
+        return JSON.stringify({ descriptions: ids.map((id) => ({ id, description: `desc ${id}` })) });
+      },
+    );
+    expect(systems.some((s) => /identify the genre/i.test(s))).toBe(false);
   });
 });

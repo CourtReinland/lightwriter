@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
-import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
+import { fillSceneDescriptions } from "../../services/expandDescriptionsService";
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
 import { correctFountainFormatting } from "../../services/fountainFormatCorrector";
@@ -186,9 +186,9 @@ export default function SuggestionPanel({
   const handleExpandDescriptions = useCallback(
     () =>
       runWholeScriptTool(
-        "Expand Descriptions",
-        "Run Expand Descriptions across the whole script? This deepens scene, action, and character descriptions scene-by-scene (no shot lines added) and opens a Review pane with the changes highlighted before anything touches the editor.",
-        (settings, onProgress) => rewriteScriptWithExpandedDescriptions(fullScript, settings, knowledgeBase, styleProfile, onProgress),
+        "Scene Descriptions",
+        "Add scene-setting descriptions across the whole script? This detects the genre, finds every INT./EXT. that jumps straight into a shot or action with no establishing description, and writes a short visual description of the location under it (so the asset generator has something to draw from). Dialogue, character action, and existing descriptions are left alone. Opens a Review pane before anything touches the editor.",
+        (settings, onProgress) => fillSceneDescriptions(fullScript, settings, knowledgeBase, styleProfile, onProgress),
       ),
     [runWholeScriptTool, fullScript, knowledgeBase, styleProfile],
   );
@@ -654,12 +654,12 @@ export default function SuggestionPanel({
             className="full-shot-pass-btn"
             onClick={handleExpandDescriptions}
             disabled={loading || !fullScript.trim()}
-            title="Deepen scene, action, and character descriptions across the whole script so nothing is blank for downstream AI rendering"
+            title="Add a short visual description of the location under every INT./EXT. that lacks one, so the asset generator has something to draw from"
           >
-            Expand Descriptions
+            Scene Descriptions
           </button>
           <div className="full-shot-pass-hint">
-            Deepens scene visuals, character intros, and action so none are blank — giving the downstream rendering AI something concrete. Preview before applying.
+            Detects the genre, then writes a short visual description of the location under any INT./EXT. that jumps straight into a shot or action — so the scene-image generator has something concrete. Leaves dialogue, character action, and existing descriptions alone. Preview before applying.
           </div>
         </div>
         <div className="full-shot-pass">
