@@ -4,6 +4,7 @@ import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../se
 import { rewriteScriptWithExpandedDescriptions } from "../../services/expandDescriptionsService";
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
+import { correctFountainFormatting } from "../../services/fountainFormatCorrector";
 import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import { runStoryDoctor, isFrameworkMetric } from "../../services/storyDoctorService";
 import {
@@ -219,6 +220,26 @@ export default function SuggestionPanel({
     setError(null);
     onOpenToolReview({ label: "Fix shot lines", beforeScript: fullScript, afterScript: fixed });
   }, [fullScript, onOpenToolReview]);
+
+  // Deterministic, instant (no LLM): a full formatting pass that reclassifies
+  // every line by context — scene / shot / character + dialogue / transition /
+  // action — so the writer can write loosely and the formatter fixes the slots.
+  const handleFormattingCorrection = useCallback(() => {
+    if (!fullScript.trim()) {
+      setError("No script content to format.");
+      return;
+    }
+    const kbNames = (knowledgeBase?.characters ?? []).map((character) => character.name);
+    const fixed = correctFountainFormatting(fullScript, kbNames);
+    if (fixed.trim() === fullScript.trim()) {
+      setError(null);
+      setLastMode(null);
+      setSuggestion("Formatting already looks correct — nothing to change.");
+      return;
+    }
+    setError(null);
+    onOpenToolReview({ label: "Formatting correction", beforeScript: fullScript, afterScript: fixed });
+  }, [fullScript, knowledgeBase, onOpenToolReview]);
 
 
   const handleSuggest = useCallback(
@@ -665,6 +686,19 @@ export default function SuggestionPanel({
           </button>
           <div className="full-shot-pass-hint">
             Instant, no AI: any camera shot written as plain CAPS (e.g. "WS LIVING ROOM") gets the "!!" prefix so it stops landing in the character/dialogue slot. Preview before applying.
+          </div>
+        </div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn"
+            onClick={handleFormattingCorrection}
+            disabled={loading || !fullScript.trim()}
+            title="Reclassify every line by context — scene, shot, character, dialogue, action — and fix the Fountain formatting"
+          >
+            Formatting Correction
+          </button>
+          <div className="full-shot-pass-hint">
+            Instant, no AI: a full pass that guesses each line's type from context (INT./EXT. → scene, WS/CU… → shot, a known name → character + the lines under it → dialogue, the rest → action) and rewrites the formatting so the writer can write loosely. Preview before applying.
           </div>
         </div>
       </div>
