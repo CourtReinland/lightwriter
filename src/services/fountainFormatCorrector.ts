@@ -19,8 +19,9 @@ import { extractCharacters } from "./scriptStructure";
 
 const SCENE_HEADING = /^(INT\.|EXT\.|INT\.?\/EXT\.?|I\/E\.?|EST\.)/i;
 const SHOT_TOKEN = /^(WS|MS|CU|ECU|LS|OTS|POV)\b/;
-const TRANSITION_TO = /^[A-Z][A-Z0-9 '\-]*TO:$/; // CUT TO:, DISSOLVE TO:, MATCH CUT TO:
-const TRANSITION_PHRASE = /^(FADE IN:?|FADE OUT\.?|FADE TO BLACK\.?|SMASH CUT\.?|MATCH CUT\.?|END OF SCENE\.?|THE END\.?|CUT TO BLACK\.?|BLACKOUT\.?|DISSOLVE\.?)$/;
+const TRANSITION_TO = /^[A-Z][A-Z0-9 '\-]*TO:$/; // CUT TO:, DISSOLVE TO:, MATCH CUT TO: (Fountain auto-detects)
+const TRANSITION_TO_BLACK = /^[A-Z][A-Z0-9 '\-]* TO BLACK[:.]?$/; // FADE/CUT/DISSOLVE TO BLACK (no colon needed)
+const TRANSITION_PHRASE = /^(FADE IN|FADE OUT|FADE TO BLACK|CUT TO BLACK|SMASH CUT|MATCH CUT|DISSOLVE|END OF SCENE|END OF ACT|THE END|BLACKOUT|INTERCUT(?: WITH)?)[:.]?$/;
 const TITLE_KEY = /^(Title|Credit|Author|Authors|Source|Draft date|Date|Contact|Copyright|Notes|Revision)\s*:/i;
 const FORCED_OR_SPECIAL = /^[.@!~>=#]/; // forced scene/char/action/shot, lyrics, transition/center, synopsis, section
 const NAME_LIKE = /^[A-Z][A-Z0-9 .'\-]{0,30}(\s*\([^)]*\))?$/; // all-caps name + optional (V.O.)/(CONT'D)
@@ -39,7 +40,7 @@ function cueNameOf(t: string): string {
   return t.replace(/\s*\([^)]*\)\s*$/, "").trim().toUpperCase();
 }
 function isTransition(t: string): boolean {
-  return TRANSITION_TO.test(t) || TRANSITION_PHRASE.test(t);
+  return TRANSITION_TO.test(t) || TRANSITION_TO_BLACK.test(t) || TRANSITION_PHRASE.test(t);
 }
 function isStructuralStart(t: string, names: Set<string>): boolean {
   return (
@@ -56,7 +57,12 @@ function looksLikeName(t: string): boolean {
   const core = cueNameOf(t);
   if (!core || core.length > 30) return false;
   if (SCENE_HEADING.test(core) || SHOT_TOKEN.test(core) || isTransition(t) || NON_NAME_CAPS.has(core)) return false;
-  return core.split(/\s+/).length <= 4;
+  const words = core.split(/\s+/);
+  if (words.length > 4) return false;
+  // A multi-word phrase ending in a gerund is SFX/action ("PHONE RINGING",
+  // "DOOR SLAMMING"), never a character name.
+  if (words.length >= 2 && /ING$/.test(words[words.length - 1])) return false;
+  return true;
 }
 // A line that could plausibly be dialogue (so we can decide a preceding caps
 // line is a cue, and know where a dialogue block ends).
@@ -89,9 +95,14 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
     }
   }
   for (const [key, count] of followedByDialogue) if (count >= 2) names.add(key);
-  // extractCharacters (and a stray KB entry) can mis-flag stock all-caps
-  // directions as characters — drop them so they aren't treated as cues.
-  for (const bad of NON_NAME_CAPS) names.delete(bad);
+  // extractCharacters (and stray KB entries) can mis-flag stock directions,
+  // transitions, and SFX as characters — drop anything that isn't name-shaped so
+  // it isn't treated as a cue (and absorb the following line as dialogue).
+  for (const n of [...names]) {
+    const words = n.split(/\s+/);
+    const gerundPhrase = words.length >= 2 && /ING$/.test(words[words.length - 1]);
+    if (NON_NAME_CAPS.has(n) || isTransition(n) || gerundPhrase) names.delete(n);
+  }
 
   // --- Re-emit line by line. ---
   const out: string[] = [];
@@ -121,21 +132,31 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
 
     if (SHOT_TOKEN.test(t) && isAllCaps(t)) { ensureBlankBefore(); out.push(`!!${t}`); i++; continue; }
 
+    // "… TO:" auto-detects as a transition; the rest are forced with ">".
     if (TRANSITION_TO.test(t)) { ensureBlankBefore(); out.push(t.toUpperCase()); out.push(""); i++; continue; }
-    if (TRANSITION_PHRASE.test(t)) { ensureBlankBefore(); out.push(`> ${t.toUpperCase()}`); out.push(""); i++; continue; }
+    if (isTransition(t)) { ensureBlankBefore(); out.push(`> ${t.toUpperCase()}`); out.push(""); i++; continue; }
 
     // Character cue + its dialogue (pulling the dialogue up under the cue).
     if (names.has(cueNameOf(t))) {
       ensureBlankBefore();
       out.push(t.toUpperCase());
       i++;
-      // Drop a single stray blank the writer put between the cue and dialogue.
-      if (i + 1 < lines.length && lines[i].trim() === "" && dialogueLike(lines[i + 1].trim())) i++;
+      const isParenthetical = (s: string) => /^\(.*\)$/.test(s);
+      // Drop a single stray blank between the cue and its first wryly/dialogue.
+      if (i + 1 < lines.length && lines[i].trim() === "" && (dialogueLike(lines[i + 1].trim()) || isParenthetical(lines[i + 1].trim()))) i++;
       // Attach the dialogue block — runs until a blank, an all-caps line (a new
-      // shot/cue/action), or another element.
+      // shot/cue/action), or another element. A parenthetical (V.O.)/(wryly) line
+      // stays attached to the cue, and a stray blank after it is dropped too.
       while (i < lines.length) {
         const dt = lines[i].trim();
-        if (dt === "" || isAllCaps(dt) || isStructuralStart(dt, names)) break;
+        if (dt === "") break;
+        if (isParenthetical(dt)) {
+          out.push(dt);
+          i++;
+          if (i + 1 < lines.length && lines[i].trim() === "" && dialogueLike(lines[i + 1].trim())) i++;
+          continue;
+        }
+        if (isAllCaps(dt) || isStructuralStart(dt, names)) break;
         out.push(dt);
         i++;
       }
