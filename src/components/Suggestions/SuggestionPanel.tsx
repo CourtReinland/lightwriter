@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
+import { generateFromPrompt, type GenerationUnit } from "../../services/promptGenerationService";
 import { fillSceneDescriptions } from "../../services/expandDescriptionsService";
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
@@ -43,6 +44,8 @@ interface SuggestionPanelProps {
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
+  /** Insert freshly generated screenplay text at the cursor and seal a checkpoint. */
+  onInsertGenerated?: (text: string) => void;
   /** Seal a version-history snapshot for a direct AI apply (not a revert). */
   onAiCommit?: (label: string, text: string) => void;
   onOpenToolReview: (review: { label: string; beforeScript: string; afterScript: string }) => void;
@@ -101,6 +104,7 @@ export default function SuggestionPanel({
   onApply,
   onInsertBelow,
   onReplaceScript,
+  onInsertGenerated,
   onAiCommit,
   onOpenToolReview,
 }: SuggestionPanelProps) {
@@ -119,6 +123,54 @@ export default function SuggestionPanel({
   const [reportCollapsed, setReportCollapsed] = useState(false);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
   const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
+  // Story Generator (direct single-call generation from the WRITER model)
+  const [genPrompt, setGenPrompt] = useState("");
+  const [genAmount, setGenAmount] = useState(23);
+  const [genUnit, setGenUnit] = useState<GenerationUnit>("pages");
+  const [genLoading, setGenLoading] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [genStatus, setGenStatus] = useState<string | null>(null);
+
+  const handleGenerateFromPrompt = useCallback(async () => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+    if (!genPrompt.trim()) {
+      setGenError("Type a brief describing what to write.");
+      return;
+    }
+    setGenLoading(true);
+    setGenError(null);
+    setGenStatus(`Generating ~${genAmount} ${genUnit} with ${textAiProviderLabel(currentSettings.provider)}...`);
+    try {
+      const text = await generateFromPrompt({
+        prompt: genPrompt.trim(),
+        amount: genAmount,
+        unit: genUnit,
+        knowledgeBase,
+        styleProfile,
+        // Existing script (empty on a blank test doc → fresh generation;
+        // otherwise the writer continues from where it leaves off).
+        precedingContext: fullScript,
+      });
+      if (!text.trim()) {
+        setGenError("The writer returned nothing. Try again or shorten the target length.");
+        return;
+      }
+      if (onInsertGenerated) onInsertGenerated(text);
+      else onReplaceScript(text);
+      const wordCount = text.trim().split(/\s+/).length;
+      setGenStatus(`Inserted ~${wordCount} words at the cursor.`);
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : "Generation failed");
+      setGenStatus(null);
+    } finally {
+      setGenLoading(false);
+    }
+  }, [genPrompt, genAmount, genUnit, knowledgeBase, styleProfile, fullScript, onInsertGenerated, onReplaceScript]);
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -630,6 +682,54 @@ export default function SuggestionPanel({
           <span className="ctx-badge kb">KB: {knowledgeBase.characters.length}ch</span>
         )}
         {styleProfile && <span className="ctx-badge style">Style</span>}
+      </div>
+
+      {/* Story Generator — direct single-call generation from the writer model */}
+      <div className="ai-group">
+        <div className="ai-group-label">Story Generator</div>
+        <div className="story-gen">
+          <textarea
+            className="story-gen-prompt"
+            value={genPrompt}
+            onChange={(e) => setGenPrompt(e.target.value)}
+            placeholder="Describe what to write — e.g. a children's urban-fantasy adventure about an immortal boy and his pet dragon, following Dan Harmon's story circle, as a Hollywood screenplay."
+            rows={4}
+            disabled={genLoading}
+          />
+          <div className="story-gen-controls">
+            <label className="story-gen-amount">
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={genAmount}
+                onChange={(e) => setGenAmount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                disabled={genLoading}
+              />
+            </label>
+            <select
+              className="story-gen-unit"
+              value={genUnit}
+              onChange={(e) => setGenUnit(e.target.value as GenerationUnit)}
+              disabled={genLoading}
+            >
+              <option value="pages">pages</option>
+              <option value="words">words</option>
+            </select>
+            <button
+              className="story-gen-btn"
+              onClick={handleGenerateFromPrompt}
+              disabled={genLoading || !genPrompt.trim()}
+            >
+              {genLoading ? "Writing..." : "Generate"}
+            </button>
+          </div>
+          <div className="full-shot-pass-hint">
+            One direct call to the writer ({textAiProviderLabel(textAiSettings.provider)}) — no rewrite/analysis pass. Inserts the result at the cursor. Use a blank document to see the writer's raw output.
+          </div>
+          {genStatus && <div className="story-gen-status">{genStatus}</div>}
+          {genError && <div className="story-gen-error">{genError}</div>}
+        </div>
       </div>
 
       {/* Scorecard wizard */}

@@ -385,6 +385,28 @@ export default function App() {
     handleReplaceScript(snap.content);
   }, [handleReplaceScript, project.content]);
 
+  // Insert freshly generated screenplay text at the cursor (replacing any
+  // selection) and seal a "Generated" version checkpoint with the result.
+  const handleInsertGenerated = useCallback((text: string) => {
+    const view = editorViewRef.current;
+    let nextContent: string;
+    if (!view) {
+      nextContent = project.content ? `${project.content}\n\n${text}` : text;
+      handleContentChange(nextContent);
+    } else {
+      const sel = view.state.selection.main;
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: text },
+        selection: { anchor: sel.from + text.length },
+      });
+      view.focus();
+      nextContent = view.state.doc.toString();
+    }
+    suppressNextEditRef.current = true;
+    forceNewEditRef.current = true;
+    setHistory(VersionHistoryService.recordAiCommit(project.id, nextContent, "Generated from prompt"));
+  }, [handleContentChange, project.content, project.id]);
+
   // Whole-script replaces coming from the AI panel are either AI applies
   // (already sealed via handleAiCommit) or a revert of an applied rewrite —
   // neither is a typing edit, so suppress the resulting autosave and let the
@@ -606,6 +628,7 @@ export default function App() {
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleSuggestionReplaceScript}
+              onInsertGenerated={handleInsertGenerated}
               onAiCommit={handleAiCommit}
               onOpenToolReview={handleOpenToolReview}
             />

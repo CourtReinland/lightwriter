@@ -308,6 +308,95 @@
   color: #777;
 }
 
+/* Story Generator */
+.story-gen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.story-gen-prompt {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 7px 8px;
+  background: #151515;
+  border: 1px solid #3a3a3a;
+  color: #e5e5e5;
+  border-radius: 4px;
+}
+
+.story-gen-prompt:focus {
+  outline: none;
+  border-color: #8b5cf6;
+}
+
+.story-gen-controls {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.story-gen-amount input {
+  width: 56px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px;
+  background: #151515;
+  border: 1px solid #3a3a3a;
+  color: #e5e5e5;
+  border-radius: 4px;
+}
+
+.story-gen-unit {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px;
+  background: #151515;
+  border: 1px solid #3a3a3a;
+  color: #e5e5e5;
+  border-radius: 4px;
+}
+
+.story-gen-btn {
+  flex: 1;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 7px 8px;
+  background: #2a1f3a;
+  border: 1px solid #7c4ddb;
+  color: #c4b5fd;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.story-gen-btn:hover:not(:disabled) {
+  background: #382a4d;
+  border-color: #a78bfa;
+}
+
+.story-gen-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.story-gen-status {
+  font-size: 10px;
+  color: #9ad0b0;
+  line-height: 1.4;
+}
+
+.story-gen-error {
+  font-size: 10px;
+  color: #f87171;
+  line-height: 1.4;
+}
+
 .suggestion-success {
   padding: 10px 12px;
   font-size: 10px;
