@@ -43,6 +43,8 @@ interface SuggestionPanelProps {
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
+  /** Seal a version-history snapshot for a direct AI apply (not a revert). */
+  onAiCommit?: (label: string, text: string) => void;
   onOpenToolReview: (review: { label: string; beforeScript: string; afterScript: string }) => void;
 }
 
@@ -99,6 +101,7 @@ export default function SuggestionPanel({
   onApply,
   onInsertBelow,
   onReplaceScript,
+  onAiCommit,
   onOpenToolReview,
 }: SuggestionPanelProps) {
   const [textAiSettings, setTextAiSettings] = useState(() => getSelectedTextAiProviderSettings());
@@ -146,6 +149,7 @@ export default function SuggestionPanel({
         knowledgeBase,
         setShotPassProgress,
       );
+      onAiCommit?.("Expand shots", rewritten);
       onReplaceScript(rewritten);
       setSuggestion("Full-script shot pass complete. The editor has been updated with professional shot direction lines.");
     } catch (e) {
@@ -154,7 +158,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [fullScript, knowledgeBase, onReplaceScript]);
+  }, [fullScript, knowledgeBase, onReplaceScript, onAiCommit]);
 
   // Shared runner for whole-script à la carte tool passes that PREVIEW before applying.
   const runWholeScriptTool = useCallback(
@@ -532,12 +536,13 @@ export default function SuggestionPanel({
       setError(`Cannot apply yet: ${rewriteReview.validation.issues.join(" ")}`);
       return;
     }
+    onAiCommit?.(rewriteReview.label || "Rewrite", rewriteReview.afterScript);
     onReplaceScript(rewriteReview.afterScript);
     setRewriteReview({ ...rewriteReview, applied: true });
     setScriptDoctorStage("applied");
     setSuggestion("Rewrite applied to the main editor. You can Re-score, Revert to the pre-rewrite snapshot, or Accept the rewrite.");
     setLastMode(null);
-  }, [onReplaceScript, rewriteReview]);
+  }, [onReplaceScript, onAiCommit, rewriteReview]);
 
   const handleDiscardRewritePreview = useCallback(() => {
     setRewriteReview(null);

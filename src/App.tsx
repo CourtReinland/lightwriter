@@ -17,10 +17,12 @@ import ElementBar, {
 } from "./components/Editor/ElementBar";
 import KBPanel from "./components/KnowledgeBase/KBPanel";
 import AssetPanel from "./components/Assets/AssetPanel";
+import ExportPanel from "./components/Export/ExportPanel";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import ToolReviewPane, { type ToolReviewData } from "./components/Suggestions/ToolReviewPane";
 import { useFountainParser } from "./hooks/useFountainParser";
 import { exportFountain, exportFdx, exportPdf } from "./services/fountainExporter";
+import { VersionHistoryService, type VersionSnapshot } from "./services/versionHistoryService";
 import {
   StorageService,
   type Project,
@@ -120,6 +122,7 @@ export default function App() {
   const [cardAiEnabled, setCardAiEnabled] = useState(false);
   const [showKB, setShowKB] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [kbFocus, setKbFocus] = useState<"characters" | "scenes" | null>(null);
   const [kbNotice, setKbNotice] = useState("");
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>(() =>
@@ -131,19 +134,45 @@ export default function App() {
   const [assets, setAssets] = useState<GeneratedAsset[]>(() =>
     AssetService.getAssets(loadOrCreateInitialProject().id),
   );
+  const [history, setHistory] = useState<VersionSnapshot[]>(() =>
+    VersionHistoryService.ensureInitialized(project.id, project.content),
+  );
   const [cursorBeats, setCursorBeats] = useState<ComputedBeat[]>([]);
   const [cursorLine, setCursorLine] = useState(0);
 
   const editorViewRef = useRef<EditorView>(null as unknown as EditorView);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined as unknown as ReturnType<typeof setTimeout>);
+  // Version-history bookkeeping. forceNewEdit: the next typing edit should start a
+  // fresh entry instead of collapsing into the tail (set after a restore).
+  // suppressNextEdit: skip the one autosave caused by a programmatic content
+  // replace (restore / project switch) so it doesn't overwrite history.
+  const forceNewEditRef = useRef(false);
+  const suppressNextEditRef = useRef(false);
 
   const { parsed, pageCount, scenes } = useFountainParser(project.content);
 
-  // Auto-save project on content/settings changes (debounced 500ms)
+  // Auto-save project on content/settings changes (debounced 500ms).
+  // The same tick records a version-history "edit" snapshot (collapsing typing
+  // into one entry, deduped against the tail). AI-tool applies are recorded
+  // separately and synchronously via handleAiCommit, so they seal their own
+  // immutable entry and the autosave that follows is a dedup no-op.
   useEffect(() => {
     clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
       StorageService.saveProject(project);
+      if (suppressNextEditRef.current) {
+        suppressNextEditRef.current = false;
+      } else {
+        const next = VersionHistoryService.recordEdit(
+          project.id,
+          project.content,
+          forceNewEditRef.current,
+        );
+        if (next) {
+          forceNewEditRef.current = false;
+          setHistory(next);
+        }
+      }
     }, 500);
     return () => clearTimeout(autoSaveTimer.current);
   }, [project]);
@@ -332,11 +361,29 @@ export default function App() {
     setToolReviewEdit(review.afterScript);
   }, []);
 
+  // Seal an immutable AI-tool snapshot in version history. Recorded with the
+  // exact applied text BEFORE the editor content is replaced, so the following
+  // autosave edit is a dedup no-op.
+  const handleAiCommit = useCallback((label: string, text: string) => {
+    setHistory(VersionHistoryService.recordAiCommit(project.id, text, label));
+  }, [project.id]);
+
   const handleApplyToolReview = useCallback(() => {
+    handleAiCommit(toolReview?.label || "AI tool", toolReviewEdit);
     handleReplaceScript(toolReviewEdit);
     setToolReview(null);
     setToolReviewEdit("");
-  }, [handleReplaceScript, toolReviewEdit]);
+  }, [handleAiCommit, handleReplaceScript, toolReview, toolReviewEdit]);
+
+  // Restore a past snapshot into the editor. Non-destructive: suppress the
+  // restore's own autosave, and force the next typing edit to start a new entry
+  // so existing snapshots (including any "future" ones) are preserved.
+  const handleRestoreVersion = useCallback((snap: VersionSnapshot) => {
+    if (snap.content === project.content) return;
+    suppressNextEditRef.current = true;
+    forceNewEditRef.current = true;
+    handleReplaceScript(snap.content);
+  }, [handleReplaceScript, project.content]);
 
   const handleDiscardToolReview = useCallback(() => {
     setToolReview(null);
@@ -369,6 +416,8 @@ export default function App() {
     setKnowledgeBase(KnowledgeBaseService.getKB(loaded.id));
     setStyleProfile(StyleProfileService.getProfile(loaded.id));
     setAssets(AssetService.getAssets(loaded.id));
+    setHistory(VersionHistoryService.ensureInitialized(loaded.id, loaded.content));
+    suppressNextEditRef.current = true; // the project-switch content change isn't an edit
     setEditorKey((k) => k + 1); // Force editor remount with new content
     setShowProjectMenu(false);
   }, []);
@@ -385,6 +434,9 @@ export default function App() {
     setKnowledgeBase(KnowledgeBaseService.getKB(newProj.id));
     setStyleProfile(StyleProfileService.getProfile(newProj.id));
     setAssets(AssetService.getAssets(newProj.id));
+    // First history entry is the open/import itself.
+    setHistory(VersionHistoryService.recordOpen(newProj.id, content || "", content ? "Imported" : "New document"));
+    suppressNextEditRef.current = true;
     setEditorKey((k) => k + 1);
     setShowProjectMenu(false);
   }, []);
@@ -404,6 +456,7 @@ export default function App() {
       setShowSettings(false);
       setShowKB(true);
       setShowSuggestions(false);
+      setShowExport(false);
     }
   }, [knowledgeBase, project.id]);
 
@@ -422,6 +475,7 @@ export default function App() {
             if (!showSuggestions) {
               setShowKB(false);
               setShowSettings(false);
+              setShowExport(false);
             }
           }}
           showKB={showKB}
@@ -430,6 +484,7 @@ export default function App() {
             if (!showKB) {
               setShowSuggestions(false);
               setShowSettings(false);
+              setShowExport(false);
               setKbNotice("");
             }
           }}
@@ -439,12 +494,20 @@ export default function App() {
             if (!showSettings) {
               setShowKB(false);
               setShowSuggestions(false);
+              setShowExport(false);
               setKbNotice("");
             }
           }}
-          onExport={handleExportFountain}
-          onExportFdx={handleExportFdx}
-          onExportPdf={handleExportPdf}
+          showExport={showExport}
+          onToggleExport={() => {
+            setShowExport(!showExport);
+            if (!showExport) {
+              setShowKB(false);
+              setShowSuggestions(false);
+              setShowSettings(false);
+              setKbNotice("");
+            }
+          }}
           onOpenProjectMenu={() => setShowProjectMenu(true)}
           projectName={project.name}
         />
@@ -531,6 +594,7 @@ export default function App() {
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleReplaceScript}
+              onAiCommit={handleAiCommit}
               onOpenToolReview={handleOpenToolReview}
             />
           )}
@@ -546,6 +610,8 @@ export default function App() {
               assets={assets}
               onAssetsChange={setAssets}
               onGenerationComplete={handleAssetGenerationComplete}
+              history={history}
+              onRestoreVersion={handleRestoreVersion}
               focusSection={kbFocus}
               notice={kbNotice}
               onClearNotice={() => setKbNotice("")}
@@ -558,6 +624,16 @@ export default function App() {
               assets={assets}
               onAssetsChange={setAssets}
               onGenerationComplete={handleAssetGenerationComplete}
+            />
+          )}
+          {activeView === "editor" && showExport && (
+            <ExportPanel
+              project={project}
+              assets={assets}
+              onExportFountain={handleExportFountain}
+              onExportFdx={handleExportFdx}
+              onExportPdf={handleExportPdf}
+              canExportPdf={!!parsed}
             />
           )}
           {activeView === "editor" && (

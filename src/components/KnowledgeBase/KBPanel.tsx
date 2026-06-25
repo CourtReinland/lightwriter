@@ -14,6 +14,7 @@ import { importFile } from "../../services/fileImporter";
 import { getSelectedTextAiProviderSettings } from "../../services/textAiSettingsService";
 import type { AssetProvider, AssetKind, GeneratedAsset } from "../../types/assets";
 import type { Project } from "../../services/storageService";
+import type { VersionSnapshot } from "../../services/versionHistoryService";
 import { buildAssetKnowledgeItems } from "../../services/assetKnowledgeViewService";
 import {
   buildGeneratedAssetFromResult,
@@ -34,6 +35,24 @@ const COMMON_GENRES = [
   "Slice of life", "Historical", "Western",
 ];
 
+function versionGlyph(type: VersionSnapshot["type"]): string {
+  if (type === "open") return "[ ]"; // opened / imported document
+  if (type === "ai") return "[*]"; // AI-tool commit
+  return "[~]"; // typing edits
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 45_000) return "just now";
+  const mins = Math.round(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(diff / 3_600_000);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(diff / 86_400_000);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
 interface KBPanelProps {
   kb: KnowledgeBase;
   onKBChange: (kb: KnowledgeBase) => void;
@@ -45,6 +64,8 @@ interface KBPanelProps {
   assets: GeneratedAsset[];
   onAssetsChange: (assets: GeneratedAsset[]) => void;
   onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
+  history?: VersionSnapshot[];
+  onRestoreVersion?: (snap: VersionSnapshot) => void;
   focusSection?: "characters" | "scenes" | null;
   notice?: string;
   onClearNotice?: () => void;
@@ -66,6 +87,8 @@ export default function KBPanel({
   assets,
   onAssetsChange,
   onGenerationComplete,
+  history = [],
+  onRestoreVersion,
   focusSection,
   notice,
   onClearNotice,
@@ -75,6 +98,7 @@ export default function KBPanel({
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    history: true,
     characters: true,
     scenes: false,
     generate: false,
@@ -439,6 +463,15 @@ export default function KBPanel({
     );
   };
 
+  // The active version is the most recent snapshot whose content matches the
+  // current editor text (highlighted in the history list).
+  const activeVersionIdx = useMemo(() => {
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].content === scriptContent) return i;
+    }
+    return -1;
+  }, [history, scriptContent]);
+
   return (
     <div className="kb-panel">
       <div className="kb-header">
@@ -462,6 +495,33 @@ export default function KBPanel({
           <option value="gemini-nano-banana">{providerLabel("gemini-nano-banana")}</option>
           <option value="grok-imagine">{providerLabel("grok-imagine")}</option>
         </select>
+      </div>
+
+      {/* Version History — open/import → typing (collapses) → each AI tool seals a snapshot */}
+      <div className="kb-section">
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("history")} onKeyDown={(e) => handleSectionKeyDown(e, "history")}>
+          <span>{expandedSections.history ? "v" : ">"} Version History ({history.length})</span>
+        </div>
+        {expandedSections.history && (
+          <div className="kb-history">
+            {history.length === 0 && <div className="kb-empty">No history yet.</div>}
+            {history.map((snap, idx) => (
+              <button
+                key={snap.id}
+                type="button"
+                className={`kb-history-row ${idx === activeVersionIdx ? "active" : ""}`}
+                onClick={() => onRestoreVersion?.(snap)}
+                disabled={!onRestoreVersion || idx === activeVersionIdx}
+                title={idx === activeVersionIdx ? "Current version" : `Restore: ${snap.label}`}
+              >
+                <span className={`kb-history-glyph kb-history-${snap.type}`}>{versionGlyph(snap.type)}</span>
+                <span className="kb-history-label">{snap.label}</span>
+                <span className="kb-history-time">{idx === activeVersionIdx ? "current" : relativeTime(snap.createdAt)}</span>
+              </button>
+            ))}
+            <div className="kb-history-hint">Click an earlier version to restore it. Each AI tool run is saved as a checkpoint.</div>
+          </div>
+        )}
       </div>
 
       {/* Characters */}

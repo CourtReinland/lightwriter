@@ -10,7 +10,6 @@ import {
   type ScriptSceneRef,
   type ScriptShotRef,
 } from "../../services/scriptStructure";
-import { buildLightWriterPackage, buildScript2ScreenManifest, exportJsonDownload } from "../../services/assetManifestExporter";
 import {
   buildGeneratedAssetFromResult,
   generateImageAsset,
@@ -624,27 +623,6 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
     refreshAssets();
   };
 
-  const handleExportLightWriterPackage = () => {
-    const pkg = buildLightWriterPackage({ project, assets });
-    exportJsonDownload(pkg, `${project.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.lightwriter-package.json`);
-  };
-
-  const handleExportScript2ScreenManifest = () => {
-    const manifest = buildScript2ScreenManifest({ resolveProjectName: project.name, assets });
-    exportJsonDownload(manifest, `${project.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.script2screen-manifest.json`);
-    const sceneCount = Object.keys(manifest.locations).length;
-    const charCount = Object.keys(manifest.characters).length;
-    const shotCount = Object.keys(manifest.generated_media).length;
-    const skipped = manifest._lightwriter_warnings?.length ?? 0;
-    const parts = [
-      `Exported Script2Screen manifest: ${sceneCount} scene background${sceneCount === 1 ? "" : "s"}, ${charCount} character${charCount === 1 ? "" : "s"}, ${shotCount} shot${shotCount === 1 ? "" : "s"}.`,
-    ];
-    if (skipped > 0) {
-      parts.push(`Skipped ${skipped} asset${skipped === 1 ? "" : "s"} with no saved image file — generate/persist them in the desktop app to include them.`);
-    }
-    setSettingsMessage(parts.join(" "));
-  };
-
   return (
     <aside className={`asset-panel${mode === "generation" ? " asset-panel-embedded" : ""}`}>
       <div className="asset-panel-header">
@@ -652,7 +630,7 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
           <h2>{mode === "settings" ? "Settings" : mode === "generation" ? "Generate Images" : "AI Assets"}</h2>
           <p>
             {mode === "settings"
-              ? "Writing-AI and image-provider keys, models, and Script2Screen export."
+              ? "Writing-AI and image-provider keys and models."
               : mode === "generation"
                 ? "Generate character portraits and scene backgrounds from the script."
                 : "Generate and tag sets, characters, and shot start frames for Script2Screen."}
@@ -805,11 +783,7 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
             <div className="asset-settings-heading">
               <h3>ScriptToScreen Export</h3>
             </div>
-            <p className="asset-muted">Export the generated assets for the ScriptToScreen handoff.</p>
-            <div className="asset-export-row">
-              <button onClick={handleExportLightWriterPackage}>Export LW Package</button>
-              <button onClick={handleExportScript2ScreenManifest}>Export STS Manifest</button>
-            </div>
+            <p className="asset-muted">Script, images, and the ScriptToScreen manifest now live in the <strong>Export</strong> tab.</p>
           </section>
         </div>
       )}
