@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   KnowledgeBaseService,
   parsePlotThreadsFromTableText,
@@ -101,6 +101,33 @@ export default function KBPanel({
 
   const characterAssetItems = buildAssetKnowledgeItems(assets, kb, "character");
   const sceneAssetItems = buildAssetKnowledgeItems(assets, kb, "scene_set");
+
+  // Merge each KB entity with its generated image into a single list, so a
+  // character/scene shows its thumbnail inline. Entities with no image still
+  // appear; images with no matching KB entry are appended so nothing is lost.
+  const norm = (s: string) => s.trim().toLowerCase();
+  const mergedCharacters = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; description: string; asset: GeneratedAsset | null; character: KBCharacter | null }>();
+    for (const c of kb.characters) map.set(norm(c.name), { key: c.id, name: c.name, description: c.description, asset: null, character: c });
+    for (const { asset, title, description } of characterAssetItems) {
+      const k = norm(title);
+      const existing = map.get(k);
+      if (existing) existing.asset = asset;
+      else map.set(k, { key: asset.id, name: title, description, asset, character: null });
+    }
+    return [...map.values()];
+  }, [kb.characters, characterAssetItems]);
+  const mergedScenes = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; description: string; asset: GeneratedAsset | null; scene: KBScene | null }>();
+    for (const s of kb.scenes || []) map.set(norm(s.heading), { key: s.id, name: s.heading, description: s.description, asset: null, scene: s });
+    for (const { asset, title, description } of sceneAssetItems) {
+      const k = norm(title);
+      const existing = map.get(k);
+      if (existing) existing.asset = asset;
+      else map.set(k, { key: asset.id, name: title, description, asset, scene: null });
+    }
+    return [...map.values()];
+  }, [kb.scenes, sceneAssetItems]);
 
   useEffect(() => {
     if (!focusSection) return;
@@ -441,30 +468,29 @@ export default function KBPanel({
       {/* Characters */}
       <div className="kb-section">
         <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("characters")} onKeyDown={(e) => handleSectionKeyDown(e, "characters")}>
-          <span>{expandedSections.characters ? "v" : ">"} Characters ({kb.characters.length})</span>
+          <span>{expandedSections.characters ? "v" : ">"} Characters ({mergedCharacters.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "character" }); }}>+</button>
         </div>
         {expandedSections.characters && (
           <>
-            {kb.characters.map(c => (
-              <div key={c.id} className="kb-entry">
-                <div className="kb-entry-name">{c.name}</div>
-                <div className="kb-entry-preview">{c.description.slice(0, 120)}{c.description.length > 120 ? "..." : ""}</div>
-                <div className="kb-entry-actions">
-                  <button onClick={() => setEditTarget({ type: "character", existing: c })}>Edit</button>
-                  <button onClick={() => handleDelete("character", c.id)}>Del</button>
-                </div>
-              </div>
-            ))}
-            {characterAssetItems.map(({ asset, title, description }) => {
-              const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+            {mergedCharacters.length === 0 && <div className="kb-empty">No characters yet — Scan Script, generate a portrait, or add one with +.</div>}
+            {mergedCharacters.map(item => {
+              const previewDataUrl = item.asset ? (item.asset.imageDataUrl || assetPreviewDataUrls[item.asset.id]) : null;
               return (
-                <div key={asset.id} className="kb-asset-entry">
-                  {previewDataUrl && <img className="kb-asset-thumb" src={previewDataUrl} alt={title} />}
+                <div key={item.key} className="kb-asset-entry">
+                  {previewDataUrl
+                    ? <img className="kb-asset-thumb" src={previewDataUrl} alt={item.name} />
+                    : <div className="kb-asset-thumb kb-thumb-empty">no image</div>}
                   <div className="kb-asset-body">
-                    <div className="kb-entry-name">{title}</div>
-                    <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
-                    {renderGeneratedAssetDetails(asset)}
+                    <div className="kb-entry-name">{item.name}</div>
+                    <div className="kb-entry-preview">{item.description.slice(0, 160)}{item.description.length > 160 ? "..." : ""}</div>
+                    {item.asset && renderGeneratedAssetDetails(item.asset)}
+                    {item.character && (
+                      <div className="kb-entry-actions">
+                        <button onClick={() => setEditTarget({ type: "character", existing: item.character! })}>Edit</button>
+                        <button onClick={() => handleDelete("character", item.character!.id)}>Del</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -476,30 +502,29 @@ export default function KBPanel({
       {/* Scenes */}
       <div className="kb-section">
         <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("scenes")} onKeyDown={(e) => handleSectionKeyDown(e, "scenes")}>
-          <span>{expandedSections.scenes ? "v" : ">"} Scenes ({Math.max(kb.scenes?.length || 0, sceneAssetItems.length)})</span>
+          <span>{expandedSections.scenes ? "v" : ">"} Scenes ({mergedScenes.length})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "scene" }); }}>+</button>
         </div>
         {expandedSections.scenes && (
           <>
-            {(kb.scenes || []).map(scene => (
-              <div key={scene.id} className="kb-entry">
-                <div className="kb-entry-name">{scene.heading}</div>
-                <div className="kb-entry-preview">{scene.description.slice(0, 120)}{scene.description.length > 120 ? "..." : ""}</div>
-                <div className="kb-entry-actions">
-                  <button onClick={() => setEditTarget({ type: "scene", existing: scene })}>Edit</button>
-                  <button onClick={() => handleDelete("scene", scene.id)}>Del</button>
-                </div>
-              </div>
-            ))}
-            {sceneAssetItems.map(({ asset, title, description }) => {
-              const previewDataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id];
+            {mergedScenes.length === 0 && <div className="kb-empty">No scenes yet — Scan Script, generate a scene image, or add one with +.</div>}
+            {mergedScenes.map(item => {
+              const previewDataUrl = item.asset ? (item.asset.imageDataUrl || assetPreviewDataUrls[item.asset.id]) : null;
               return (
-                <div key={asset.id} className="kb-asset-entry">
-                  {previewDataUrl && <img className="kb-asset-thumb wide" src={previewDataUrl} alt={title} />}
+                <div key={item.key} className="kb-asset-entry">
+                  {previewDataUrl
+                    ? <img className="kb-asset-thumb wide" src={previewDataUrl} alt={item.name} />
+                    : <div className="kb-asset-thumb wide kb-thumb-empty">no image</div>}
                   <div className="kb-asset-body">
-                    <div className="kb-entry-name">{title}</div>
-                    <div className="kb-entry-preview">{description.slice(0, 160)}{description.length > 160 ? "..." : ""}</div>
-                    {renderGeneratedAssetDetails(asset)}
+                    <div className="kb-entry-name">{item.name}</div>
+                    <div className="kb-entry-preview">{item.description.slice(0, 160)}{item.description.length > 160 ? "..." : ""}</div>
+                    {item.asset && renderGeneratedAssetDetails(item.asset)}
+                    {item.scene && (
+                      <div className="kb-entry-actions">
+                        <button onClick={() => setEditTarget({ type: "scene", existing: item.scene! })}>Edit</button>
+                        <button onClick={() => handleDelete("scene", item.scene!.id)}>Del</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
