@@ -27,7 +27,7 @@ function tokenBudgetForPages(pages: number): number {
   return Math.min(16000, Math.max(2048, Math.round(pages * WORDS_PER_PAGE * 3)));
 }
 
-const SYSTEM = `You are a professional screenwriter. Write an original screenplay in valid Fountain format following Hollywood screenplay conventions.
+export const SCREENPLAY_SYSTEM = `You are a professional screenwriter. Write an original screenplay in valid Fountain format following Hollywood screenplay conventions.
 
 FORMAT RULES:
 - Begin with a Fountain title page: lines "Title:", "Author:", "Draft date:", then a line containing only "====".
@@ -55,7 +55,7 @@ export async function generateFromPrompt(req: PromptGenerationRequest): Promise<
   const approxWords = unit === "words" ? amount : Math.round(amount * WORDS_PER_PAGE);
   const maxTokens = tokenBudgetForPages(pages);
 
-  const sections = [SYSTEM];
+  const sections = [SCREENPLAY_SYSTEM];
   if (req.styleProfile) {
     sections.push("\n" + StyleProfileService.serializeForPrompt(req.styleProfile, req.knowledgeBase?.toneStyle?.targetStyle));
   }

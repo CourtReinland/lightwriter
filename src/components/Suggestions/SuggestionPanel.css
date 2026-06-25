@@ -385,6 +385,19 @@
   cursor: default;
 }
 
+.story-gen-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #c4b5fd;
+  cursor: pointer;
+}
+
+.story-gen-toggle input {
+  cursor: pointer;
+}
+
 .story-gen-status {
   font-size: 10px;
   color: #9ad0b0;

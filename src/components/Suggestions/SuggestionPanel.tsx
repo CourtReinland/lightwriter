@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import { generateFromPrompt, type GenerationUnit } from "../../services/promptGenerationService";
+import { generateLongScreenplay } from "../../services/planThenWriteService";
 import { fillSceneDescriptions } from "../../services/expandDescriptionsService";
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
@@ -130,6 +131,7 @@ export default function SuggestionPanel({
   const [genLoading, setGenLoading] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [genStatus, setGenStatus] = useState<string | null>(null);
+  const [genPlan, setGenPlan] = useState(true);
 
   const handleGenerateFromPrompt = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -144,18 +146,34 @@ export default function SuggestionPanel({
     }
     setGenLoading(true);
     setGenError(null);
-    setGenStatus(`Generating ~${genAmount} ${genUnit} with ${textAiProviderLabel(currentSettings.provider)}...`);
     try {
-      const text = await generateFromPrompt({
-        prompt: genPrompt.trim(),
-        amount: genAmount,
-        unit: genUnit,
-        knowledgeBase,
-        styleProfile,
-        // Existing script (empty on a blank test doc → fresh generation;
-        // otherwise the writer continues from where it leaves off).
-        precedingContext: fullScript,
-      });
+      let text: string;
+      let failedBeats: number[] = [];
+      if (genPlan) {
+        // Plan-then-write: analyst plans a beat outline, writer drafts each beat
+        // in its own call with KB/style/outline/synopsis/tail carried forward.
+        const pages = genUnit === "pages" ? genAmount : Math.max(1, Math.round(genAmount / 190));
+        setGenStatus("Planning the story (analyst)...");
+        const result = await generateLongScreenplay(
+          { prompt: genPrompt.trim(), pages, knowledgeBase, styleProfile },
+          new Date().toISOString().slice(0, 10),
+          (p) => setGenStatus(p.label + (p.total > 1 ? ` (${p.completed}/${p.total})` : "")),
+        );
+        text = result.script;
+        failedBeats = result.failedBeats;
+      } else {
+        setGenStatus(`Generating ~${genAmount} ${genUnit} with ${textAiProviderLabel(currentSettings.provider)}...`);
+        text = await generateFromPrompt({
+          prompt: genPrompt.trim(),
+          amount: genAmount,
+          unit: genUnit,
+          knowledgeBase,
+          styleProfile,
+          // Existing script (empty on a blank test doc → fresh generation;
+          // otherwise the writer continues from where it leaves off).
+          precedingContext: fullScript,
+        });
+      }
       if (!text.trim()) {
         setGenError("The writer returned nothing. Try again or shorten the target length.");
         return;
@@ -163,14 +181,17 @@ export default function SuggestionPanel({
       if (onInsertGenerated) onInsertGenerated(text);
       else onReplaceScript(text);
       const wordCount = text.trim().split(/\s+/).length;
-      setGenStatus(`Inserted ~${wordCount} words at the cursor.`);
+      setGenStatus(
+        `Done — inserted ~${wordCount} words at the cursor.` +
+          (failedBeats.length ? ` ${failedBeats.length} beat(s) failed (network) — re-run to fill the gaps.` : ""),
+      );
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "Generation failed");
       setGenStatus(null);
     } finally {
       setGenLoading(false);
     }
-  }, [genPrompt, genAmount, genUnit, knowledgeBase, styleProfile, fullScript, onInsertGenerated, onReplaceScript]);
+  }, [genPrompt, genAmount, genUnit, genPlan, knowledgeBase, styleProfile, fullScript, onInsertGenerated, onReplaceScript]);
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();
@@ -724,8 +745,19 @@ export default function SuggestionPanel({
               {genLoading ? "Writing..." : "Generate"}
             </button>
           </div>
+          <label className="story-gen-toggle">
+            <input
+              type="checkbox"
+              checked={genPlan}
+              onChange={(e) => setGenPlan(e.target.checked)}
+              disabled={genLoading}
+            />
+            Plan &amp; write (long-form: outline first, then write each beat)
+          </label>
           <div className="full-shot-pass-hint">
-            One direct call to the writer ({textAiProviderLabel(textAiSettings.provider)}) — no rewrite/analysis pass. Inserts the result at the cursor. Use a blank document to see the writer's raw output.
+            {genPlan
+              ? `Analyst outlines the beats, then the writer (${textAiProviderLabel(textAiSettings.provider)}) drafts each beat in its own call — carrying your KB, style, the outline, and the story-so-far forward. Built for length without repetition.`
+              : `One direct call to the writer (${textAiProviderLabel(textAiSettings.provider)}) — no plan. Best for a single scene or short passage. Use a blank document to see the writer's raw output.`}
           </div>
           {genStatus && <div className="story-gen-status">{genStatus}</div>}
           {genError && <div className="story-gen-error">{genError}</div>}
