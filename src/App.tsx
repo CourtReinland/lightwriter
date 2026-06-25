@@ -385,6 +385,18 @@ export default function App() {
     handleReplaceScript(snap.content);
   }, [handleReplaceScript, project.content]);
 
+  // Whole-script replaces coming from the AI panel are either AI applies
+  // (already sealed via handleAiCommit) or a revert of an applied rewrite —
+  // neither is a typing edit, so suppress the resulting autosave and let the
+  // next real edit start its own entry. Mirrors handleRestoreVersion.
+  const handleSuggestionReplaceScript = useCallback((text: string) => {
+    if (text !== project.content) {
+      suppressNextEditRef.current = true;
+      forceNewEditRef.current = true;
+    }
+    handleReplaceScript(text);
+  }, [handleReplaceScript, project.content]);
+
   const handleDiscardToolReview = useCallback(() => {
     setToolReview(null);
     setToolReviewEdit("");
@@ -593,7 +605,7 @@ export default function App() {
               onGenerationComplete={handleAssetGenerationComplete}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
-              onReplaceScript={handleReplaceScript}
+              onReplaceScript={handleSuggestionReplaceScript}
               onAiCommit={handleAiCommit}
               onOpenToolReview={handleOpenToolReview}
             />
