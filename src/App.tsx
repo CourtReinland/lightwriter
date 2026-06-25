@@ -524,6 +524,10 @@ export default function App() {
               styleProfile={styleProfile}
               targetPages={project.targetPages}
               activeFrameworks={project.activeFrameworks}
+              project={project}
+              assets={assets}
+              onAssetsChange={setAssets}
+              onGenerationComplete={handleAssetGenerationComplete}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleReplaceScript}

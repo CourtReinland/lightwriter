@@ -9,6 +9,18 @@
   overflow-y: auto;
 }
 
+/* The image-generation AssetPanel is normally 360px wide; shrink it to fit
+   inside the AI panel when embedded here. */
+.image-gen-embed {
+  margin-top: 8px;
+}
+.image-gen-embed .asset-panel {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-left: none;
+}
+
 .suggestion-header {
   display: flex;
   align-items: center;

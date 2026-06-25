@@ -14,7 +14,6 @@ import { importFile } from "../../services/fileImporter";
 import { getSelectedTextAiProviderSettings } from "../../services/textAiSettingsService";
 import type { AssetProvider, AssetKind, GeneratedAsset } from "../../types/assets";
 import type { Project } from "../../services/storageService";
-import AssetPanel from "../Assets/AssetPanel";
 import { buildAssetKnowledgeItems } from "../../services/assetKnowledgeViewService";
 import {
   buildGeneratedAssetFromResult,
@@ -533,22 +532,9 @@ export default function KBPanel({
         )}
       </div>
 
-      {/* Generate Images — character portraits + scene backgrounds */}
+      {/* Image generation moved to the AI tab — KB now just tracks the results. */}
       <div className="kb-section">
-        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("generate")} onKeyDown={(e) => handleSectionKeyDown(e, "generate")}>
-          <span>{expandedSections.generate ? "v" : ">"} Generate Images</span>
-        </div>
-        {expandedSections.generate && (
-          <div className="kb-generate-embed">
-            <AssetPanel
-              mode="generation"
-              project={project}
-              assets={assets}
-              onAssetsChange={onAssetsChange}
-              onGenerationComplete={onGenerationComplete}
-            />
-          </div>
-        )}
+        <div className="kb-empty">Generate scene &amp; character images in the <strong>AI</strong> tab → “Image Generation”. They show up in the lists above.</div>
       </div>
 
       {/* World Rules */}

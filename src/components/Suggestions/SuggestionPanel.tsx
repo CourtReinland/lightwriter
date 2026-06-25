@@ -21,6 +21,9 @@ import SuggestionCard from "./SuggestionCard";
 import AnalysisCard from "./AnalysisCard";
 import ReportCard from "./ReportCard";
 import RewriteReviewCard from "./RewriteReviewCard";
+import AssetPanel from "../Assets/AssetPanel";
+import type { Project } from "../../services/storageService";
+import type { GeneratedAsset, AssetKind } from "../../types/assets";
 import "./SuggestionPanel.css";
 
 interface SuggestionPanelProps {
@@ -33,6 +36,10 @@ interface SuggestionPanelProps {
   styleProfile: StyleProfile | null;
   targetPages: number;
   activeFrameworks?: string[];
+  project: Project;
+  assets: GeneratedAsset[];
+  onAssetsChange: (assets: GeneratedAsset[]) => void;
+  onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
@@ -85,12 +92,17 @@ export default function SuggestionPanel({
   styleProfile,
   targetPages,
   activeFrameworks,
+  project,
+  assets,
+  onAssetsChange,
+  onGenerationComplete,
   onApply,
   onInsertBelow,
   onReplaceScript,
   onOpenToolReview,
 }: SuggestionPanelProps) {
   const [textAiSettings, setTextAiSettings] = useState(() => getSelectedTextAiProviderSettings());
+  const [showImageGen, setShowImageGen] = useState(false);
   const [showKeyDialog, setShowKeyDialog] = useState(false);
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -700,6 +712,29 @@ export default function SuggestionPanel({
           <div className="full-shot-pass-hint">
             Instant, no AI: a full pass that guesses each line's type from context (INT./EXT. → scene, WS/CU… → shot, a known name → character + the lines under it → dialogue, the rest → action) and rewrites the formatting so the writer can write loosely. Preview before applying.
           </div>
+        </div>
+        <div className="full-shot-pass image-gen-section">
+          <button
+            className="full-shot-pass-btn"
+            onClick={() => setShowImageGen((v) => !v)}
+            title="Generate scene backgrounds and character portraits from the script"
+          >
+            {showImageGen ? "▾ Image Generation" : "▸ Image Generation"}
+          </button>
+          <div className="full-shot-pass-hint">
+            Generate scene backgrounds and character portraits from the script (pulls each scene's description). Results show up in the KB lists and feed Export.
+          </div>
+          {showImageGen && (
+            <div className="image-gen-embed">
+              <AssetPanel
+                mode="generation"
+                project={project}
+                assets={assets}
+                onAssetsChange={onAssetsChange}
+                onGenerationComplete={onGenerationComplete}
+              />
+            </div>
+          )}
         </div>
       </div>
 
