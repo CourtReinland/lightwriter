@@ -23,6 +23,8 @@ export interface WorldLocation {
   description: string;
   referenceImageDataUrl?: string;
   referenceMimeType?: string;
+  /** Durable on-disk path of the reference image (Electron), for ScriptToScreen handoff. */
+  referenceFilePath?: string;
   /** Stable key carried into the ScriptToScreen manifest's locations{}. */
   stsLocationKey: string;
   createdAt: number;
@@ -132,6 +134,19 @@ export function findSceneAtLine(content: string, cursorLine1Based: number): Scen
   return current;
 }
 
+/** Every scene heading in the script, with its 0-based index and location token. */
+export function listSceneHeadings(content: string): { index: number; heading: string; token: string }[] {
+  const out: { index: number; heading: string; token: string }[] = [];
+  let index = -1;
+  for (const line of content.split("\n")) {
+    if (isSceneHeading(line)) {
+      index += 1;
+      out.push({ index, heading: line.trim(), token: extractLocationToken(line) });
+    }
+  }
+  return out;
+}
+
 /** Split a comma/semicolon/newline list of aliases into normalized uppercase tokens. */
 export function parseAliases(input: string): string[] {
   return Array.from(
@@ -224,6 +239,7 @@ export const WorldStateService = {
       description: input.description || "",
       referenceImageDataUrl: input.referenceImageDataUrl,
       referenceMimeType: input.referenceMimeType,
+      referenceFilePath: input.referenceFilePath,
       stsLocationKey: input.stsLocationKey || uid("stsloc"),
       createdAt: now,
       updatedAt: now,
@@ -287,5 +303,15 @@ export const WorldStateService = {
 
   boundLocationId(projectId: string, sceneIndex: number): string | undefined {
     return this.getBindings(projectId)[String(sceneIndex)];
+  },
+
+  /** Resolve a scene to its world location: explicit binding first, else best alias match. */
+  resolveLocationForScene(projectId: string, seriesId: string, sceneIndex: number, heading: string): WorldLocation | null {
+    const boundId = this.boundLocationId(projectId, sceneIndex);
+    if (boundId) {
+      const bound = this.getLocation(boundId);
+      if (bound) return bound;
+    }
+    return this.matchForHeading(seriesId, heading)[0] || null;
   },
 };

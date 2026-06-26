@@ -85,16 +85,16 @@ export default function ExportPanel({
   };
 
   const handleExportManifest = () => {
-    const manifest = buildScript2ScreenManifest({ resolveProjectName: project.name, assets });
+    const manifest = buildScript2ScreenManifest({ project, assets });
     exportJsonDownload(manifest, `${safeName(project.name)}.script2screen-manifest.json`);
     const sceneCount = Object.keys(manifest.locations).length;
     const charCount = Object.keys(manifest.characters).length;
     const shotCount = Object.keys(manifest.generated_media).length;
+    const worldCount = manifest.world_locations ? Object.keys(manifest.world_locations).length : 0;
     const skipped = manifest._lightwriter_warnings?.length ?? 0;
-    let msg = `Exported ScriptToScreen manifest: ${sceneCount} location${sceneCount === 1 ? "" : "s"}, ${charCount} character${charCount === 1 ? "" : "s"}, ${shotCount} shot${shotCount === 1 ? "" : "s"}.`;
-    if (skipped > 0) {
-      msg += ` Skipped ${skipped} asset${skipped === 1 ? "" : "s"} with no saved image file.`;
-    }
+    let msg = `Exported ScriptToScreen manifest: ${sceneCount} scene location${sceneCount === 1 ? "" : "s"}, ${charCount} character${charCount === 1 ? "" : "s"}, ${shotCount} shot${shotCount === 1 ? "" : "s"}.`;
+    if (worldCount > 0) msg += ` ${worldCount} world location${worldCount === 1 ? "" : "s"} from the series.`;
+    if (skipped > 0) msg += ` ${skipped} note${skipped === 1 ? "" : "s"} (see manifest warnings).`;
     setStatus(msg);
   };
 

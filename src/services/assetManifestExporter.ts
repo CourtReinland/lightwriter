@@ -1,6 +1,7 @@
 import type { Project } from "./storageService";
 import type { GeneratedAsset } from "../types/assets";
 import { simpleScriptHash } from "./scriptStructure";
+import { WorldStateService, listSceneHeadings, type WorldLocation } from "./worldStateService";
 
 export interface LightWriterPackageShot {
   shot_key: string;
@@ -34,8 +35,12 @@ export interface LightWriterPackage {
 export interface Script2ScreenManifest {
   version: 1;
   resolve_project_name: string;
+  /** Series this script belongs to (portable World State). */
+  series_name?: string;
   characters: Record<string, { reference_image_path?: string; visual_prompt?: string; voice_id?: string; voice_provider?: string; voice_samples: string[] }>;
   locations: Record<string, Record<string, unknown>>;
+  /** Shared location library keyed by stable stsLocationKey, so the same location resolves identically across scripts in a series. */
+  world_locations?: Record<string, Record<string, unknown>>;
   generated_media: Record<string, Record<string, unknown>>;
   /** Non-canonical: assets that could not be exported (e.g. browser-mode with no durable file path). ScriptToScreen ignores unknown keys. */
   _lightwriter_warnings?: string[];
@@ -119,17 +124,22 @@ export function buildLightWriterPackage(args: {
 }
 
 export function buildScript2ScreenManifest(args: {
-  resolveProjectName: string;
+  project: Project;
   assets: GeneratedAsset[];
 }): Script2ScreenManifest {
   const manifest: Script2ScreenManifest = {
     version: 1,
-    resolve_project_name: args.resolveProjectName,
+    resolve_project_name: args.project.name,
     characters: {},
     locations: {},
     generated_media: {},
   };
   const warnings: string[] = [];
+
+  const seriesId = args.project.seriesId;
+  if (seriesId) {
+    manifest.series_name = WorldStateService.getSeries(seriesId)?.name;
+  }
 
   for (const asset of args.assets) {
     if (asset.kind === "character" && asset.scriptRef.characterName) {
@@ -196,6 +206,53 @@ export function buildScript2ScreenManifest(args: {
       generated_at: new Date(asset.createdAt).toISOString(),
       lightwriter_script_ref: asset.scriptRef,
     };
+  }
+
+  // World State: resolve each scene to its portable series location (binding
+  // first, else alias match), build a shared world_locations{} library keyed by
+  // the stable stsLocationKey, and tag each scene's locations{} entry with it —
+  // so the same location resolves identically across every script in the series.
+  if (seriesId) {
+    for (const scene of listSceneHeadings(args.project.content)) {
+      const loc: WorldLocation | null = WorldStateService.resolveLocationForScene(
+        args.project.id,
+        seriesId,
+        scene.index,
+        scene.heading,
+      );
+      if (!loc) continue;
+
+      manifest.world_locations ??= {};
+      if (!manifest.world_locations[loc.stsLocationKey]) {
+        const entry: Record<string, unknown> = {
+          name: loc.name,
+          category: loc.category,
+          aliases: loc.aliases,
+          description: loc.description,
+          reference_image_path: loc.referenceFilePath || "",
+        };
+        if (!loc.referenceFilePath && loc.referenceImageDataUrl) {
+          entry.reference_image_data_url = loc.referenceImageDataUrl;
+          warnings.push(`World location "${loc.name}" reference image has no saved file path yet (re-save it in the desktop app to persist).`);
+        } else if (!loc.referenceFilePath && !loc.referenceImageDataUrl) {
+          warnings.push(`World location "${loc.name}" has no reference image yet.`);
+        }
+        manifest.world_locations[loc.stsLocationKey] = entry;
+      }
+
+      const sceneKey = String(scene.index);
+      const existing = manifest.locations[sceneKey] || {};
+      manifest.locations[sceneKey] = {
+        ...existing,
+        world_location_key: loc.stsLocationKey,
+        world_location_name: loc.name,
+        lightwriter_world_location_id: loc.id,
+        description: (existing.description as string) || loc.description || scene.heading,
+        reference_image_paths:
+          (existing.reference_image_paths as string[]) || (loc.referenceFilePath ? [loc.referenceFilePath] : []),
+        file_path: (existing.file_path as string) || loc.referenceFilePath || "",
+      };
+    }
   }
 
   if (warnings.length > 0) {

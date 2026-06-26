@@ -5,6 +5,7 @@ import {
   type WorldLocation,
   type WorldLocationCategory,
 } from "../../services/worldStateService";
+import { persistGeneratedImageFile } from "../../services/imageAssetStorageService";
 import type { Project } from "../../services/storageService";
 
 interface WorldSectionProps {
@@ -20,6 +21,8 @@ interface LocationDraft {
   description: string;
   referenceImageDataUrl?: string;
   referenceMimeType?: string;
+  referenceFilePath?: string;
+  imageChanged?: boolean;
 }
 
 const EMPTY_DRAFT: LocationDraft = { name: "", aliases: "", category: "interior", description: "" };
@@ -67,11 +70,13 @@ export default function WorldSection({ project, onAssignSeries }: WorldSectionPr
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () =>
-      setDraft((prev) => (prev ? { ...prev, referenceImageDataUrl: String(reader.result), referenceMimeType: file.type } : prev));
+      setDraft((prev) =>
+        prev ? { ...prev, referenceImageDataUrl: String(reader.result), referenceMimeType: file.type, imageChanged: true } : prev,
+      );
     reader.readAsDataURL(file);
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     if (!draft || !activeSeriesId || !draft.name.trim()) return;
     const fields = {
       name: draft.name.trim(),
@@ -81,8 +86,27 @@ export default function WorldSection({ project, onAssignSeries }: WorldSectionPr
       referenceImageDataUrl: draft.referenceImageDataUrl,
       referenceMimeType: draft.referenceMimeType,
     };
-    if (draft.id) WorldStateService.updateLocation(draft.id, fields);
-    else WorldStateService.addLocation(activeSeriesId, fields);
+    const loc = draft.id
+      ? WorldStateService.updateLocation(draft.id, fields)
+      : WorldStateService.addLocation(activeSeriesId, fields);
+
+    // Persist the reference image to disk (Electron) so the ScriptToScreen
+    // manifest can hand off a durable file path. Best-effort; no-op in browser.
+    if (loc && fields.referenceImageDataUrl && (draft.imageChanged || !draft.referenceFilePath)) {
+      try {
+        const filePath = await persistGeneratedImageFile({
+          projectId: activeSeriesId,
+          assetId: loc.id,
+          name: loc.name,
+          mimeType: fields.referenceMimeType || "image/png",
+          dataUrl: fields.referenceImageDataUrl,
+        });
+        if (filePath) WorldStateService.updateLocation(loc.id, { referenceFilePath: filePath });
+      } catch {
+        /* keep the dataUrl-only fallback */
+      }
+    }
+
     setDraft(null);
     refresh();
   };
@@ -96,6 +120,7 @@ export default function WorldSection({ project, onAssignSeries }: WorldSectionPr
       description: loc.description,
       referenceImageDataUrl: loc.referenceImageDataUrl,
       referenceMimeType: loc.referenceMimeType,
+      referenceFilePath: loc.referenceFilePath,
     });
 
   const handleDelete = (loc: WorldLocation) => {

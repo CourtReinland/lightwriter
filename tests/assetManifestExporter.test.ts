@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import { buildScript2ScreenManifest, buildLightWriterPackage } from "../src/services/assetManifestExporter";
+import { WorldStateService } from "../src/services/worldStateService";
 import type { GeneratedAsset } from "../src/types/assets";
+
+// Minimal in-memory localStorage so WorldStateService works in the node test env.
+function installLocalStorage() {
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+}
 
 const assets: GeneratedAsset[] = [
   {
@@ -87,7 +99,7 @@ describe("asset manifest export", () => {
 
   it("routes scene backgrounds into locations and real shots into generated_media", () => {
     const manifest = buildScript2ScreenManifest({
-      resolveProjectName: "Pilot Resolve",
+      project: { id: "project-1", name: "Pilot Resolve", content: "INT. COFFEE SHOP - DAY", targetPages: 30, activeFrameworks: [], createdAt: 1, updatedAt: 2 },
       assets,
     });
 
@@ -122,7 +134,7 @@ describe("asset manifest export", () => {
 
   it("surfaces a warning instead of silently dropping browser-mode assets with no file path", () => {
     const manifest = buildScript2ScreenManifest({
-      resolveProjectName: "Pilot Resolve",
+      project: { id: "project-1", name: "Pilot Resolve", content: "EXT. CLIFF - DUSK", targetPages: 30, activeFrameworks: [], createdAt: 1, updatedAt: 2 },
       assets: [
         {
           id: "browser-scene",
@@ -146,5 +158,68 @@ describe("asset manifest export", () => {
     expect(manifest._lightwriter_warnings?.length).toBe(1);
     expect(manifest._lightwriter_warnings?.[0]).toContain("skipped");
     expect(manifest._lightwriter_warnings?.[0]).toContain("EXT. CLIFF - DUSK");
+  });
+});
+
+describe("script2screen manifest — world locations", () => {
+  beforeEach(() => installLocalStorage());
+
+  it("resolves scene headings to shared series locations and emits a stable world_locations library", () => {
+    const series = WorldStateService.createSeries("The Maddox Chronicles");
+    const kitchen = WorldStateService.addLocation(series.id, {
+      name: "Maddox Family Kitchen",
+      aliases: ["KITCHEN"],
+      description: "Warm sunlit kitchen.",
+      referenceFilePath: "/tmp/lw/series/kitchen.png",
+    });
+
+    const project = {
+      id: "proj-9",
+      name: "Episode 1",
+      content: "INT. KITCHEN - DAY\n\nFinn cooks.\n\nEXT. PARK - DAY\n\nThey walk.",
+      targetPages: 23,
+      activeFrameworks: [],
+      seriesId: series.id,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    const manifest = buildScript2ScreenManifest({ project, assets: [] });
+
+    expect(manifest.series_name).toBe("The Maddox Chronicles");
+    // KITCHEN scene (index 0) resolved to the series location via its alias.
+    expect(manifest.world_locations?.[kitchen.stsLocationKey]).toMatchObject({
+      name: "Maddox Family Kitchen",
+      reference_image_path: "/tmp/lw/series/kitchen.png",
+    });
+    expect(manifest.locations["0"]).toMatchObject({
+      world_location_key: kitchen.stsLocationKey,
+      world_location_name: "Maddox Family Kitchen",
+      file_path: "/tmp/lw/series/kitchen.png",
+    });
+    // PARK (index 1) has no matching world location, so it isn't tagged.
+    expect(manifest.locations["1"]).toBeUndefined();
+  });
+
+  it("an explicit per-scene binding overrides alias matching", () => {
+    const series = WorldStateService.createSeries("Series B");
+    const kitchenA = WorldStateService.addLocation(series.id, { name: "Diner Kitchen", aliases: ["KITCHEN"] });
+    const kitchenB = WorldStateService.addLocation(series.id, { name: "Home Kitchen", aliases: ["KITCHEN"] });
+    const project = {
+      id: "proj-b",
+      name: "Ep",
+      content: "INT. KITCHEN - DAY\n\nAction.",
+      targetPages: 10,
+      activeFrameworks: [],
+      seriesId: series.id,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    // Bind scene 0 to the second kitchen explicitly.
+    WorldStateService.bindScene(project.id, 0, kitchenB.id);
+
+    const manifest = buildScript2ScreenManifest({ project, assets: [] });
+    expect(manifest.locations["0"].world_location_key).toBe(kitchenB.stsLocationKey);
+    expect(manifest.world_locations?.[kitchenA.stsLocationKey]).toBeUndefined();
   });
 });
