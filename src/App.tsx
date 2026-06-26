@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { type EditorView } from "@codemirror/view";
 import ArtisticBorder from "./components/Layout/ArtisticBorder";
 import EditorToolbar from "./components/Editor/EditorToolbar";
@@ -18,6 +18,8 @@ import ElementBar, {
 import KBPanel from "./components/KnowledgeBase/KBPanel";
 import AssetPanel from "./components/Assets/AssetPanel";
 import ExportPanel from "./components/Export/ExportPanel";
+import LocationBar from "./components/Editor/LocationBar";
+import { WorldStateService, findSceneAtLine } from "./services/worldStateService";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import ToolReviewPane, { type ToolReviewData } from "./components/Suggestions/ToolReviewPane";
 import { useFountainParser } from "./hooks/useFountainParser";
@@ -494,6 +496,48 @@ export default function App() {
     }
   }, [knowledgeBase, project.id]);
 
+  // ── World State: link the scene at the cursor to a portable series location ──
+  const [worldVersion, setWorldVersion] = useState(0);
+  const currentScene = useMemo(
+    () => (activeView === "editor" && project.seriesId ? findSceneAtLine(project.content, cursorLine) : null),
+    [activeView, project.seriesId, project.content, cursorLine],
+  );
+  const seriesName = useMemo(
+    () => (project.seriesId ? WorldStateService.getSeries(project.seriesId)?.name ?? "this series" : ""),
+    [project.seriesId, worldVersion],
+  );
+  const sceneMatches = useMemo(
+    () => (project.seriesId && currentScene ? WorldStateService.matchForHeading(project.seriesId, currentScene.heading) : []),
+    [project.seriesId, currentScene, worldVersion],
+  );
+  const boundLocation = useMemo(() => {
+    if (!project.seriesId || !currentScene) return null;
+    const id = WorldStateService.boundLocationId(project.id, currentScene.index);
+    return id ? WorldStateService.getLocation(id) : null;
+  }, [project.seriesId, project.id, currentScene, worldVersion]);
+
+  const handleBindScene = useCallback((locationId: string) => {
+    if (!currentScene) return;
+    WorldStateService.bindScene(project.id, currentScene.index, locationId);
+    setWorldVersion((v) => v + 1);
+  }, [currentScene, project.id]);
+
+  const handleUnbindScene = useCallback(() => {
+    if (!currentScene) return;
+    WorldStateService.unbindScene(project.id, currentScene.index);
+    setWorldVersion((v) => v + 1);
+  }, [currentScene, project.id]);
+
+  const handleQuickAddLocation = useCallback((token: string) => {
+    if (!currentScene || !project.seriesId) return;
+    const name = token
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    const loc = WorldStateService.addLocation(project.seriesId, { name, aliases: [token.toUpperCase()] });
+    WorldStateService.bindScene(project.id, currentScene.index, loc.id);
+    setWorldVersion((v) => v + 1);
+  }, [currentScene, project.seriesId, project.id]);
+
   return (
     <ArtisticBorder>
       <div className="app">
@@ -560,6 +604,17 @@ export default function App() {
               <ElementBar
                 currentElement={currentElement}
                 onInsertElement={handleInsertElement}
+              />
+            )}
+            {activeView === "editor" && currentScene && currentScene.token && (
+              <LocationBar
+                scene={currentScene}
+                seriesName={seriesName}
+                boundLocation={boundLocation}
+                matches={sceneMatches}
+                onBind={handleBindScene}
+                onUnbind={handleUnbindScene}
+                onQuickAdd={handleQuickAddLocation}
               />
             )}
             {activeView === "editor" && (

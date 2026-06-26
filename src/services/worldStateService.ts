@@ -31,6 +31,10 @@ export interface WorldLocation {
 
 const SERIES_KEY = "lw-series";
 const LOCATIONS_KEY = "lw-world-locations";
+const BINDINGS_PREFIX = "lw-scene-locations-";
+
+/** Per-script map: scene index (as string) -> world location id. */
+export type SceneLocationBindings = Record<string, string>;
 
 function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -87,6 +91,45 @@ export function matchLocations(locations: WorldLocation[], token: string): World
     .filter((x) => x.s < 99)
     .sort((a, b) => a.s - b.s)
     .map((x) => x.loc);
+}
+
+const HEADING_RE = /^(INT\.|EXT\.|EST\.|INT\.?\/EXT\.?|I\/E\.?)/i;
+
+export function isSceneHeading(line: string): boolean {
+  const t = line.trim();
+  return HEADING_RE.test(t) || /^\.[A-Z]/.test(t);
+}
+
+export interface SceneAtCursor {
+  /** 0-based index of this scene among all scene headings (aligns with export). */
+  index: number;
+  heading: string;
+  token: string;
+  /** 1-based line number of the scene heading. */
+  headingLine: number;
+}
+
+/** Find the scene that contains a 1-based cursor line, or null if before the first heading. */
+export function findSceneAtLine(content: string, cursorLine1Based: number): SceneAtCursor | null {
+  const lines = content.split("\n");
+  let sceneIndex = -1;
+  let current: SceneAtCursor | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    if (isSceneHeading(lines[i])) {
+      sceneIndex += 1;
+      if (i + 1 <= cursorLine1Based) {
+        current = {
+          index: sceneIndex,
+          heading: lines[i].trim(),
+          token: extractLocationToken(lines[i]),
+          headingLine: i + 1,
+        };
+      } else {
+        break; // headings past the cursor can't contain it
+      }
+    }
+  }
+  return current;
 }
 
 /** Split a comma/semicolon/newline list of aliases into normalized uppercase tokens. */
@@ -207,5 +250,42 @@ export const WorldStateService = {
   /** Locations in a series that match a scene heading, best first. */
   matchForHeading(seriesId: string, heading: string): WorldLocation[] {
     return matchLocations(this.listLocations(seriesId), extractLocationToken(heading));
+  },
+
+  // Per-script scene -> location bindings (override on top of alias auto-match)
+  getBindings(projectId: string): SceneLocationBindings {
+    if (typeof localStorage === "undefined") return {};
+    try {
+      const raw = localStorage.getItem(BINDINGS_PREFIX + projectId);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? (parsed as SceneLocationBindings) : {};
+    } catch {
+      return {};
+    }
+  },
+
+  setBindings(projectId: string, bindings: SceneLocationBindings): void {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(BINDINGS_PREFIX + projectId, JSON.stringify(bindings));
+    } catch {
+      /* quota — best effort */
+    }
+  },
+
+  bindScene(projectId: string, sceneIndex: number, locationId: string): void {
+    const b = this.getBindings(projectId);
+    b[String(sceneIndex)] = locationId;
+    this.setBindings(projectId, b);
+  },
+
+  unbindScene(projectId: string, sceneIndex: number): void {
+    const b = this.getBindings(projectId);
+    delete b[String(sceneIndex)];
+    this.setBindings(projectId, b);
+  },
+
+  boundLocationId(projectId: string, sceneIndex: number): string | undefined {
+    return this.getBindings(projectId)[String(sceneIndex)];
   },
 };
