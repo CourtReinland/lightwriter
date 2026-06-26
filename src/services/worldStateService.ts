@@ -134,14 +134,15 @@ export function findSceneAtLine(content: string, cursorLine1Based: number): Scen
   return current;
 }
 
-/** Every scene heading in the script, with its 0-based index and location token. */
-export function listSceneHeadings(content: string): { index: number; heading: string; token: string }[] {
-  const out: { index: number; heading: string; token: string }[] = [];
+/** Every scene heading in the script, with its 0-based index, 1-based line, and location token. */
+export function listSceneHeadings(content: string): { index: number; heading: string; token: string; line: number }[] {
+  const out: { index: number; heading: string; token: string; line: number }[] = [];
   let index = -1;
-  for (const line of content.split("\n")) {
-    if (isSceneHeading(line)) {
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (isSceneHeading(lines[i])) {
       index += 1;
-      out.push({ index, heading: line.trim(), token: extractLocationToken(line) });
+      out.push({ index, heading: lines[i].trim(), token: extractLocationToken(lines[i]), line: i + 1 });
     }
   }
   return out;

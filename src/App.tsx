@@ -19,7 +19,7 @@ import KBPanel from "./components/KnowledgeBase/KBPanel";
 import AssetPanel from "./components/Assets/AssetPanel";
 import ExportPanel from "./components/Export/ExportPanel";
 import LocationBar from "./components/Editor/LocationBar";
-import { WorldStateService, findSceneAtLine } from "./services/worldStateService";
+import { WorldStateService, findSceneAtLine, listSceneHeadings } from "./services/worldStateService";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import ToolReviewPane, { type ToolReviewData } from "./components/Suggestions/ToolReviewPane";
 import { useFountainParser } from "./hooks/useFountainParser";
@@ -528,6 +528,17 @@ export default function App() {
     setWorldVersion((v) => v + 1);
   }, [currentScene, project.id]);
 
+  // 1-based scene-heading line -> resolved world location name, for the editor gutter.
+  const locationGutterLines = useMemo(() => {
+    const map = new Map<number, string>();
+    if (!project.seriesId) return map;
+    for (const s of listSceneHeadings(project.content)) {
+      const loc = WorldStateService.resolveLocationForScene(project.id, project.seriesId, s.index, s.heading);
+      if (loc) map.set(s.line, loc.name);
+    }
+    return map;
+  }, [project.seriesId, project.id, project.content, worldVersion]);
+
   const handleQuickAddLocation = useCallback((token: string) => {
     if (!currentScene || !project.seriesId) return;
     const name = token
@@ -627,6 +638,7 @@ export default function App() {
                 onSelectionChange={handleSelectionChange}
                 onElementChange={setCurrentElement}
                 onCursorBeatChange={setCursorBeats}
+                locationLines={locationGutterLines}
                 viewRef={editorViewRef}
               />
             )}

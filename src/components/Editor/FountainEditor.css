@@ -11,3 +11,16 @@
 .fountain-editor .cm-scroller {
   overflow: auto;
 }
+
+/* World-State location gutter marker */
+.fountain-editor .cm-location-gutter {
+  min-width: 14px;
+  padding: 0 2px;
+}
+
+.fountain-editor .cm-loc-marker {
+  color: #2f9e6e;
+  font-size: 9px;
+  line-height: inherit;
+  cursor: default;
+}

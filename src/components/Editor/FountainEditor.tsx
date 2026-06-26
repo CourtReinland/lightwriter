@@ -6,6 +6,7 @@ import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { fountainLanguage } from "../../codemirror/fountain-language";
 import { fountainEditorTheme, fountainHighlightStyle } from "../../codemirror/fountain-theme";
 import { overlayExtension, setOverlayBeats } from "../../codemirror/overlay-decorations";
+import { locationGutter, setLocationGutter } from "../../codemirror/location-gutter";
 import { screenplayFormatting } from "../../codemirror/screenplay-formatting";
 import { ALL_FRAMEWORKS, computeBeatRanges } from "../../frameworks";
 import type { ComputedBeat } from "../../frameworks";
@@ -122,6 +123,8 @@ interface FountainEditorProps {
   onSelectionChange?: (selectedText: string, contextText: string) => void;
   onElementChange?: (element: ElementType) => void;
   onCursorBeatChange?: (beats: ComputedBeat[]) => void;
+  /** 1-based scene-heading line -> world location name, for the location gutter. */
+  locationLines?: Map<number, string>;
   viewRef?: React.MutableRefObject<EditorView | undefined>;
 }
 
@@ -133,6 +136,7 @@ export default function FountainEditor({
   onSelectionChange,
   onElementChange,
   onCursorBeatChange,
+  locationLines,
   viewRef: externalViewRef,
 }: FountainEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -163,6 +167,7 @@ export default function FountainEditor({
         fountainHighlightStyle,
         screenplayFormatting,
         overlayExtension,
+        locationGutter,
         keymap.of([
           {
             key: "Enter",
@@ -325,6 +330,13 @@ export default function FountainEditor({
       effects: setOverlayBeats.of(beats),
     });
   }, [activeFrameworks, targetPages, content]);
+
+  // Update the World-State location gutter when bindings/content change.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ effects: setLocationGutter.of(locationLines ?? new Map()) });
+  }, [locationLines]);
 
   return <div ref={containerRef} className="fountain-editor" />;
 }
