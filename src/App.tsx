@@ -18,6 +18,7 @@ import ElementBar, {
 import KBPanel from "./components/KnowledgeBase/KBPanel";
 import AssetPanel from "./components/Assets/AssetPanel";
 import ExportPanel from "./components/Export/ExportPanel";
+import SeriesView from "./components/Series/SeriesView";
 import LocationBar from "./components/Editor/LocationBar";
 import { WorldStateService, findSceneAtLine, listSceneHeadings } from "./services/worldStateService";
 import { serializeEpisodeContext } from "./services/seriesContextService";
@@ -109,7 +110,7 @@ function loadOrCreateInitialProject(): Project {
 
 export default function App() {
   const [project, setProject] = useState<Project>(loadOrCreateInitialProject);
-  const [activeView, setActiveView] = useState<"editor" | "preview" | "cards" | "analysis">("editor");
+  const [activeView, setActiveView] = useState<"editor" | "preview" | "cards" | "analysis" | "series">("editor");
   const [selectedText, setSelectedText] = useState("");
   const [contextText, setContextText] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -699,6 +700,13 @@ export default function App() {
                 styleProfile={styleProfile}
                 activeFrameworks={project.activeFrameworks}
                 targetPages={project.targetPages}
+              />
+            )}
+            {activeView === "series" && (
+              <SeriesView
+                project={project}
+                onAssignSeries={handleAssignSeries}
+                onChange={() => setWorldVersion((v) => v + 1)}
               />
             )}
           </div>
