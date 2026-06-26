@@ -26,6 +26,7 @@ import {
 import { downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageFile } from "../../services/imageAssetStorageService";
 import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
+import WorldSection from "./WorldSection";
 import "./KBPanel.css";
 
 const COMMON_GENRES = [
@@ -66,6 +67,7 @@ interface KBPanelProps {
   onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
   history?: VersionSnapshot[];
   onRestoreVersion?: (snap: VersionSnapshot) => void;
+  onAssignSeries?: (seriesId: string | undefined) => void;
   focusSection?: "characters" | "scenes" | null;
   notice?: string;
   onClearNotice?: () => void;
@@ -89,6 +91,7 @@ export default function KBPanel({
   onGenerationComplete,
   history = [],
   onRestoreVersion,
+  onAssignSeries,
   focusSection,
   notice,
   onClearNotice,
@@ -99,6 +102,7 @@ export default function KBPanel({
   const [scanError, setScanError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     history: true,
+    series: false,
     characters: true,
     scenes: false,
     generate: false,
@@ -521,6 +525,16 @@ export default function KBPanel({
             ))}
             <div className="kb-history-hint">Click an earlier version to restore it. Each AI tool run is saved as a checkpoint.</div>
           </div>
+        )}
+      </div>
+
+      {/* World / Series — portable locations shared across scripts in a series */}
+      <div className="kb-section">
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("series")} onKeyDown={(e) => handleSectionKeyDown(e, "series")}>
+          <span>{expandedSections.series ? "v" : ">"} World / Series</span>
+        </div>
+        {expandedSections.series && (
+          <WorldSection project={project} onAssignSeries={onAssignSeries || (() => {})} />
         )}
       </div>
 

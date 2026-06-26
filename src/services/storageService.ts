@@ -9,6 +9,8 @@ export interface Project {
   content: string;
   targetPages: number;
   activeFrameworks: string[];
+  /** Optional series this script belongs to, for the portable World State (shared locations across scripts). */
+  seriesId?: string;
   createdAt: number;
   updatedAt: number;
 }

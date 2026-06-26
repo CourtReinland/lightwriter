@@ -647,6 +647,7 @@ export default function App() {
               onGenerationComplete={handleAssetGenerationComplete}
               history={history}
               onRestoreVersion={handleRestoreVersion}
+              onAssignSeries={(seriesId) => updateProject({ seriesId })}
               focusSection={kbFocus}
               notice={kbNotice}
               onClearNotice={() => setKbNotice("")}
