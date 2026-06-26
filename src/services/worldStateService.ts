@@ -6,6 +6,35 @@
 export interface Series {
   id: string;
   name: string;
+  /** Project IDs in episode order (index 0 = episode 1). */
+  episodeOrder: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A plot or character through-line spanning a range of episodes (0-based, inclusive). */
+export interface SeriesArc {
+  id: string;
+  seriesId: string;
+  kind: "plot" | "character";
+  name: string;
+  description: string;
+  /** Character this arc tracks (for kind="character"). */
+  characterName?: string;
+  startEpisode: number;
+  endEpisode: number;
+  color?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A cliffhanger link: episode `fromEpisode` must END on a hook that OPENS `toEpisode` (= fromEpisode + 1). */
+export interface SeriesCliffhanger {
+  id: string;
+  seriesId: string;
+  fromEpisode: number;
+  toEpisode: number;
+  description: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -34,6 +63,8 @@ export interface WorldLocation {
 const SERIES_KEY = "lw-series";
 const LOCATIONS_KEY = "lw-world-locations";
 const BINDINGS_PREFIX = "lw-scene-locations-";
+const ARCS_KEY = "lw-series-arcs";
+const CLIFFHANGERS_KEY = "lw-series-cliffhangers";
 
 /** Per-script map: scene index (as string) -> world location id. */
 export type SceneLocationBindings = Record<string, string>;
@@ -161,6 +192,27 @@ export function parseAliases(input: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Series arc / cliffhanger query helpers (pure — unit-tested)
+// ---------------------------------------------------------------------------
+
+/** Arcs live in a given episode (0-based), sorted plot-first then by name. */
+export function activeArcsForEpisode(arcs: SeriesArc[], episodeIndex: number): SeriesArc[] {
+  return arcs
+    .filter((a) => episodeIndex >= a.startEpisode && episodeIndex <= a.endEpisode)
+    .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "plot" ? -1 : 1));
+}
+
+/** The cliffhanger this episode must END on (feeding the next episode), if any. */
+export function cliffhangerEndingEpisode(cliffs: SeriesCliffhanger[], episodeIndex: number): SeriesCliffhanger | null {
+  return cliffs.find((c) => c.fromEpisode === episodeIndex) || null;
+}
+
+/** The prior cliffhanger this episode must OPEN by resolving/continuing, if any. */
+export function cliffhangerOpeningEpisode(cliffs: SeriesCliffhanger[], episodeIndex: number): SeriesCliffhanger | null {
+  return cliffs.find((c) => c.toEpisode === episodeIndex) || null;
+}
+
+// ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
 
@@ -196,7 +248,7 @@ export const WorldStateService = {
 
   createSeries(name: string): Series {
     const now = Date.now();
-    const series: Series = { id: uid("series"), name: name.trim() || "Untitled Series", createdAt: now, updatedAt: now };
+    const series: Series = { id: uid("series"), name: name.trim() || "Untitled Series", episodeOrder: [], createdAt: now, updatedAt: now };
     const all = read<Series>(SERIES_KEY);
     all.push(series);
     write(SERIES_KEY, all);
@@ -314,5 +366,128 @@ export const WorldStateService = {
       if (bound) return bound;
     }
     return this.matchForHeading(seriesId, heading)[0] || null;
+  },
+
+  // Episode order ----------------------------------------------------------
+  getEpisodeOrder(seriesId: string): string[] {
+    return this.getSeries(seriesId)?.episodeOrder ?? [];
+  },
+
+  setEpisodeOrder(seriesId: string, projectIds: string[]): void {
+    const all = read<Series>(SERIES_KEY);
+    const s = all.find((x) => x.id === seriesId);
+    if (s) {
+      s.episodeOrder = projectIds;
+      s.updatedAt = Date.now();
+      write(SERIES_KEY, all);
+    }
+  },
+
+  /** Add a project as the next episode (no-op if already present). Returns its 0-based index. */
+  addEpisode(seriesId: string, projectId: string): number {
+    const order = this.getEpisodeOrder(seriesId);
+    const existing = order.indexOf(projectId);
+    if (existing >= 0) return existing;
+    const next = [...order, projectId];
+    this.setEpisodeOrder(seriesId, next);
+    return next.length - 1;
+  },
+
+  removeEpisode(seriesId: string, projectId: string): void {
+    this.setEpisodeOrder(seriesId, this.getEpisodeOrder(seriesId).filter((id) => id !== projectId));
+  },
+
+  /** 0-based episode index of a project in its series, or -1. */
+  episodeIndexOf(seriesId: string, projectId: string): number {
+    return this.getEpisodeOrder(seriesId).indexOf(projectId);
+  },
+
+  episodeCount(seriesId: string): number {
+    return this.getEpisodeOrder(seriesId).length;
+  },
+
+  // Arcs -------------------------------------------------------------------
+  listArcs(seriesId: string): SeriesArc[] {
+    return read<SeriesArc>(ARCS_KEY)
+      .filter((a) => a.seriesId === seriesId)
+      .sort((a, b) => a.startEpisode - b.startEpisode || a.name.localeCompare(b.name));
+  },
+
+  getArc(id: string): SeriesArc | null {
+    return read<SeriesArc>(ARCS_KEY).find((a) => a.id === id) || null;
+  },
+
+  addArc(seriesId: string, input: Partial<SeriesArc> & { name: string }): SeriesArc {
+    const now = Date.now();
+    const arc: SeriesArc = {
+      id: uid("arc"),
+      seriesId,
+      kind: input.kind || "plot",
+      name: input.name.trim(),
+      description: input.description || "",
+      characterName: input.characterName,
+      startEpisode: input.startEpisode ?? 0,
+      endEpisode: input.endEpisode ?? input.startEpisode ?? 0,
+      color: input.color,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const all = read<SeriesArc>(ARCS_KEY);
+    all.push(arc);
+    write(ARCS_KEY, all);
+    return arc;
+  },
+
+  updateArc(id: string, updates: Partial<SeriesArc>): SeriesArc | null {
+    const all = read<SeriesArc>(ARCS_KEY);
+    const i = all.findIndex((a) => a.id === id);
+    if (i < 0) return null;
+    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: Date.now() };
+    write(ARCS_KEY, all);
+    return all[i];
+  },
+
+  deleteArc(id: string): void {
+    write(ARCS_KEY, read<SeriesArc>(ARCS_KEY).filter((a) => a.id !== id));
+  },
+
+  // Cliffhangers (one per consecutive episode pair, keyed by fromEpisode) ---
+  listCliffhangers(seriesId: string): SeriesCliffhanger[] {
+    return read<SeriesCliffhanger>(CLIFFHANGERS_KEY)
+      .filter((c) => c.seriesId === seriesId)
+      .sort((a, b) => a.fromEpisode - b.fromEpisode);
+  },
+
+  /** Create or replace the cliffhanger from `fromEpisode` to the next episode. */
+  upsertCliffhanger(seriesId: string, fromEpisode: number, description: string): SeriesCliffhanger {
+    const all = read<SeriesCliffhanger>(CLIFFHANGERS_KEY);
+    const now = Date.now();
+    const existing = all.find((c) => c.seriesId === seriesId && c.fromEpisode === fromEpisode);
+    if (existing) {
+      existing.description = description;
+      existing.toEpisode = fromEpisode + 1;
+      existing.updatedAt = now;
+      write(CLIFFHANGERS_KEY, all);
+      return existing;
+    }
+    const cliff: SeriesCliffhanger = {
+      id: uid("cliff"),
+      seriesId,
+      fromEpisode,
+      toEpisode: fromEpisode + 1,
+      description,
+      createdAt: now,
+      updatedAt: now,
+    };
+    all.push(cliff);
+    write(CLIFFHANGERS_KEY, all);
+    return cliff;
+  },
+
+  removeCliffhanger(seriesId: string, fromEpisode: number): void {
+    write(
+      CLIFFHANGERS_KEY,
+      read<SeriesCliffhanger>(CLIFFHANGERS_KEY).filter((c) => !(c.seriesId === seriesId && c.fromEpisode === fromEpisode)),
+    );
   },
 };
