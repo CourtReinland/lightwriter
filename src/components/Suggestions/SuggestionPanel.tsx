@@ -49,6 +49,8 @@ interface SuggestionPanelProps {
   onInsertGenerated?: (text: string) => void;
   /** Seal a version-history snapshot for a direct AI apply (not a revert). */
   onAiCommit?: (label: string, text: string) => void;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
   onOpenToolReview: (review: { label: string; beforeScript: string; afterScript: string }) => void;
 }
 
@@ -107,6 +109,7 @@ export default function SuggestionPanel({
   onReplaceScript,
   onInsertGenerated,
   onAiCommit,
+  seriesContext,
   onOpenToolReview,
 }: SuggestionPanelProps) {
   const [textAiSettings, setTextAiSettings] = useState(() => getSelectedTextAiProviderSettings());
@@ -155,7 +158,7 @@ export default function SuggestionPanel({
         const pages = genUnit === "pages" ? genAmount : Math.max(1, Math.round(genAmount / 190));
         setGenStatus("Planning the story (analyst)...");
         const result = await generateLongScreenplay(
-          { prompt: genPrompt.trim(), pages, knowledgeBase, styleProfile },
+          { prompt: genPrompt.trim(), pages, knowledgeBase, styleProfile, seriesContext },
           new Date().toISOString().slice(0, 10),
           (p) => setGenStatus(p.label + (p.total > 1 ? ` (${p.completed}/${p.total})` : "")),
         );
@@ -169,6 +172,7 @@ export default function SuggestionPanel({
           unit: genUnit,
           knowledgeBase,
           styleProfile,
+          seriesContext,
           // Existing script (empty on a blank test doc → fresh generation;
           // otherwise the writer continues from where it leaves off).
           precedingContext: fullScript,
@@ -191,7 +195,7 @@ export default function SuggestionPanel({
     } finally {
       setGenLoading(false);
     }
-  }, [genPrompt, genAmount, genUnit, genPlan, knowledgeBase, styleProfile, fullScript, onInsertGenerated, onReplaceScript]);
+  }, [genPrompt, genAmount, genUnit, genPlan, knowledgeBase, styleProfile, fullScript, seriesContext, onInsertGenerated, onReplaceScript]);
 
   const handleFullShotPass = useCallback(async () => {
     const currentSettings = getSelectedTextAiProviderSettings();

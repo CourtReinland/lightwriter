@@ -13,6 +13,8 @@ export interface PromptGenerationRequest {
   unit: GenerationUnit;
   knowledgeBase?: KnowledgeBase | null;
   styleProfile?: StyleProfile | null;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
   /** Existing text immediately before the cursor, so generation continues it. */
   precedingContext?: string;
 }
@@ -63,6 +65,9 @@ export async function generateFromPrompt(req: PromptGenerationRequest): Promise<
   if (req.knowledgeBase) {
     const kb = KnowledgeBaseService.serializeForPrompt(req.knowledgeBase, 6000, []);
     if (kb) sections.push("\n" + kb);
+  }
+  if (req.seriesContext && req.seriesContext.trim()) {
+    sections.push("\n" + req.seriesContext.trim());
   }
   const system = sections.join("\n");
 

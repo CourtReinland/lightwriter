@@ -20,6 +20,7 @@ import AssetPanel from "./components/Assets/AssetPanel";
 import ExportPanel from "./components/Export/ExportPanel";
 import LocationBar from "./components/Editor/LocationBar";
 import { WorldStateService, findSceneAtLine, listSceneHeadings } from "./services/worldStateService";
+import { serializeEpisodeContext } from "./services/seriesContextService";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import ToolReviewPane, { type ToolReviewData } from "./components/Suggestions/ToolReviewPane";
 import { useFountainParser } from "./hooks/useFountainParser";
@@ -528,6 +529,30 @@ export default function App() {
     setWorldVersion((v) => v + 1);
   }, [currentScene, project.id]);
 
+  // Assigning a script to a series also slots it as the next episode (if new),
+  // so the AI weaving has an episode position to work from.
+  const handleAssignSeries = useCallback((seriesId: string | undefined) => {
+    updateProject({ seriesId });
+    if (seriesId) WorldStateService.addEpisode(seriesId, project.id);
+    setWorldVersion((v) => v + 1);
+  }, [updateProject, project.id]);
+
+  // Pre-serialized series/arc/cliffhanger context for THIS episode, fed to the
+  // AI writing tools so the writer knows where it sits and which arcs are live.
+  const seriesContextString = useMemo(() => {
+    const sid = project.seriesId;
+    if (!sid) return "";
+    const series = WorldStateService.getSeries(sid);
+    if (!series) return "";
+    return serializeEpisodeContext({
+      seriesName: series.name,
+      episodeIndex: WorldStateService.episodeIndexOf(sid, project.id),
+      totalEpisodes: WorldStateService.episodeCount(sid),
+      arcs: WorldStateService.listArcs(sid),
+      cliffhangers: WorldStateService.listCliffhangers(sid),
+    });
+  }, [project.seriesId, project.id, worldVersion]);
+
   // 1-based scene-heading line -> resolved world location name, for the editor gutter.
   const locationGutterLines = useMemo(() => {
     const map = new Map<number, string>();
@@ -697,6 +722,7 @@ export default function App() {
               onReplaceScript={handleSuggestionReplaceScript}
               onInsertGenerated={handleInsertGenerated}
               onAiCommit={handleAiCommit}
+              seriesContext={seriesContextString}
               onOpenToolReview={handleOpenToolReview}
             />
           )}
@@ -714,7 +740,7 @@ export default function App() {
               onGenerationComplete={handleAssetGenerationComplete}
               history={history}
               onRestoreVersion={handleRestoreVersion}
-              onAssignSeries={(seriesId) => updateProject({ seriesId })}
+              onAssignSeries={handleAssignSeries}
               focusSection={kbFocus}
               notice={kbNotice}
               onClearNotice={() => setKbNotice("")}

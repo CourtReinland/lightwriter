@@ -42,6 +42,8 @@ export interface LongGenRequest {
   pages: number;
   knowledgeBase?: KnowledgeBase | null;
   styleProfile?: StyleProfile | null;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
 }
 
 const MAX_BEATS = 30;
@@ -124,6 +126,9 @@ Return STRICT JSON ONLY — no markdown, no code fences, no commentary — match
 - No two beats may cover the same events, location-as-first-seen, or relationship milestone. Each "synopsis" must state the NEW event/revelation and how it changes the situation — never restate the premise or a prior beat.
 - Each beat's "characters" array lists only the characters PRESENT in that beat.`,
     ctx ? `Use this existing project canon (characters, world, tone, style) — stay consistent with it:\n${ctx}` : "",
+    req.seriesContext && req.seriesContext.trim()
+      ? `${req.seriesContext.trim()}\n\nThe outline MUST honor this SERIES CONTEXT: distribute the active arcs across the beats, open on the prior cliffhanger if given, and make the final beat deliver this episode's cliffhanger if given.`
+      : "",
     `Return the JSON plan now.`,
   ]
     .filter(Boolean)
@@ -205,6 +210,7 @@ You are writing a LATER scene of a screenplay that is ALREADY IN PROGRESS. This 
           ? `ESTABLISHED CAST — already introduced and acquainted earlier in THIS screenplay; refer to them by name only, never re-introduce, re-describe, or re-stage a meeting between them: ${mainCast.join(", ")}.`
           : "",
       ctx ? `PROJECT CANON (stay consistent):\n${ctx}` : "",
+      req.seriesContext && req.seriesContext.trim() ? req.seriesContext.trim() : "",
       `FULL OUTLINE (context only — write just the current beat):\n${outline}`,
       `>>> CURRENT BEAT ${beat.id}/${total}: [${beat.stage}] ${beat.heading}\n${beat.synopsis}\nTarget length for THIS beat: ~${beat.pages || 2} page(s).${isFinal ? " This is the FINAL beat — bring the story to its resolution and end with FADE OUT." : ""}`,
       synopsisSoFar.length ? `STORY SO FAR (already happened — continue AFTER this; do NOT repeat any of it):\n${synopsisSoFar.map((s, n) => `${n + 1}. ${s}`).join("\n")}` : "This is the opening — there is no prior text.",
