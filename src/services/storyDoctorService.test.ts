@@ -117,11 +117,17 @@ describe("runStoryDoctor", () => {
   it("expands the rewritten draft toward the page target with new scenes", async () => {
     const metricId = "dan-harmon-story-circle";
     const bigScene = "INT. NEW BEAT SCENE - DAY\n" + Array.from({ length: 300 }, (_, i) => `Action line ${i}.`).join("\n");
-    // The same model handles both jobs; discriminate by the engine's system prompt.
-    const mockComplete = async (system: string) =>
-      /expansion engine/i.test(system)
-        ? JSON.stringify({ scenes: [{ insert_after: "START", beat: "Take", fountain: bigScene }] })
-        : JSON.stringify({ rewrittenScript: "INT. OPENING - DAY\n\nAliyah enters.", changeSummary: ["restructured"], warnings: [] });
+    // Expansion is now plan-then-write: the planner returns {newScenes}, then
+    // each scene is written as plain Fountain. Discriminate by system prompt.
+    const mockComplete = async (system: string) => {
+      if (/expansion planner/i.test(system)) {
+        return JSON.stringify({ newScenes: [{ insert_after: "START", beat: "Take", synopsis: "A dramatic new beat unfolds.", pages: 5 }] });
+      }
+      if (/new scene to insert/i.test(system)) {
+        return bigScene;
+      }
+      return JSON.stringify({ rewrittenScript: "INT. OPENING - DAY\n\nAliyah enters.", changeSummary: ["restructured"], warnings: [] });
+    };
     const mockScore = async () => reportWithScore(metricId, 70); // beats the start, so a real rewrite is kept
 
     const res = await runStoryDoctor(

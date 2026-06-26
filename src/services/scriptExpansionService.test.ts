@@ -28,13 +28,16 @@ describe("parseInsertions", () => {
   });
 });
 
-describe("expandScriptToTargetPages", () => {
-  it("inserts new scenes after the named slugline and grows toward the target", async () => {
-    let n = 0;
-    const mockComplete = async () => {
-      n++;
-      const body = Array.from({ length: 60 }, (_, i) => `new line ${n}.${i}`).join("\\n");
-      return `{"scenes":[{"insert_after":"INT. ROOM - DAY","beat":"Need","fountain":"INT. NEW${n} - DAY\\n\\n${body}"}]}`;
+describe("expandScriptToTargetPages (plan-then-write)", () => {
+  it("plans new scenes, writes each, and inserts after the named slugline", async () => {
+    // One mock for both phases: the PLAN prompt asks for {"newScenes":...}; any
+    // other call is a per-scene write that returns Fountain.
+    const mockComplete = async (_system: string, user: string) => {
+      if (user.includes('"newScenes"')) {
+        return '{"newScenes":[{"insert_after":"INT. ROOM - DAY","beat":"Need","synopsis":"Jess discovers a clue.","pages":2}]}';
+      }
+      const body = Array.from({ length: 60 }, (_, i) => `Jess searches the room. Beat ${i}.`).join("\n");
+      return `INT. NEWSCENE - DAY\n\n${body}`;
     };
 
     const res = await expandScriptToTargetPages(
@@ -46,16 +49,16 @@ describe("expandScriptToTargetPages", () => {
 
     expect(res.endPages).toBeGreaterThan(res.startPages);
     expect(res.passes).toBeGreaterThanOrEqual(1);
-    // First new scene was inserted AFTER INT. ROOM and BEFORE EXT. STREET.
+    // The new scene was inserted AFTER INT. ROOM and BEFORE EXT. STREET.
     const idxRoom = res.script.indexOf("INT. ROOM - DAY");
-    const idxNew = res.script.indexOf("INT. NEW1 - DAY");
+    const idxNew = res.script.indexOf("INT. NEWSCENE - DAY");
     const idxStreet = res.script.indexOf("EXT. STREET - DAY");
     expect(idxRoom).toBeGreaterThanOrEqual(0);
     expect(idxRoom).toBeLessThan(idxNew);
     expect(idxNew).toBeLessThan(idxStreet);
   });
 
-  it("stops cleanly when the model returns no scenes", async () => {
+  it("returns the original and warns when planning yields no scenes", async () => {
     const res = await expandScriptToTargetPages(
       SCRIPT,
       { targetPages: 20, knowledgeBase: null, styleProfile: null },
@@ -64,5 +67,20 @@ describe("expandScriptToTargetPages", () => {
     );
     expect(res.script).toBe(SCRIPT);
     expect(res.warnings.some((w) => /target/i.test(w))).toBe(true);
+  });
+
+  it("no-ops when already at the target length", async () => {
+    let called = false;
+    const res = await expandScriptToTargetPages(
+      SCRIPT,
+      { targetPages: 1, knowledgeBase: null, styleProfile: null },
+      undefined,
+      async () => {
+        called = true;
+        return "{}";
+      },
+    );
+    expect(called).toBe(false);
+    expect(res.script).toBe(SCRIPT);
   });
 });

@@ -1,20 +1,30 @@
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { estimatePages } from "../frameworks/utils";
 import { extractShotScenes } from "./shotDirectionService";
-import { normalizeShotLines } from "./fountainShotNormalizer";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
+import { SCREENPLAY_SYSTEM } from "./promptGenerationService";
+import { cleanupGeneratedScreenplay } from "./generatedScriptCleanup";
 
-// Reliable page-count expansion. A single LLM call asked to "rewrite this script
-// 10 pages longer" almost always under-delivers, because the model rewrites and
-// compresses existing content. Instead we keep the draft intact and accumulate
-// NEW scenes (small, reliable outputs) until the line count reaches the target.
+// Plan-then-write page expansion.
+//
+// The old approach made up to 8 blind passes, each re-prompting "write N more
+// pages" with only a truncated (head+tail) view of the draft and the same beat
+// guidance — so it regenerated near-duplicate scenes ("the same scene with small
+// iterations"). Instead we now: (1) PLAN the new scenes once with the analyst,
+// which sees the FULL list of existing scenes and places distinct, causally
+// connected new beats with anchors; then (2) WRITE each planned scene with the
+// writer, carrying continuity (established cast — never re-introduce — and the
+// neighbouring scene) so length comes from NEW material, not repetition.
 
 const LINES_PER_PAGE = 56;
 const EXPAND_TIMEOUT_MS = 240_000;
-const MAX_PASSES = 8;
+const MAX_NEW_SCENES = 18;
 
 type Completion = (system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export interface ExpandProgress {
   completed: number;
@@ -46,6 +56,13 @@ interface SceneInsertion {
   fountain: string;
 }
 
+interface PlannedScene {
+  insert_after: string;
+  beat: string;
+  synopsis: string;
+  pages: number;
+}
+
 function lineCount(text: string): number {
   return text.split("\n").length;
 }
@@ -59,6 +76,7 @@ function stripToJson(text: string): string {
   return t.trim();
 }
 
+/** Legacy insertion parser (kept for any caller that returns {scenes:[...]}). */
 export function parseInsertions(text: string): SceneInsertion[] {
   try {
     const obj = JSON.parse(stripToJson(text));
@@ -75,47 +93,140 @@ export function parseInsertions(text: string): SceneInsertion[] {
   }
 }
 
-function buildInsertionPrompt(script: string, ctx: ExpandContext): { system: string; user: string } {
-  const curPages = estimatePages(lineCount(script));
-  const deficitPages = Math.max(1, ctx.targetPages - curPages);
-  const deficitLines = deficitPages * LINES_PER_PAGE;
-  const styleText = ctx.styleProfile ? StyleProfileService.serializeForPrompt(ctx.styleProfile) : "";
-  const kbText = ctx.knowledgeBase ? KnowledgeBaseService.serializeForPrompt(ctx.knowledgeBase, 4000) : "";
+function parseExpansionPlan(text: string): PlannedScene[] {
+  try {
+    const obj = JSON.parse(stripToJson(text));
+    const arr = Array.isArray(obj)
+      ? obj
+      : Array.isArray(obj.newScenes)
+        ? obj.newScenes
+        : Array.isArray(obj.scenes)
+          ? obj.scenes
+          : [];
+    return arr
+      .map((s: Record<string, unknown>) => ({
+        insert_after: String(s.insert_after ?? s.after ?? "END"),
+        beat: String(s.beat ?? s.stage ?? "New scene"),
+        synopsis: String(s.synopsis ?? s.description ?? "").trim(),
+        pages: Number(s.pages) > 0 ? Number(s.pages) : 2,
+      }))
+      .filter((s: PlannedScene) => s.synopsis.length > 0)
+      .slice(0, MAX_NEW_SCENES);
+  } catch {
+    return [];
+  }
+}
+
+async function completeWithRetry(
+  complete: Completion,
+  system: string,
+  user: string,
+  opts: TextCompleteOptions,
+  attempts = 3,
+): Promise<string> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await complete(system, user, opts);
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await delay(1200 * (i + 1));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Expansion request failed");
+}
+
+interface ExistingScene {
+  heading: string;
+  brief: string;
+}
+
+function existingSceneList(script: string): ExistingScene[] {
+  const { scenes } = extractShotScenes(script);
+  const lines = script.split("\n");
+  return scenes.map((s) => {
+    const body = lines
+      .slice(s.startLine + 1, s.endLine + 1)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    // first line that isn't an all-caps cue/shot -> a readable one-line gist
+    const brief = body.find((l) => !/^[A-Z][A-Z0-9 .'\-]+$/.test(l) && !l.startsWith("!!")) || body[0] || "";
+    return { heading: s.heading.trim(), brief: brief.slice(0, 100) };
+  });
+}
+
+function sceneTextAt(script: string, heading: string): string {
+  const { scenes } = extractShotScenes(script);
+  const lines = script.split("\n");
+  const a = heading.trim().toUpperCase();
+  const match =
+    scenes.find((s) => s.heading.trim().toUpperCase() === a) ||
+    scenes.find((s) => s.heading.trim().toUpperCase().includes(a) || a.includes(s.heading.trim().toUpperCase()));
+  if (!match) return "";
+  return lines.slice(match.startLine, match.endLine + 1).join("\n").trim();
+}
+
+function buildExpansionPlanPrompt(script: string, ctx: ExpandContext): { system: string; user: string } {
+  const cur = estimatePages(lineCount(script));
+  const deficit = Math.max(1, ctx.targetPages - cur);
+  const approxScenes = Math.min(MAX_NEW_SCENES, Math.max(1, Math.round(deficit / 2)));
+  const sceneList = existingSceneList(script)
+    .map((s, i) => `${i + 1}. ${s.heading}${s.brief ? ` — ${s.brief}` : ""}`)
+    .join("\n");
+  const kbText = ctx.knowledgeBase ? KnowledgeBaseService.serializeForPrompt(ctx.knowledgeBase, 3000) : "";
+  const beatGuidance =
+    ctx.beatGuidance && ctx.beatGuidance.trim()
+      ? ctx.beatGuidance
+      : "Deepen thin sequences and bridge gaps between existing scenes with new dramatized beats.";
   const fwLine = ctx.frameworkName ? `Target structure: ${ctx.frameworkName}.` : "";
-  const beatGuidance = ctx.beatGuidance && ctx.beatGuidance.trim()
-    ? ctx.beatGuidance
-    : "Deepen thin sequences and bridge gaps between existing scenes with new dramatized beats.";
 
-  // Keep the prompt bounded but give head + tail of the draft for continuity.
-  const draftContext = script.length > 12000 ? `${script.slice(0, 6000)}\n...\n${script.slice(-6000)}` : script;
+  const system = `You are LightWriter's screenplay expansion planner. The draft is too short. Plan the NEW scenes to ADD (you never rewrite or shorten existing scenes) so the script reaches the target length and improves structure. Return ONLY valid JSON, no markdown.`;
 
-  const system = `You are LightWriter's screenplay expansion engine. You GROW a screenplay toward a target page count by writing NEW scenes that get inserted into the existing draft. You never rewrite, summarize, or shorten existing scenes. Return ONLY valid JSON, no markdown.`;
+  const user = `The draft is about ${cur} page(s); the target is ${ctx.targetPages} page(s). Plan about ${deficit} page(s) of NEW material as roughly ${approxScenes} new scene(s). ${fwLine}
 
-  const user = `The current screenplay is about ${curPages} page(s); the writer needs it at ${ctx.targetPages} page(s). Write NEW scenes that add roughly ${deficitPages} page(s) (~${deficitLines} lines). ${fwLine}
+EXISTING SCENES (in order — do NOT recreate, rewrite, or duplicate any of these; place new scenes between or after them):
+${sceneList}
 
-DEVELOP THESE BEATS (write full dramatized scenes for the missing/weak ones, landing in their page ranges):
+DEVELOP THESE BEATS (prioritise the missing/weak ones):
 ${beatGuidance}
 
-FOUNTAIN FORMAT — match the existing draft EXACTLY. Each line type renders in a fixed screenplay position, so getting this wrong puts shots in the character slot and action in the dialogue slot:
-- SCENE HEADING: a line starting with INT. or EXT. — e.g. "INT. LIVING ROOM, HOME, DAY".
-- ACTION / description: plain sentence-case prose. NEVER write action in ALL CAPS (an ALL-CAPS line above a text line is read as a character name).
-- CHARACTER CUE: the speaking character's name in ALL CAPS, alone on its line, with a BLANK LINE before it; the spoken line(s) go on the very next line(s) with NO blank line between cue and dialogue.
-- CAMERA SHOT: MUST begin with "!!" then immediately one of WS, MS, CU, ECU, LS, OTS, POV, then an uppercase description — e.g. "!!WS LIVING ROOM", "!!MS ALIYAH OPENS THE TRUNK", "!!CU ALIYAH'S FACE". A camera line WITHOUT the leading "!!" is mis-parsed as a character name and the line under it becomes dialogue, so EVERY shot must start with "!!". Do not use bare "ANGLE ON…", "WIDE", "INSERT" — express those after the required token (e.g. "!!WS AERIAL OVER THE HOUSE").
-- Put a BLANK LINE between every element (between stacked shots and the action under them, between action and the next character cue, between a character's dialogue and the next element).
+RULES:
+- Every new scene is a DISTINCT event that does NOT repeat any existing scene above. Do not re-stage a meeting, arrival, or reveal that already happened.
+- New scenes connect causally to the scenes around them (this happened, therefore that).
+- Characters already in the draft are established — new scenes must NOT re-introduce or re-describe them.
+- "insert_after" MUST be the EXACT slugline of an existing scene above (copied verbatim), or "START" for the very beginning.
+${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}
+Return ONLY: {"newScenes":[{"insert_after":"<existing slugline verbatim or START>","beat":"<purpose/beat>","synopsis":"<the NEW thing that happens>","pages":<number>}]}`;
 
-CONTENT RULES:
-- Write COMPLETE dramatized scenes (real action and dialogue), not summaries or outlines. Mirror the existing draft's shot-heavy coverage style using the "!!" shot syntax above.
-- Match the existing draft's voice, characters, tone, and world. Never contradict established plot facts or introduce unrelated characters/events.
-- Do NOT repeat or restate existing scenes. Only ADD new material that advances the story causally (this happened, therefore that).
-- Add MULTIPLE scenes this pass, totaling close to ${deficitPages} pages. Write generously — real page growth is the goal.
-${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}
-CURRENT DRAFT (context only — do NOT return it):
----
-${draftContext}
----
+  return { system, user };
+}
 
-Return ONLY this JSON:
-{"scenes":[{"insert_after":"<EXACT existing slugline this new scene should follow, copied verbatim from the draft, or \\"START\\" for the very beginning>","beat":"<beat name>","fountain":"<the complete new scene in Fountain>"}]}`;
+function buildExpansionScenePrompt(
+  planned: PlannedScene,
+  ctx: ExpandContext,
+  neighborText: string,
+  castNames: string[],
+): { system: string; user: string } {
+  const styleText = ctx.styleProfile ? StyleProfileService.serializeForPrompt(ctx.styleProfile) : "";
+  const system = `${SCREENPLAY_SYSTEM}
+
+You are writing ONE NEW scene to insert into a screenplay that ALREADY EXISTS.
+- The characters are ALREADY introduced and acquainted. Refer to them by name. Do NOT re-introduce or re-describe them, and do NOT stage any first meeting between them. Introduce a brand-new character only if this beat genuinely brings one in.
+- Match the existing draft's voice, tense, and Fountain formatting.
+- Do NOT repeat, recap, or rewrite the neighbouring scene shown below or any other existing material — write NEW story that advances causally.
+- No title page. Return ONLY the new Fountain scene text.`;
+
+  const user = [
+    castNames.length ? `ESTABLISHED CAST (already introduced — never re-introduce): ${castNames.join(", ")}.` : "",
+    neighborText
+      ? `THIS NEW SCENE FOLLOWS THIS EXISTING SCENE (continue smoothly after it; do NOT repeat it):\n---\n${neighborText.slice(-1600)}\n---`
+      : "This new scene opens the screenplay.",
+    `NEW SCENE TO WRITE — ${planned.beat}; about ${planned.pages} page(s):\n${planned.synopsis}`,
+    styleText ? `STYLE CONTRACT:\n${styleText}` : "",
+    `Write the new scene now in Fountain format.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return { system, user };
 }
@@ -151,64 +262,70 @@ export async function expandScriptToTargetPages(
   onProgress?: (p: ExpandProgress) => void,
   completeOverride?: Completion,
 ): Promise<ExpandResult> {
-  const service = new TextAiService();
-  const complete: Completion = completeOverride ?? service.complete.bind(service);
   const startPages = estimatePages(lineCount(script));
-  const targetLines = ctx.targetPages * LINES_PER_PAGE;
+  if (!ctx.targetPages || startPages >= Math.floor(ctx.targetPages * 0.92)) {
+    return { script, changeSummary: [], warnings: [], passes: 0, startPages, endPages: startPages };
+  }
 
-  let working = script;
+  const writerSvc = new TextAiService();
+  const analystSvc = TextAiService.forAnalyst();
+  const writeComplete: Completion = completeOverride ?? writerSvc.complete.bind(writerSvc);
+  const planComplete: Completion = completeOverride ?? analystSvc.complete.bind(analystSvc);
+
   const changeSummary: string[] = [];
   const warnings: string[] = [];
-  let noGrowth = 0;
-  let passes = 0;
 
-  for (let pass = 0; pass < MAX_PASSES; pass++) {
-    const curLines = lineCount(working);
-    if (curLines >= Math.floor(targetLines * 0.92)) break;
-    passes = pass + 1;
-
-    onProgress?.({
-      completed: pass,
-      total: MAX_PASSES,
-      label: `Expanding: ~${estimatePages(curLines)} of ${ctx.targetPages} pages (pass ${pass + 1})`,
+  // PHASE 1 — plan the new scenes (analyst sees the full existing scene list).
+  onProgress?.({ completed: 0, total: 1, label: `Planning new scenes for ${ctx.targetPages} pages...` });
+  let planned: PlannedScene[] = [];
+  try {
+    const planPrompt = buildExpansionPlanPrompt(script, ctx);
+    const raw = await completeWithRetry(planComplete, planPrompt.system, planPrompt.user, {
+      temperature: 0.7,
+      maxTokens: 3000,
+      timeoutMs: EXPAND_TIMEOUT_MS,
     });
-
-    const { system, user } = buildInsertionPrompt(working, ctx);
-    let response: string;
-    try {
-      response = await complete(system, user, { temperature: 0.6, maxTokens: 8000, timeoutMs: EXPAND_TIMEOUT_MS });
-    } catch (e) {
-      warnings.push(`Expansion pass ${pass + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
-      break;
-    }
-
-    const insertions = parseInsertions(response);
-    if (!insertions.length) {
-      if (++noGrowth >= 2) break;
-      continue;
-    }
-
-    const before = lineCount(working);
-    const next = insertScenes(working, insertions);
-    if (lineCount(next) <= before + 3) {
-      if (++noGrowth >= 2) break;
-      continue;
-    }
-
-    noGrowth = 0;
-    working = next;
-    for (const ins of insertions) {
-      const firstLine = ins.fountain.split("\n").find((l) => l.trim()) || "new scene";
-      changeSummary.push(`Added scene${ins.beat ? ` (${ins.beat})` : ""}: ${firstLine.trim().slice(0, 80)}`);
-    }
+    planned = parseExpansionPlan(raw);
+  } catch (e) {
+    warnings.push(`Expansion planning failed: ${errMsg(e)}`);
+  }
+  if (!planned.length) {
+    warnings.push(`Could not plan new scenes to reach the ${ctx.targetPages}-page target. Run the rewrite again.`);
+    return { script, changeSummary, warnings, passes: 0, startPages, endPages: startPages };
   }
 
+  // PHASE 2 — write each planned scene with continuity, collect insertions.
+  const castNames = ctx.knowledgeBase?.characters.map((c) => c.name) ?? [];
+  const insertions: SceneInsertion[] = [];
+  for (let i = 0; i < planned.length; i++) {
+    const p = planned[i];
+    onProgress?.({ completed: i + 1, total: planned.length, label: `Writing new scene ${i + 1}/${planned.length}: ${p.beat}` });
+    const neighbor = p.insert_after.trim().toUpperCase() === "START" ? "" : sceneTextAt(script, p.insert_after);
+    const prompt = buildExpansionScenePrompt(p, ctx, neighbor, castNames);
+    const maxTokens = Math.min(4000, Math.max(1024, Math.round(p.pages * 600)));
+    try {
+      const chunk = (
+        await completeWithRetry(writeComplete, prompt.system, prompt.user, {
+          temperature: 0.85,
+          maxTokens,
+          timeoutMs: EXPAND_TIMEOUT_MS,
+        })
+      ).trim();
+      if (chunk) {
+        insertions.push({ insert_after: p.insert_after, beat: p.beat, fountain: cleanupGeneratedScreenplay(chunk, castNames).trim() });
+        const firstLine = chunk.split("\n").find((l) => l.trim()) || "new scene";
+        changeSummary.push(`Added scene (${p.beat}): ${firstLine.trim().slice(0, 80)}`);
+      }
+    } catch (e) {
+      warnings.push(`New scene "${p.beat}" failed: ${errMsg(e)}`);
+    }
+    if (i < planned.length - 1) await delay(400);
+  }
+
+  const working = insertScenes(script, insertions);
   const endPages = estimatePages(lineCount(working));
-  if (endPages < ctx.targetPages) {
+  if (endPages < Math.floor(ctx.targetPages * 0.9)) {
     warnings.push(`Expanded to ~${endPages} of ${ctx.targetPages} target pages. Run the rewrite again to add more.`);
   }
-
-  // Backstop: ensure any inserted camera lines use the "!!" shot prefix so they
-  // don't render in the character/dialogue slots even if the model forgot.
-  return { script: normalizeShotLines(working), changeSummary, warnings, passes, startPages, endPages };
+  return { script: working, changeSummary, warnings, passes: insertions.length, startPages, endPages };
 }

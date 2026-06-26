@@ -3,7 +3,7 @@ import { getSelectedTextAiProviderSettings } from "./textAiSettingsService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import { SCREENPLAY_SYSTEM } from "./promptGenerationService";
-import { normalizeShotLines } from "./fountainShotNormalizer";
+import { cleanupGeneratedScreenplay } from "./generatedScriptCleanup";
 
 // Plan-then-write long-form generation.
 //
@@ -232,7 +232,7 @@ You are writing a LATER scene of a screenplay that is ALREADY IN PROGRESS. This 
     if (i < plan.beats.length - 1) await delay(600);
   }
 
-  return { script: normalizeShotLines(script.trim() + "\n"), failedBeats };
+  return { script: cleanupGeneratedScreenplay(script.trim() + "\n", mainCast), failedBeats };
 }
 
 /** Orchestrate plan -> write. */

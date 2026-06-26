@@ -2,6 +2,7 @@ import { TextAiService } from "./textAiService";
 import { getSelectedTextAiProviderSettings } from "./textAiSettingsService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
+import { cleanupGeneratedScreenplay } from "./generatedScriptCleanup";
 
 export type GenerationUnit = "pages" | "words";
 
@@ -79,9 +80,11 @@ export async function generateFromPrompt(req: PromptGenerationRequest): Promise<
   userParts.push("Write the screenplay now in Fountain format.");
 
   const service = new TextAiService(getSelectedTextAiProviderSettings());
-  return service.complete(system, userParts.join("\n\n"), {
+  const raw = await service.complete(system, userParts.join("\n\n"), {
     temperature: 0.9,
     maxTokens,
     timeoutMs: 240_000,
   });
+  const names = req.knowledgeBase?.characters.map((c) => c.name) ?? [];
+  return cleanupGeneratedScreenplay(raw, names);
 }
