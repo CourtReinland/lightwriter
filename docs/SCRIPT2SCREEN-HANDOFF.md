@@ -44,13 +44,18 @@ LightWriter exports this top-level shape for ScriptToScreen:
 {
   "version": 1,
   "resolve_project_name": "Demo Project",
+  "series_name": "The Maddox Chronicles",   // only when the script is in a World-State Series
   "characters": {},
   "locations": {},
+  "world_locations": {},                     // only when the script is in a Series; see "World State" below
   "generated_media": {}
 }
 ```
 
-This matches ScriptToScreen's `script_to_screen/manifest.py` empty manifest structure.
+This matches ScriptToScreen's `script_to_screen/manifest.py` empty manifest
+structure, plus the optional `series_name` / `world_locations` keys added by the
+World State feature (STS ignores keys it doesn't recognize, so older importers
+are unaffected).
 
 ### Character entries
 
@@ -145,6 +150,85 @@ shot 0 of the scene.
 - The importer matches `0`, `s0`, and `scene_0` key variants, so the plain 0-based index is safest.
 - It reads `style_reference_path` first, then `file_path` — both are exported so either resolves.
 - Real per-shot images (kind `shot`) still flow into `generated_media` keyed by filename, unchanged.
+
+## World State: portable, series-scoped locations (NEW — 2026-06)
+
+The single most important addition for cross-script continuity. In LightWriter a
+script can opt into a named **Series**; the series owns a library of **World
+Locations** (the family kitchen, the rooftop, etc.), each with a human name,
+alias tokens (`KITCHEN`, `FAMILY KITCHEN`), description, a reference image, and a
+**stable `stsLocationKey` that never changes**. Scenes resolve to a location by
+an explicit per-scene binding, or by alias match on the heading token. The same
+physical place in episode 1 and episode 2 carries the **same `stsLocationKey`**.
+
+Source: `src/services/worldStateService.ts` (`resolveLocationForScene`,
+`listSceneHeadings`, `matchForHeading`); emitted by `buildScript2ScreenManifest`.
+
+### What the manifest carries
+
+1. **`series_name`** (top level) — the series this script belongs to.
+2. **`world_locations`** — the shared library, keyed by the stable
+   `stsLocationKey`. This is the canonical definition of each place:
+
+   ```json
+   {
+     "world_locations": {
+       "stsloc_mqupmxh7_18arq": {
+         "name": "Maddox Family Kitchen",
+         "category": "interior",
+         "aliases": ["KITCHEN", "FAMILY KITCHEN"],
+         "description": "Warm sunlit kitchen with wooden cabinets...",
+         "reference_image_path": "/abs/path/series/kitchen.png",
+         "reference_image_data_url": "data:image/png;base64,..."  // only if no file path
+       }
+     }
+   }
+   ```
+
+3. **`locations[sceneIndex]`** gains a foreign key into that library (merged with
+   any generated `scene_set` image for the same scene):
+
+   ```json
+   {
+     "locations": {
+       "1": {
+         "world_location_key": "stsloc_mqupmxh7_18arq",
+         "world_location_name": "Maddox Family Kitchen",
+         "lightwriter_world_location_id": "loc_...",
+         "description": "Warm sunlit kitchen...",
+         "reference_image_paths": ["/abs/path/series/kitchen.png"],
+         "file_path": "/abs/path/series/kitchen.png"
+       }
+     }
+   }
+   ```
+
+### How ScriptToScreen should consume it
+
+- Build a **Location library** from `world_locations`, keyed by
+  `world_location_key`. Import each location's reference image (prefer
+  `reference_image_path`; fall back to `reference_image_data_url`) + description.
+- For each scene, read `locations[sceneIndex].world_location_key`. Scenes sharing
+  a key — **in the same script or across scripts of the same series** — are the
+  **same place**: render/generate the environment once and reuse it. Persist
+  STS's location→asset mapping against `world_location_key`, **not** against the
+  scene index (which is positional and can shift) or heading text.
+- If a scene has no `world_location_key`, fall back to its own
+  `locations[...]` image, then to generating from `description`.
+
+### Round-trip test for the agent
+
+Export two scripts in the same series that both contain `INT. KITCHEN` (linked to
+the same World Location). Confirm both manifests carry the **same**
+`world_location_key` and an identical `world_locations[key]` entry → one shared
+environment across episodes.
+
+### Image durability
+
+World-location reference images are persisted to disk on save in the desktop app
+(`persistGeneratedImageFile`) and exported as `reference_image_path`. If a
+location has no saved file path yet, the exporter embeds
+`reference_image_data_url` and adds a `_lightwriter_warnings` note. Accept either.
 
 ### Browser-mode export limit (no silent drops)
 
@@ -258,6 +342,21 @@ Branch `experimental/s2s-handoff-hardening`. Mapped to the integration asks:
   tone-derived visual tokens + composition/depth cues (prompt layer only; Fountain text untouched).
   `shotDirectionService` hard-constrains the shot-type vocabulary.
 - **Concurrent testing (ask #4):** `script2screen/tests/__init__.py` + `scripts/test-both.sh`.
+
+### World State — portable series locations (2026-06, on `main`)
+
+- New: scripts opt into a named **Series** (`Project.seriesId`) that owns a
+  library of **World Locations** with stable `stsLocationKey`s. See the
+  "World State" section above for the full contract.
+- `buildScript2ScreenManifest` now resolves every scene heading to its world
+  location and emits `series_name`, a top-level `world_locations{}` library, and
+  per-scene `world_location_key` / `world_location_name`.
+- **Breaking signature change:** `buildScript2ScreenManifest` now takes
+  `{ project: Project; assets }` (was `{ resolveProjectName: string; assets }`).
+  `resolve_project_name` is derived from `project.name`. Any other caller must
+  pass the project (it's needed for `seriesId` + `content` to walk scenes).
+- Tests: `tests/assetManifestExporter.test.ts` covers alias-match resolution and
+  per-scene binding override (with a localStorage mock).
 
 ### Known follow-ups (not yet done)
 
