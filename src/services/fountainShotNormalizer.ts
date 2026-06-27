@@ -7,7 +7,15 @@
 // forgets the convention) and can also repair an already-corrupted draft.
 
 const SHOT_TOKEN = /^(WS|MS|CU|ECU|LS|OTS|POV)\b/;
+// A camera line mis-FORCED as a scene heading: ".WS WIDE SHOT", ".CU ALIYAH".
+// Fountain's leading "." forces a scene heading, so these render blue as scenes.
+const DOT_SHOT = /^\.(WS|MS|CU|ECU|LS|OTS|POV)\b/;
 const SCENE_HEADING = /^(INT\.|EXT\.|INT\/EXT\.|I\/E\.|EST\.)/i;
+
+function isDotForcedShot(line: string): boolean {
+  const trimmed = line.trim();
+  return DOT_SHOT.test(trimmed) && trimmed === trimmed.toUpperCase();
+}
 
 function isMisformattedShot(line: string): boolean {
   const trimmed = line.trim();
@@ -22,10 +30,15 @@ function isMisformattedShot(line: string): boolean {
 export function normalizeShotLines(script: string): string {
   return script
     .split("\n")
-    .map((line) => (isMisformattedShot(line) ? `!!${line.trim()}` : line))
+    .map((line) => {
+      const trimmed = line.trim();
+      if (isDotForcedShot(line)) return `!!${trimmed.slice(1)}`; // ".WS …" -> "!!WS …"
+      if (isMisformattedShot(line)) return `!!${trimmed}`; // "WS …" -> "!!WS …"
+      return line;
+    })
     .join("\n");
 }
 
 export function countMisformattedShots(script: string): number {
-  return script.split("\n").filter(isMisformattedShot).length;
+  return script.split("\n").filter((l) => isMisformattedShot(l) || isDotForcedShot(l)).length;
 }

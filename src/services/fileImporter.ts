@@ -3,6 +3,8 @@
  * All converters return plain Fountain text.
  */
 
+import { repairImportedScreenplay } from "./generatedScriptCleanup";
+
 // ─── .fountain import ───────────────────────────────────────────────
 export function importFountain(text: string): string {
   return text;
@@ -553,29 +555,24 @@ export async function importExcel(arrayBuffer: ArrayBuffer): Promise<string> {
 export async function importFile(file: File): Promise<string> {
   const name = file.name.toLowerCase();
 
-  if (name.endsWith(".fountain") || name.endsWith(".txt")) {
-    return importFountain(await file.text());
-  }
-
+  let raw: string;
   if (name.endsWith(".fdx")) {
-    return importFdx(await file.text());
+    raw = importFdx(await file.text());
+  } else if (name.endsWith(".celtx")) {
+    raw = await importCeltx(await file.arrayBuffer());
+  } else if (name.endsWith(".pdf")) {
+    raw = await importPdf(await file.arrayBuffer());
+  } else if (name.endsWith(".docx")) {
+    raw = await importDocx(await file.arrayBuffer());
+  } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    raw = await importExcel(await file.arrayBuffer());
+  } else {
+    // .fountain, .txt, and unknown — treated as Fountain
+    raw = importFountain(await file.text());
   }
 
-  if (name.endsWith(".celtx")) {
-    return importCeltx(await file.arrayBuffer());
-  }
-
-  if (name.endsWith(".pdf")) {
-    return importPdf(await file.arrayBuffer());
-  }
-
-  if (name.endsWith(".docx")) {
-    return importDocx(await file.arrayBuffer());
-  }
-
-  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-    return importExcel(await file.arrayBuffer());
-  }
-
-  return importFountain(await file.text());
+  // Normalize shots/stage-direction artifacts so imported scripts don't render
+  // bare camera lines or leading-dot directions as scene headings. No-op on
+  // already-clean files.
+  return repairImportedScreenplay(raw);
 }

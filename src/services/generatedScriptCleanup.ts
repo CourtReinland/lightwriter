@@ -1,4 +1,5 @@
 import { correctFountainFormatting } from "./fountainFormatCorrector";
+import { normalizeShotLines } from "./fountainShotNormalizer";
 
 const CUE = /^[A-Z][A-Z0-9 .'\-]{0,30}(\s*\([^)]*\))?$/;
 
@@ -37,4 +38,16 @@ function repairParentheticals(script: string): string {
  */
 export function cleanupGeneratedScreenplay(script: string, extraNames: string[] = []): string {
   return correctFountainFormatting(repairParentheticals(script), extraNames);
+}
+
+/**
+ * Lightweight repair for IMPORTED scripts: fix the parenthetical artifacts above
+ * and re-prefix bare camera-shot lines (WS/MS/CU…) with "!!". Unlike
+ * cleanupGeneratedScreenplay it does NOT run the full reclassification pass, so a
+ * clean hand-written .fountain is left untouched (both steps are no-ops when there
+ * is nothing to fix). This stops imported shots/stage-directions — e.g. a leading
+ * "." line like ".from inside the apartment" — from rendering as scene headings.
+ */
+export function repairImportedScreenplay(script: string): string {
+  return normalizeShotLines(repairParentheticals(script));
 }
