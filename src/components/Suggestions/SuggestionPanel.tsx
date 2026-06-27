@@ -514,6 +514,7 @@ export default function SuggestionPanel({
             reportCard,
             knowledgeBase,
             styleProfile,
+            seriesContext,
           }, setShotPassProgress)
         : await rewriteScriptForMetric({
             script: fullScript,
@@ -523,6 +524,7 @@ export default function SuggestionPanel({
             reportCard,
             metricId,
             metricName,
+            seriesContext,
           }, setShotPassProgress);
       setScriptDoctorStage("validating");
       stageRewritePreview(result, `${metricName} rewrite`, fullScript, reportCard);
@@ -533,7 +535,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, seriesContext]);
 
   const handleFillGaps = useCallback(async (mode: "missing_beats" | "target_pages") => {
     if (!ensureRewriteReady() || !reportCard) return;
@@ -557,6 +559,7 @@ export default function SuggestionPanel({
         reportCard,
         mode,
         targetFrameworkId,
+        seriesContext,
       }, setShotPassProgress);
       setScriptDoctorStage("validating");
       const focusSuffix = targetFrameworkId ? " (focused on active framework)" : "";
@@ -568,7 +571,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks, seriesContext]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;

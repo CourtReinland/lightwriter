@@ -32,6 +32,8 @@ export interface StoryDoctorInput {
   reportCard: ScriptReportCard;
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
 }
 
 export interface StoryDoctorResult extends ScriptRewriteResult {
@@ -87,6 +89,7 @@ function buildRestructurePrompt(args: {
   targetPages: number;
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
+  seriesContext?: string;
 }): { system: string; user: string } {
   const styleText = args.styleProfile ? StyleProfileService.serializeForPrompt(args.styleProfile) : "";
   const kbText = args.knowledgeBase ? KnowledgeBaseService.serializeForPrompt(args.knowledgeBase, 5000) : "";
@@ -109,8 +112,8 @@ RULES:
 - CRAFT (this is what earns a high score): each beat must turn on a clear character CHOICE with visible stakes, and connect causally to the beats before and after it (this happened, THEREFORE that — not "and then"). Escalate the consequences from You through Take. End on a Change beat that mirrors the opening You beat with a new emotional charge. Mere presence of a beat is not enough; it must do real dramatic work.
 - Preserve the writer's voice, the existing characters, and all established plot facts. Do not invent unrelated characters or events.
 - PRESERVE FOUNTAIN FORMAT exactly: keep camera shots prefixed with "!!" (e.g. "!!WS LIVING ROOM", "!!CU ALIYAH'S FACE") — a shot WITHOUT the "!!" is mis-parsed as a character name. Character cues are ALL CAPS with a blank line before and dialogue on the next line; action is sentence-case prose (never ALL CAPS); keep a blank line between elements. Any NEW scene you add must follow these same conventions.
-- Return the COMPLETE revised screenplay (every scene in order), not notes or a diff.
-${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}
+- Return the COMPLETE revised screenplay (every scene in order), not notes or a diff.${args.seriesContext ? "\n- Honor the SERIES CONTEXT below: keep the active arcs advancing through the episode, open on the prior cliffhanger if given, and end the episode on its cliffhanger if given." : ""}
+${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${args.seriesContext ? `\n${args.seriesContext}\n` : ""}
 CURRENT DRAFT:
 ---
 ${args.script}
@@ -181,6 +184,7 @@ export async function runStoryDoctor(
       targetPages: input.targetPages,
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
+      seriesContext: input.seriesContext,
     });
 
     let rewrite: ScriptRewriteResult | null = null;
@@ -269,6 +273,7 @@ export async function runStoryDoctor(
           reportCard: finalReport,
           knowledgeBase: input.knowledgeBase,
           styleProfile: input.styleProfile,
+          seriesContext: input.seriesContext,
         },
         onProgress,
         complete,

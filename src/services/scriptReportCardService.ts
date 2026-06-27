@@ -53,6 +53,8 @@ export interface ScriptReportPromptInput {
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
   targetPages: number;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
 }
 
 export interface ImproveMetricPromptInput extends ScriptReportPromptInput {
@@ -308,7 +310,7 @@ export function buildMetricRewritePrompt(input: ImproveMetricPromptInput): { sys
 
 SELECTED REWRITE METRIC: ${input.metricName} (${input.metricId})
 CURRENT REPORT DETAIL:
-${JSON.stringify(metricPayload, null, 2)}${structureBlock}${expansion}
+${JSON.stringify(metricPayload, null, 2)}${structureBlock}${expansion}${input.seriesContext ? `\n\n${input.seriesContext}` : ""}
 
 Rewrite the current script to improve this selected metric, expanding the draft toward its target length.
 Rules:
@@ -316,7 +318,7 @@ Rules:
 - Keep existing scene headings and useful dialogue where they still work.
 - Add, expand, cut, or reorder what materially improves ${input.metricName}; when below target length, that means writing substantial NEW scenes for the metric's weak/missing beats.
 - Preserve the STYLE CONTRACT and target/director style.
-- Preserve KB continuity and character voice.
+- Preserve KB continuity and character voice.${input.seriesContext ? "\n- Honor the SERIES CONTEXT above: keep the active arcs advancing, open on the prior cliffhanger if given, and end this episode on its cliffhanger if given." : ""}
 - Honor the EXPANSION REQUIREMENT above when present: reach roughly ${input.targetPages} pages with real new scenes, not padding.
 
 ${rewriteJsonInstructions()}`,
@@ -349,7 +351,7 @@ export function buildFillGapsRewritePrompt(input: FillGapsRewritePromptInput): {
 
 FILL GAPS / COMPLETE TO TARGET PAGES
 Mode: ${modeLabel}
-Target pages: ${input.targetPages}${structureBlock}${expansion}
+Target pages: ${input.targetPages}${structureBlock}${expansion}${input.seriesContext ? `\n\n${input.seriesContext}` : ""}
 
 Priority missing beats / weak beats:
 ${missingBeatSummary(input.reportCard, input.targetFrameworkId)}
@@ -737,7 +739,7 @@ function beatGuidanceFor(reportCard: ScriptReportCard, frameworkId: string | und
 // count, grow it to target by inserting whole new scenes (reliable expansion).
 export async function expandToTargetIfNeeded(
   result: ScriptRewriteResult,
-  opts: { targetPages: number; frameworkId?: string; reportCard: ScriptReportCard; knowledgeBase: KnowledgeBase | null; styleProfile: StyleProfile | null },
+  opts: { targetPages: number; frameworkId?: string; reportCard: ScriptReportCard; knowledgeBase: KnowledgeBase | null; styleProfile: StyleProfile | null; seriesContext?: string },
   onProgress?: (p: ExpandProgress) => void,
   completeOverride?: Completion,
 ): Promise<ScriptRewriteResult> {
@@ -754,6 +756,7 @@ export async function expandToTargetIfNeeded(
       beatGuidance: beatGuidanceFor(opts.reportCard, opts.frameworkId),
       knowledgeBase: opts.knowledgeBase,
       styleProfile: opts.styleProfile,
+      seriesContext: opts.seriesContext,
     },
     onProgress,
     completeOverride,
@@ -786,6 +789,7 @@ export async function rewriteScriptForMetric(
       reportCard: input.reportCard,
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
+      seriesContext: input.seriesContext,
     },
     onProgress,
   );
@@ -812,6 +816,7 @@ export async function fillScriptGaps(
       reportCard: input.reportCard,
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
+      seriesContext: input.seriesContext,
     },
     onProgress,
   );

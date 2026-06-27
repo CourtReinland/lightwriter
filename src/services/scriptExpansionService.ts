@@ -39,6 +39,8 @@ export interface ExpandContext {
   beatGuidance?: string;
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
 }
 
 export interface ExpandResult {
@@ -195,7 +197,7 @@ RULES:
 - New scenes connect causally to the scenes around them (this happened, therefore that).
 - Characters already in the draft are established — new scenes must NOT re-introduce or re-describe them.
 - "insert_after" MUST be the EXACT slugline of an existing scene above (copied verbatim), or "START" for the very beginning.
-${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}
+${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${ctx.seriesContext ? `\n${ctx.seriesContext}\nNew scenes must advance the active arcs and respect this episode's cliffhanger duties.\n` : ""}
 Return ONLY: {"newScenes":[{"insert_after":"<existing slugline verbatim or START>","beat":"<purpose/beat>","synopsis":"<the NEW thing that happens>","pages":<number>}]}`;
 
   return { system, user };
@@ -223,6 +225,7 @@ You are writing ONE NEW scene to insert into a screenplay that ALREADY EXISTS.
       : "This new scene opens the screenplay.",
     `NEW SCENE TO WRITE — ${planned.beat}; about ${planned.pages} page(s):\n${planned.synopsis}`,
     styleText ? `STYLE CONTRACT:\n${styleText}` : "",
+    ctx.seriesContext ? ctx.seriesContext : "",
     `Write the new scene now in Fountain format.`,
   ]
     .filter(Boolean)
