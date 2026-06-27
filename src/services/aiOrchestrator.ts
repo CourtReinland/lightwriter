@@ -19,6 +19,7 @@ export type OrchestratorMode =
   | "smart_continue"
   | "scene_builder"
   | "character_voice"
+  | "re_roll"
   // Analysis modes
   | "instant_critique"
   | "plot_hole_check"
@@ -45,6 +46,8 @@ export interface OrchestratorContext {
   characterName?: string;
   characterNames?: string[]; // For scene builder: multiple characters
   targetPages?: number;
+  /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
+  seriesContext?: string;
 }
 
 // ── Mode Configs ──
@@ -116,6 +119,10 @@ Choose shots based on scene context and professional film grammar: WS to establi
   character_voice: {
     taskPrompt: "Write dialogue for the specified character in this context. Match their established voice, speech patterns, and personality. Return ONLY the dialogue in Fountain format.",
     temperature: 0.75, maxTokens: 1024, needsSelection: true, isAnalysis: false,
+  },
+  re_roll: {
+    taskPrompt: "Rewrite the selected passage with fresh creative energy — a genuinely different take, not a paraphrase. Vary the wording, imagery, beats, and rhythm while keeping its narrative purpose, the surrounding continuity, the characters' voices, the established world/arcs, and Fountain format. Return ONLY the rewritten passage.",
+    temperature: 0.85, maxTokens: 2048, needsSelection: true, isAnalysis: false,
   },
   instant_critique: {
     taskPrompt: `Analyze this screenplay section. Provide a structured critique with scores (1-10) for:
@@ -207,6 +214,10 @@ export function buildPrompt(ctx: OrchestratorContext): {
 
   if (ctx.knowledgeBase?.toneStyle?.styleNotes) {
     sections.push("\n=== ADDITIONAL STYLE CONSTRAINTS ===\n" + ctx.knowledgeBase.toneStyle.styleNotes);
+  }
+
+  if (ctx.seriesContext && ctx.seriesContext.trim()) {
+    sections.push("\n" + ctx.seriesContext.trim());
   }
 
   if (ctx.targetPages) {

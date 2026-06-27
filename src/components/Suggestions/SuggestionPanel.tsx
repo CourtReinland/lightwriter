@@ -15,6 +15,7 @@ import {
   type OrchestratorMode,
   type OrchestratorContext,
 } from "../../services/aiOrchestrator";
+import { generateReRollVariants, type ReRollVariant } from "../../services/reRollService";
 import type { KnowledgeBase } from "../../services/knowledgeBase";
 import type { StyleProfile } from "../../services/styleProfile";
 import type { ComputedBeat } from "../../frameworks/utils";
@@ -367,6 +368,7 @@ export default function SuggestionPanel({
           customPrompt: prompt,
           characterName,
           targetPages,
+          seriesContext,
         };
 
         const result = await generate(ctx);
@@ -377,8 +379,52 @@ export default function SuggestionPanel({
         setLoading(false);
       }
     },
-    [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages],
+    [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext],
   );
+
+  // Re-roll the selected passage into several variants (varied weighting).
+  const [reRollVariants, setReRollVariants] = useState<ReRollVariant[] | null>(null);
+  const [reRolling, setReRolling] = useState(false);
+
+  const handleReRoll = useCallback(async () => {
+    const currentSettings = getSelectedTextAiProviderSettings();
+    setTextAiSettings(currentSettings);
+    if (!currentSettings.apiKey.trim()) {
+      setShowKeyDialog(true);
+      return;
+    }
+    if (!selectedText.trim()) {
+      setError("Select the paragraph or passage to re-roll first.");
+      return;
+    }
+    setReRolling(true);
+    setError(null);
+    setReRollVariants(null);
+    try {
+      const variants = await generateReRollVariants({
+        selectedText,
+        surroundingContext: contextText,
+        fullScript,
+        cursorLine,
+        cursorBeats,
+        knowledgeBase,
+        styleProfile,
+        mode: "re_roll",
+        targetPages,
+        seriesContext,
+      });
+      setReRollVariants(variants);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-roll failed");
+    } finally {
+      setReRolling(false);
+    }
+  }, [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext]);
+
+  const applyReRoll = useCallback((text: string) => {
+    onApply(text);
+    setReRollVariants(null);
+  }, [onApply]);
 
   const handleCustomSubmit = useCallback(() => {
     if (!customPrompt.trim()) return;
@@ -768,6 +814,44 @@ export default function SuggestionPanel({
           </div>
           {genStatus && <div className="story-gen-status">{genStatus}</div>}
           {genError && <div className="story-gen-error">{genError}</div>}
+        </div>
+      </div>
+
+      {/* Re-roll the selected passage into variants */}
+      <div className="ai-group">
+        <div className="ai-group-label">Re-roll selection</div>
+        <div className="full-shot-pass">
+          <button
+            className="full-shot-pass-btn"
+            onClick={handleReRoll}
+            disabled={reRolling || !selectedText.trim()}
+            title="Regenerate the highlighted passage into a few variants under the same constraints"
+          >
+            {reRolling ? "Rolling…" : "Re-roll Selection"}
+          </button>
+          <div className="full-shot-pass-hint">
+            Highlight a paragraph, then re-roll it into a few takes (faithful → wild) under the same story, style, and series arcs — pick the one you like.
+          </div>
+          {reRollVariants && (
+            <div className="reroll-variants">
+              {reRollVariants.map((v) => (
+                <div key={v.id} className="reroll-variant">
+                  <div className="reroll-variant-head">
+                    <span className="reroll-variant-label">{v.label}</span>
+                    {!v.error && v.text && (
+                      <button className="reroll-use" onClick={() => applyReRoll(v.text)}>Use</button>
+                    )}
+                  </div>
+                  {v.error ? (
+                    <div className="reroll-variant-error">{v.error}</div>
+                  ) : (
+                    <div className="reroll-variant-text">{v.text}</div>
+                  )}
+                </div>
+              ))}
+              <button className="reroll-dismiss" onClick={() => setReRollVariants(null)}>Dismiss</button>
+            </div>
+          )}
         </div>
       </div>
 
