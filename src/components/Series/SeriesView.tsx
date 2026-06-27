@@ -5,6 +5,7 @@ import {
   type SeriesCliffhanger,
 } from "../../services/worldStateService";
 import { StorageService, type Project } from "../../services/storageService";
+import SeriesGraph from "./SeriesGraph";
 import "./SeriesView.css";
 
 interface SeriesViewProps {
@@ -212,6 +213,20 @@ export default function SeriesView({ project, onAssignSeries, onChange }: Series
           </select>
         )}
       </div>
+
+      {episodes.length > 0 && (
+        <SeriesGraph
+          episodes={episodes.map((e) => ({ id: e.id, name: e.name }))}
+          arcs={arcs}
+          cliffhangers={cliffhangers}
+          currentProjectId={project.id}
+          onArcClick={(id) => {
+            const a = arcs.find((x) => x.id === id);
+            if (a) startEditArc(a);
+          }}
+          onCliffhangerClick={() => {}}
+        />
+      )}
 
       <div className="series-grid">
         {/* Episodes */}
