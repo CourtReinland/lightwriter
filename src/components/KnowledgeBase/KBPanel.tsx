@@ -28,7 +28,7 @@ import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
 import WorldSection from "./WorldSection";
 import SeriesRecordsPanel from "../Series/SeriesRecordsPanel";
-import { WorldStateService } from "../../services/worldStateService";
+import { WorldStateService, extractLocationToken, type WorldCharacter, type WorldLocation } from "../../services/worldStateService";
 import "./KBPanel.css";
 
 const COMMON_GENRES = [
@@ -37,6 +37,12 @@ const COMMON_GENRES = [
   "Family", "Adventure", "Action", "Animation", "Musical", "Documentary",
   "Slice of life", "Historical", "Western",
 ];
+
+// Title-case a heading token without capitalizing the letter after an apostrophe
+// ("AIDEN'S ROOM" -> "Aiden's Room", not "Aiden'S Room").
+function titleCaseToken(token: string): string {
+  return token.toLowerCase().replace(/(^|[\s-])([a-z])/g, (_m, p, c) => p + c.toUpperCase());
+}
 
 function versionGlyph(type: VersionSnapshot["type"]): string {
   if (type === "open") return "[ ]"; // opened / imported document
@@ -136,11 +142,26 @@ export default function KBPanel({
 
   const characterAssetItems = buildAssetKnowledgeItems(assets, kb, "character");
   const sceneAssetItems = buildAssetKnowledgeItems(assets, kb, "scene_set");
+  const norm = (s: string) => s.trim().toLowerCase();
+
+  // Series-scoped records (the portable home for characters/scenes). These render
+  // via SeriesRecordsPanel at the top of each section; their names are used to
+  // de-duplicate the per-project lists so a promoted entry doesn't show twice.
+  const seriesId = project.seriesId;
+  const seriesCharacters = useMemo(() => (seriesId ? WorldStateService.listCharacters(seriesId) : []), [seriesId, worldVersion]);
+  const seriesLocations = useMemo(() => (seriesId ? WorldStateService.listLocations(seriesId) : []), [seriesId, worldVersion]);
+  const seriesCharacterCount = seriesCharacters.length;
+  const seriesSceneCount = seriesLocations.length;
+  const seriesCharNames = useMemo(() => new Set(seriesCharacters.map((c) => norm(c.name))), [seriesCharacters]);
+  // Match on the location's human name only — a series location ("Kitchen") and a
+  // per-project scene heading ("INT. KITCHEN - DAY") are different granularities,
+  // so don't hide every heading that shares a location token.
+  const seriesSceneNames = useMemo(() => new Set(seriesLocations.map((l) => norm(l.name))), [seriesLocations]);
 
   // Merge each KB entity with its generated image into a single list, so a
   // character/scene shows its thumbnail inline. Entities with no image still
   // appear; images with no matching KB entry are appended so nothing is lost.
-  const norm = (s: string) => s.trim().toLowerCase();
+  // Entries already represented by a series record are dropped (shown above).
   const mergedCharacters = useMemo(() => {
     const map = new Map<string, { key: string; name: string; description: string; asset: GeneratedAsset | null; character: KBCharacter | null }>();
     for (const c of kb.characters) map.set(norm(c.name), { key: c.id, name: c.name, description: c.description, asset: null, character: c });
@@ -150,8 +171,8 @@ export default function KBPanel({
       if (existing) existing.asset = asset;
       else map.set(k, { key: asset.id, name: title, description, asset, character: null });
     }
-    return [...map.values()];
-  }, [kb.characters, characterAssetItems]);
+    return [...map.values()].filter((item) => !seriesCharNames.has(norm(item.name)));
+  }, [kb.characters, characterAssetItems, seriesCharNames]);
   const mergedScenes = useMemo(() => {
     const map = new Map<string, { key: string; name: string; description: string; asset: GeneratedAsset | null; scene: KBScene | null }>();
     for (const s of kb.scenes || []) map.set(norm(s.heading), { key: s.id, name: s.heading, description: s.description, asset: null, scene: s });
@@ -161,14 +182,8 @@ export default function KBPanel({
       if (existing) existing.asset = asset;
       else map.set(k, { key: asset.id, name: title, description, asset, scene: null });
     }
-    return [...map.values()];
-  }, [kb.scenes, sceneAssetItems]);
-
-  // Series-scoped record counts, shown in the section headers alongside the
-  // per-project KB counts (the series records render via SeriesRecordsPanel).
-  const seriesId = project.seriesId;
-  const seriesSceneCount = useMemo(() => (seriesId ? WorldStateService.listLocations(seriesId).length : 0), [seriesId, worldVersion]);
-  const seriesCharacterCount = useMemo(() => (seriesId ? WorldStateService.listCharacters(seriesId).length : 0), [seriesId, worldVersion]);
+    return [...map.values()].filter((item) => !seriesSceneNames.has(norm(item.name)));
+  }, [kb.scenes, sceneAssetItems, seriesSceneNames]);
 
   useEffect(() => {
     if (!focusSection) return;
@@ -239,10 +254,79 @@ export default function KBPanel({
     }
   }, [projectId, onAssetsChange]);
 
+  // Save a character/scene to the SERIES database (the portable home), text +
+  // image together, upserting by name. Used whenever the project is in a series.
+  const saveSeriesRecord = useCallback(async (type: "character" | "scene", fields: Record<string, unknown>, image?: { dataUrl: string; mimeType: string }) => {
+    const sid = project.seriesId;
+    if (!sid) return;
+    const imgFields = image ? { referenceImageDataUrl: image.dataUrl, referenceMimeType: image.mimeType } : {};
+    try {
+      if (type === "character") {
+        const name = ((fields.name as string) || "").trim();
+        if (!name) return;
+        // Fresh read (don't trust a worldVersion-stale memo) for the upsert match.
+        const existing = WorldStateService.listCharacters(sid).find((c) => norm(c.name) === norm(name));
+        const rec = existing
+          ? WorldStateService.updateCharacter(existing.id, {
+              description: (fields.description as string) || "",
+              traits: (fields.traits as string[]) || [],
+              voiceNotes: (fields.voiceNotes as string) || undefined,
+              ...imgFields,
+            })
+          : WorldStateService.addCharacter(sid, {
+              name,
+              description: (fields.description as string) || "",
+              traits: (fields.traits as string[]) || [],
+              voiceNotes: (fields.voiceNotes as string) || undefined,
+              ...imgFields,
+            });
+        if (rec && image) {
+          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType: image.mimeType, dataUrl: image.dataUrl });
+          if (fp) WorldStateService.updateCharacter(rec.id, { referenceFilePath: fp });
+        }
+      } else {
+        const heading = ((fields.heading as string) || "").trim();
+        if (!heading) return;
+        const token = (extractLocationToken(heading) || heading).toUpperCase();
+        const existing = WorldStateService.listLocations(sid).find((l) => norm(l.name) === norm(token) || l.aliases.some((a) => norm(a) === norm(token)));
+        const rec = existing
+          ? // Merge: keep the curated name + aliases, just fold in the token + description/image.
+            WorldStateService.updateLocation(existing.id, {
+              aliases: Array.from(new Set([...existing.aliases, token])),
+              description: (fields.description as string) || existing.description,
+              ...imgFields,
+            })
+          : WorldStateService.addLocation(sid, {
+              name: titleCaseToken(token),
+              aliases: [token],
+              description: (fields.description as string) || "",
+              ...imgFields,
+            });
+        if (rec && image) {
+          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType: image.mimeType, dataUrl: image.dataUrl });
+          if (fp) WorldStateService.updateLocation(rec.id, { referenceFilePath: fp });
+        }
+      }
+      onWorldChange?.();
+    } catch {
+      /* best-effort */
+    }
+  }, [project.seriesId, onWorldChange]);
+
   const handleSave = useCallback((type: string, data: Record<string, unknown>) => {
     const { __image, ...fields } = data as { __image?: { dataUrl: string; mimeType: string } } & Record<string, unknown>;
-    let updated = kb;
     const existingId = editTarget?.existing && "id" in editTarget.existing ? editTarget.existing.id : null;
+
+    // In a series, NEW characters & scenes are created in the series database
+    // (text + image). Editing an existing per-project KB entry stays on the KB
+    // path below so its edits actually apply (and it isn't orphaned).
+    if (!existingId && (type === "character" || type === "scene") && project.seriesId) {
+      void saveSeriesRecord(type, fields, __image);
+      setEditTarget(null);
+      return;
+    }
+
+    let updated = kb;
 
     switch (type) {
       case "character":
@@ -280,7 +364,7 @@ export default function KBPanel({
       void attachImageAsset(type, name || "", __image, sceneIndex);
     }
     setEditTarget(null);
-  }, [kb, editTarget, onKBChange, attachImageAsset]);
+  }, [kb, editTarget, onKBChange, attachImageAsset, project.seriesId, saveSeriesRecord]);
 
   const handleDelete = useCallback((type: string, id: string) => {
     let updated = kb;

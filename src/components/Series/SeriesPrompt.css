@@ -1,0 +1,87 @@
+/* Self-contained backdrop (don't depend on another dialog's CSS being loaded). */
+.series-prompt-dialog-backdrop,
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.series-prompt-dialog {
+  position: relative;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: system-ui, sans-serif;
+}
+
+.series-prompt-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.series-prompt-sub {
+  font-size: 12px;
+  color: #9a9a9a;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.series-prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+  background: #131313;
+  border: 1px solid #3a3a3a;
+  color: #eee;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.series-prompt-existing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #8a8a8a;
+}
+.series-prompt-existing select {
+  font-size: 12px;
+  background: #131313;
+  border: 1px solid #333;
+  color: #ddd;
+  border-radius: 5px;
+  padding: 5px 7px;
+}
+
+.series-prompt-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.series-prompt-btn {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #3a3a3a;
+  background: #222;
+  color: #ddd;
+  cursor: pointer;
+}
+.series-prompt-btn:hover { background: #2b2b2b; }
+.series-prompt-btn.primary { background: #2d5e48; border-color: #3f7d61; color: #eafff4; }
+.series-prompt-btn.primary:hover { background: #356b53; }
+.series-prompt-btn.primary:disabled { opacity: 0.5; cursor: default; }

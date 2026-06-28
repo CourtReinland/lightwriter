@@ -21,6 +21,7 @@ import ExportPanel from "./components/Export/ExportPanel";
 import SeriesView from "./components/Series/SeriesView";
 import LocationBar from "./components/Editor/LocationBar";
 import AddToSeriesPopup, { type AddToSeriesTarget } from "./components/Series/AddToSeriesPopup";
+import SeriesPrompt from "./components/Series/SeriesPrompt";
 import type { LineAffordance } from "./components/Editor/FountainEditor";
 import { WorldStateService, findSceneAtLine, listSceneHeadings } from "./services/worldStateService";
 import { serializeEpisodeContext } from "./services/seriesContextService";
@@ -38,6 +39,8 @@ import { StyleProfileService, type StyleProfile } from "./services/styleProfile"
 import { AssetService } from "./services/assetService";
 import type { GeneratedAsset, AssetKind } from "./types/assets";
 import type { ComputedBeat } from "./frameworks/utils";
+
+const SERIES_PROMPT_SKIP_KEY = "lw-series-prompt-skipped";
 
 const SAMPLE_FOUNTAIN = `Title: My Screenplay
 Author: Writer Name
@@ -616,6 +619,30 @@ export default function App() {
   // Dismiss the add-to-series popup as soon as the user edits the script.
   useEffect(() => { setAffordance(null); }, [project.content]);
 
+  // Every project belongs to a series (so characters/scenes + images are portable).
+  // Prompt to name one when a real script (not the empty/sample starter) has no
+  // series and the user hasn't skipped it (skip persists across restarts).
+  const [seriesPromptSkipped, setSeriesPromptSkipped] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(SERIES_PROMPT_SKIP_KEY);
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const skipSeriesPrompt = useCallback((id: string) => {
+    setSeriesPromptSkipped((prev) => {
+      const next = new Set(prev).add(id);
+      try { localStorage.setItem(SERIES_PROMPT_SKIP_KEY, JSON.stringify([...next])); } catch { /* best-effort */ }
+      return next;
+    });
+  }, []);
+  const showSeriesPrompt =
+    !project.seriesId &&
+    !seriesPromptSkipped.has(project.id) &&
+    project.content.trim().length > 0 &&
+    project.content !== SAMPLE_FOUNTAIN;
+
   return (
     <ArtisticBorder>
       <div className="app">
@@ -847,6 +874,15 @@ export default function App() {
             onLoadProject={handleLoadProject}
             onNewProject={handleNewProject}
             onClose={() => setShowProjectMenu(false)}
+          />
+        )}
+        {showSeriesPrompt && (
+          <SeriesPrompt
+            defaultName={project.name}
+            existingSeries={WorldStateService.listSeries().map((s) => ({ id: s.id, name: s.name }))}
+            onCreate={(name) => handleAssignSeries(WorldStateService.createSeries(name).id)}
+            onUseExisting={(id) => handleAssignSeries(id)}
+            onSkip={() => skipSeriesPrompt(project.id)}
           />
         )}
       </div>
