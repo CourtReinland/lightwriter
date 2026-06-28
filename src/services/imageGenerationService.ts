@@ -302,7 +302,65 @@ async function generateGeminiImageAsset(request: ImageGenerationRequest): Promis
   };
 }
 
+/** Best-effort image MIME from a base64 payload's magic-byte prefix. */
+function b64ImageMime(b64: string): string {
+  if (b64.startsWith("iVBOR")) return "image/png";
+  if (b64.startsWith("R0lGOD")) return "image/gif";
+  if (b64.startsWith("UklGR")) return "image/webp";
+  return "image/jpeg";
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Could not read image data."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function generateGrokImageAsset(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
+  const settings = getImageProviderSettings("grok-imagine");
+  const apiKey = settings.apiKey?.trim();
+  if (!apiKey) throw new Error("Add a Grok (x.ai) API key before generating images.");
+  const model = request.model || settings.selectedModel || getDefaultImageModel("grok-imagine") || "grok-2-image";
+
+  // x.ai's image API is OpenAI-compatible (POST /v1/images/generations). It is
+  // text-to-image only today — no style/reference image input, and it ignores
+  // aspect ratio — so request.styleReference is intentionally not sent.
+  const response = await fetch("https://api.x.ai/v1/images/generations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, prompt: request.prompt, n: 1, response_format: "b64_json" }),
+  });
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const err = await response.json();
+      const msg = err?.error?.message || err?.error || err?.message;
+      if (msg) detail = typeof msg === "string" ? msg : JSON.stringify(msg);
+    } catch {
+      /* keep status text */
+    }
+    throw new Error(`Grok image generation failed: ${detail}`);
+  }
+  const data = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const first = data.data?.[0];
+  if (first?.b64_json) {
+    const mime = b64ImageMime(first.b64_json);
+    return { mimeType: mime, imageDataUrl: `data:${mime};base64,${first.b64_json}` };
+  }
+  if (first?.url) {
+    const img = await fetch(first.url);
+    if (!img.ok) throw new Error(`Grok returned an image URL that could not be fetched: ${img.status}`);
+    const blob = await img.blob();
+    return { mimeType: blob.type || "image/jpeg", imageDataUrl: await blobToDataUrl(blob) };
+  }
+  throw new Error("Grok did not return an image payload.");
+}
+
 export async function generateImageAsset(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
   if (request.provider === "gemini-nano-banana") return generateGeminiImageAsset(request);
-  throw new Error("Grok Imagine generation is not wired yet. Use Gemini / Nano Banana generation or stage the prompt metadata for now.");
+  if (request.provider === "grok-imagine") return generateGrokImageAsset(request);
+  throw new Error(`Unknown image provider: ${request.provider}`);
 }

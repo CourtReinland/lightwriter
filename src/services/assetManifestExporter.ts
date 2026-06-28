@@ -35,12 +35,16 @@ export interface LightWriterPackage {
 export interface Script2ScreenManifest {
   version: 1;
   resolve_project_name: string;
+  /** The screenplay this manifest belongs to — links the manifest to the script. */
+  screenplay?: { script_hash: string; project_name: string; fountain: string };
   /** Series this script belongs to (portable World State). */
   series_name?: string;
-  characters: Record<string, { reference_image_path?: string; visual_prompt?: string; voice_id?: string; voice_provider?: string; voice_samples: string[] }>;
+  characters: Record<string, { reference_image_path?: string; visual_prompt?: string; voice_id?: string; voice_provider?: string; voice_samples: string[]; world_character_key?: string }>;
   locations: Record<string, Record<string, unknown>>;
   /** Shared location library keyed by stable stsLocationKey, so the same location resolves identically across scripts in a series. */
   world_locations?: Record<string, Record<string, unknown>>;
+  /** Shared, portable character library keyed by stable stsCharacterKey — pre-populates the characters ScriptToScreen detects. */
+  world_characters?: Record<string, Record<string, unknown>>;
   generated_media: Record<string, Record<string, unknown>>;
   /** Non-canonical: assets that could not be exported (e.g. browser-mode with no durable file path). ScriptToScreen ignores unknown keys. */
   _lightwriter_warnings?: string[];
@@ -130,6 +134,11 @@ export function buildScript2ScreenManifest(args: {
   const manifest: Script2ScreenManifest = {
     version: 1,
     resolve_project_name: args.project.name,
+    screenplay: {
+      script_hash: simpleScriptHash(args.project.content),
+      project_name: args.project.name,
+      fountain: args.project.content,
+    },
     characters: {},
     locations: {},
     generated_media: {},
@@ -140,6 +149,14 @@ export function buildScript2ScreenManifest(args: {
   if (seriesId) {
     manifest.series_name = WorldStateService.getSeries(seriesId)?.name;
   }
+
+  // 0-based scene index -> heading, so a shot can resolve its scene's location.
+  const headingByIndex = new Map<number, string>();
+  for (const s of listSceneHeadings(args.project.content)) headingByIndex.set(s.index, s.heading);
+  const sceneReferenceForIndex = (sceneIndex: number | undefined): WorldLocation | null => {
+    if (!seriesId || sceneIndex === undefined) return null;
+    return WorldStateService.resolveLocationForScene(args.project.id, seriesId, sceneIndex, headingByIndex.get(sceneIndex) || "");
+  };
 
   for (const asset of args.assets) {
     if (asset.kind === "character" && asset.scriptRef.characterName) {
@@ -186,6 +203,9 @@ export function buildScript2ScreenManifest(args: {
     }
 
     const filename = filenameForPath(asset.filePath);
+    // The shot's scene reference (its world location image), so a provider that
+    // accepts a scene reference alongside character references gets BOTH per shot.
+    const shotLocation = sceneReferenceForIndex(asset.scriptRef.sceneIndex);
     manifest.generated_media[filename] = {
       type: "image",
       shot_key: shotKey,
@@ -202,6 +222,8 @@ export function buildScript2ScreenManifest(args: {
         asset.scriptRef.characterName && asset.filePath
           ? { [asset.scriptRef.characterName.toUpperCase()]: asset.filePath }
           : {},
+      scene_reference_path: shotLocation?.referenceFilePath || "",
+      world_location_key: shotLocation?.stsLocationKey || "",
       file_path: asset.filePath,
       generated_at: new Date(asset.createdAt).toISOString(),
       lightwriter_script_ref: asset.scriptRef,
@@ -252,6 +274,47 @@ export function buildScript2ScreenManifest(args: {
           (existing.reference_image_paths as string[]) || (loc.referenceFilePath ? [loc.referenceFilePath] : []),
         file_path: (existing.file_path as string) || loc.referenceFilePath || "",
       };
+    }
+
+    // Portable series CHARACTERS: a shared world_characters{} library keyed by the
+    // stable stsCharacterKey, and a by-name/alias pre-population of characters{} so
+    // ScriptToScreen's detected characters arrive with their reference image. A
+    // generated character ASSET for the same name (set above) keeps precedence.
+    for (const c of WorldStateService.listCharacters(seriesId)) {
+      const refPath = c.referenceFilePath || "";
+      manifest.world_characters ??= {};
+      const entry: Record<string, unknown> = {
+        name: c.name,
+        aliases: c.aliases,
+        description: c.description,
+        traits: c.traits || [],
+        reference_image_path: refPath,
+      };
+      if (!refPath && c.referenceImageDataUrl) {
+        entry.reference_image_data_url = c.referenceImageDataUrl;
+        warnings.push(`Series character "${c.name}" reference image has no saved file path yet (re-save it in the desktop app to persist).`);
+      } else if (!refPath && !c.referenceImageDataUrl) {
+        warnings.push(`Series character "${c.name}" has no reference image yet.`);
+      }
+      manifest.world_characters[c.stsCharacterKey] = entry;
+
+      // Pre-populate the by-name map for every cue spelling (name + aliases).
+      for (const key of [c.name.toUpperCase(), ...c.aliases.map((a) => a.toUpperCase())]) {
+        const existing = manifest.characters[key];
+        if (!existing) {
+          manifest.characters[key] = {
+            reference_image_path: refPath || "",
+            visual_prompt: c.description,
+            voice_samples: [],
+            world_character_key: c.stsCharacterKey,
+          };
+        } else {
+          // First world character to claim a cue spelling owns it; don't let a
+          // later alias collision silently repoint the key or portrait.
+          if (!existing.world_character_key) existing.world_character_key = c.stsCharacterKey;
+          if (!existing.reference_image_path && refPath) existing.reference_image_path = refPath;
+        }
+      }
     }
   }
 

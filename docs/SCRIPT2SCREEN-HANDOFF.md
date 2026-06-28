@@ -44,18 +44,20 @@ LightWriter exports this top-level shape for ScriptToScreen:
 {
   "version": 1,
   "resolve_project_name": "Demo Project",
+  "screenplay": {},                          // { script_hash, project_name, fountain } — links this manifest to its script
   "series_name": "The Maddox Chronicles",   // only when the script is in a World-State Series
   "characters": {},
   "locations": {},
-  "world_locations": {},                     // only when the script is in a Series; see "World State" below
+  "world_locations": {},                     // shared scene library, keyed by stsLocationKey; only in a Series
+  "world_characters": {},                    // shared character library, keyed by stsCharacterKey; only in a Series
   "generated_media": {}
 }
 ```
 
 This matches ScriptToScreen's `script_to_screen/manifest.py` empty manifest
-structure, plus the optional `series_name` / `world_locations` keys added by the
-World State feature (STS ignores keys it doesn't recognize, so older importers
-are unaffected).
+structure, plus the optional `screenplay` / `series_name` / `world_locations` /
+`world_characters` keys added by the World State feature (STS ignores keys it
+doesn't recognize, so older importers are unaffected).
 
 ### Character entries
 
@@ -223,12 +225,75 @@ the same World Location). Confirm both manifests carry the **same**
 `world_location_key` and an identical `world_locations[key]` entry → one shared
 environment across episodes.
 
+### Portable series CHARACTERS (NEW — 2026-06, commit on `main`)
+
+The character analogue of World Locations. A series now also owns a library of
+**World Characters** (`src/services/worldStateService.ts` — `WorldCharacter`,
+`listCharacters`, `matchForCue`), each with a human name, uppercase cue
+`aliases` (`AIDEN`, `YOUNG AIDEN`), description, traits, a reference portrait,
+and a **stable `stsCharacterKey`**. The manifest carries them two ways:
+
+1. **`world_characters`** — the shared library keyed by `stsCharacterKey`
+   (mirrors `world_locations`):
+
+   ```json
+   {
+     "world_characters": {
+       "stschar_mqv1_x9": {
+         "name": "Aiden",
+         "aliases": ["AIDEN", "YOUNG AIDEN"],
+         "description": "an immortal boy with a pet dragon",
+         "traits": ["brave", "impulsive"],
+         "reference_image_path": "/abs/path/series/aiden.png",
+         "reference_image_data_url": "data:image/png;base64,..."  // only if no file path
+       }
+     }
+   }
+   ```
+
+2. **`characters[NAME]` pre-population** — for the character's name **and every
+   cue alias**, so STS's by-name character detection arrives with a portrait
+   already attached. Each gets `reference_image_path`, `visual_prompt`
+   (description), and a `world_character_key` back-reference. A generated
+   character *asset* for the same name keeps precedence; world characters fill
+   the gaps.
+
+**STS consumption:** build the character library from `world_characters` (key on
+`world_character_key`, portable across episodes); when STS detects a cue, look it
+up in `characters[CUE]` to pre-populate the reference portrait.
+
+### Linking the screenplay
+
+The manifest now carries a top-level **`screenplay`** object so the manifest is
+self-linked to its script: `{ script_hash, project_name, fountain }` (the full
+Fountain text is embedded). Match `script_hash` against the separately-exported
+`.fountain`, or parse `screenplay.fountain` directly.
+
+### Both refs per shot (scene + character)
+
+Each `generated_media[...]` shot entry now carries **both** references so a
+provider that accepts a scene/style reference alongside character references gets
+both for that shot:
+
+- `character_refs` — `{ NAME: image_path }` (unchanged).
+- `scene_reference_path` — the shot's scene's World-Location image, resolved via
+  `resolveLocationForScene(sceneIndex)`.
+- `world_location_key` — the stable key for that scene's location.
+
+For shots **STS generates itself** (not pre-rendered by LightWriter), pair them
+the same way: for a shot in scene *N* featuring characters *[A, B]*, send the
+provider `locations[N]`/`world_locations[...]` scene image **and**
+`characters[A]`/`characters[B]` portraits together. This is the "scene saved
+together with character" the handoff targets — previously only character refs
+were sent.
+
 ### Image durability
 
-World-location reference images are persisted to disk on save in the desktop app
-(`persistGeneratedImageFile`) and exported as `reference_image_path`. If a
-location has no saved file path yet, the exporter embeds
-`reference_image_data_url` and adds a `_lightwriter_warnings` note. Accept either.
+World-location and world-character reference images are persisted to disk on save
+in the desktop app (`persistGeneratedImageFile`) and exported as
+`reference_image_path`. If a record has no saved file path yet, the exporter
+embeds `reference_image_data_url` and adds a `_lightwriter_warnings` note. Accept
+either.
 
 ### Browser-mode export limit (no silent drops)
 
