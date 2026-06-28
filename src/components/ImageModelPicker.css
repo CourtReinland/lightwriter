@@ -1,0 +1,16 @@
+.image-model-picker {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.image-model-picker .imp-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  background: #1b1b1b;
+  border: 1px solid #333;
+  color: #ddd;
+  border-radius: 4px;
+  padding: 4px 6px;
+}

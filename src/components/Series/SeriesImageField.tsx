@@ -3,18 +3,17 @@ import type { AssetProvider } from "../../types/assets";
 import {
   generateImageAsset,
   getImageProviderSettings,
-  hasImageProviderApiKey,
   providerLabel,
   type ImageGenerationRequest,
 } from "../../services/imageGenerationService";
+import ImageModelPicker from "../ImageModelPicker";
 import "./SeriesImageField.css";
 
 // Shared "attach a file OR generate one from a description" control, reused by
-// series scenes, series characters, and the editor add-to-series popup. It only
-// hands the chosen image (dataUrl + mimeType) back to the parent via onChange —
-// persistence to disk is the parent's job (on save), mirroring WorldSection.
-
-const PROVIDERS: AssetProvider[] = ["gemini-nano-banana", "grok-imagine"];
+// series scenes, series characters, the editor add-to-series popup, and the KB
+// entry editor. It only hands the chosen image (dataUrl + mimeType) back to the
+// parent via onChange — persistence is the parent's job. The provider + image
+// model are picked right here (point of use) via ImageModelPicker.
 
 export interface SeriesImageValue {
   dataUrl: string;
@@ -22,8 +21,8 @@ export interface SeriesImageValue {
 }
 
 interface SeriesImageFieldProps {
-  /** Series scope id, used as the projectId of the generation request. */
-  seriesId: string;
+  /** Id used as the projectId of the generation request (a series id or project id). */
+  scopeId: string;
   kind: "scene_set" | "character";
   /** Entity name (generation request name + scriptRef). */
   name: string;
@@ -33,9 +32,10 @@ interface SeriesImageFieldProps {
   onChange: (value: SeriesImageValue | null) => void;
 }
 
-export default function SeriesImageField({ seriesId, kind, name, description, imageDataUrl, onChange }: SeriesImageFieldProps) {
+export default function SeriesImageField({ scopeId, kind, name, description, imageDataUrl, onChange }: SeriesImageFieldProps) {
   const [mode, setMode] = useState<"idle" | "generate">("idle");
   const [provider, setProvider] = useState<AssetProvider>("gemini-nano-banana");
+  const [model, setModel] = useState<string>(() => getImageProviderSettings("gemini-nano-banana").selectedModel || "");
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,18 +65,19 @@ export default function SeriesImageField({ seriesId, kind, name, description, im
       setError(`Add a ${providerLabel(provider)} API key in Settings first.`);
       return;
     }
-    if (!settings.selectedModel?.trim()) {
-      setError(`Choose a ${providerLabel(provider)} image model in Settings first.`);
+    const chosenModel = model || settings.selectedModel;
+    if (!chosenModel.trim()) {
+      setError(`Choose a ${providerLabel(provider)} image model first.`);
       return;
     }
     setGenerating(true);
     setError(null);
     try {
       const request: ImageGenerationRequest = {
-        projectId: seriesId,
+        projectId: scopeId,
         kind,
         provider,
-        model: settings.selectedModel,
+        model: chosenModel,
         name: name || (kind === "character" ? "Character" : "Scene"),
         prompt: text,
         scriptRef: { scriptHash: "", ...(kind === "character" ? { characterName: name } : { sceneHeading: name }) },
@@ -121,11 +122,7 @@ export default function SeriesImageField({ seriesId, kind, name, description, im
 
       {mode === "generate" && (
         <div className="sif-generate">
-          <select className="sif-select" value={provider} onChange={(e) => { setProvider(e.target.value as AssetProvider); setError(null); }}>
-            {PROVIDERS.map((p) => (
-              <option key={p} value={p}>{providerLabel(p)}{hasImageProviderApiKey(p) ? "" : " — no key"}</option>
-            ))}
-          </select>
+          <ImageModelPicker provider={provider} model={model} onChange={(p, m) => { setProvider(p); setModel(m); setError(null); }} />
           <textarea
             className="sif-prompt"
             rows={3}

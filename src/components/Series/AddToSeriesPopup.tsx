@@ -123,7 +123,7 @@ export default function AddToSeriesPopup({ target, onClose, onAdded }: AddToSeri
         placeholder={isScene ? "Visual description (optional)" : "Appearance / who they are (optional)"}
       />
       <SeriesImageField
-        seriesId={seriesId}
+        scopeId={seriesId}
         kind={isScene ? "scene_set" : "character"}
         name={name}
         description={description}

@@ -38,6 +38,7 @@ import {
 } from "../../services/textAiSettingsService";
 import ModelPicker from "../ModelPicker";
 import { parseCharactersWithTextAi, buildCharacterAssetPrompt } from "../../services/characterParserService";
+import { WorldStateService, extractLocationToken } from "../../services/worldStateService";
 import "./AssetPanel.css";
 
 interface AssetPanelProps {
@@ -45,6 +46,8 @@ interface AssetPanelProps {
   assets: GeneratedAsset[];
   onAssetsChange: (assets: GeneratedAsset[]) => void;
   onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
+  /** Bump App's worldVersion when a series scene/character image is assigned here. */
+  onWorldChange?: () => void;
   /**
    * "settings" — provider/API-key/style config + export (shown under the Settings toggle).
    * "generation" — character/scene image generation, embedded inside the KB panel.
@@ -69,7 +72,7 @@ function isKnownModel(modelOptions: { id: string }[], model: string): boolean {
   return modelOptions.some((option) => option.id === model);
 }
 
-export default function AssetPanel({ project, assets, onAssetsChange, onGenerationComplete, mode = "full" }: AssetPanelProps) {
+export default function AssetPanel({ project, assets, onAssetsChange, onGenerationComplete, onWorldChange, mode = "full" }: AssetPanelProps) {
   const showSettings = mode === "settings" || mode === "full";
   const showGeneration = mode === "generation" || mode === "full";
   const [activeTab, setActiveTab] = useState<AssetSubTab>(mode === "generation" ? "characters" : "settings");
@@ -294,6 +297,8 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const choices = sourceKind === "character" ? characters : sourceKind === "shot" ? shots : scenes;
   const selected = choices[Number(selectedKey)] || choices[0];
   const selectedPromptDraftKey = promptDraftKey(sourceKind, selectedKey);
+  // Already-generated assets of the current kind, offered for direct assignment to the series record.
+  const assignableAssets = useMemo(() => assets.filter((asset) => asset.kind === sourceKind), [assets, sourceKind]);
 
   useEffect(() => {
     setPromptDrafts({});
@@ -400,6 +405,71 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
     if (scope === "character") setCharacterStyleReference(null);
     else setSceneStyleReference(null);
     setSettingsMessage(`${scope === "character" ? "Character" : "Scene"} style reference cleared.`);
+  };
+
+  // Assign a FINISHED image (made elsewhere or already generated) straight to the
+  // selected character/scene's slot in the series database (WorldCharacter /
+  // WorldLocation). This is not a generation input — it sets the record's image.
+  const handleAssignFinishedImage = async (dataUrl: string, mimeType: string) => {
+    const sid = project.seriesId;
+    if (!sid) {
+      setSettingsMessage("Assign this script to a series first (KB → Series) to save character/scene images.");
+      return;
+    }
+    if (!selected) return;
+    try {
+      if (sourceKind === "character") {
+        const cname = (selected as ScriptCharacterRef).name;
+        const existing = WorldStateService.matchForCue(sid, cname)[0];
+        const rec = existing
+          ? WorldStateService.updateCharacter(existing.id, { referenceImageDataUrl: dataUrl, referenceMimeType: mimeType })
+          : WorldStateService.addCharacter(sid, { name: cname, referenceImageDataUrl: dataUrl, referenceMimeType: mimeType });
+        if (rec) {
+          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType, dataUrl });
+          if (fp) WorldStateService.updateCharacter(rec.id, { referenceFilePath: fp });
+        }
+        setSettingsMessage(`Assigned image to series character "${cname}".`);
+      } else if (sourceKind === "scene_set") {
+        const heading = (selected as ScriptSceneRef).heading;
+        const token = extractLocationToken(heading) || heading;
+        const niceName = token.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+        const existing = WorldStateService.matchForHeading(sid, heading)[0];
+        const rec = existing
+          ? WorldStateService.updateLocation(existing.id, { referenceImageDataUrl: dataUrl, referenceMimeType: mimeType })
+          : WorldStateService.addLocation(sid, { name: niceName, aliases: [token.toUpperCase()], referenceImageDataUrl: dataUrl, referenceMimeType: mimeType });
+        if (rec) {
+          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType, dataUrl });
+          if (fp) WorldStateService.updateLocation(rec.id, { referenceFilePath: fp });
+        }
+        setSettingsMessage(`Assigned image to series scene "${niceName}".`);
+      }
+      onWorldChange?.();
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Could not assign image to the series.");
+    }
+  };
+
+  const handleAssignUpload = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setSettingsMessage("Choose an image file to assign.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => handleAssignFinishedImage(String(reader.result || ""), file.type);
+    reader.onerror = () => setSettingsMessage("Could not read the image file.");
+    reader.readAsDataURL(file);
+  };
+
+  const handleAssignFromAsset = async (assetId: string) => {
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return;
+    const dataUrl = asset.imageDataUrl || assetPreviewDataUrls[asset.id] || (await loadPersistedImageDataUrl(asset.filePath));
+    if (!dataUrl) {
+      setSettingsMessage("That asset has no loadable image yet.");
+      return;
+    }
+    await handleAssignFinishedImage(dataUrl, asset.mimeType);
   };
 
   const buildAssetRequestForChoice = (choice: ScriptSceneRef | ScriptCharacterRef | ScriptShotRef, promptText: string): ImageGenerationRequest | null => {
@@ -824,6 +894,53 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
             <p className="asset-status">
               {isParsingCharacters ? "LLM character parser running..." : characterParserMessage || `Using ${characters.length} parsed character${characters.length === 1 ? "" : "s"}.`}
             </p>
+          )}
+
+          <section className="asset-settings-box">
+            <h3>Image model</h3>
+            <p className="asset-muted">Provider &amp; model for this generation — pick it right here, or set defaults in Settings.</p>
+            <label>
+              Provider
+              <select value={provider} onChange={(event) => setProvider(event.target.value as AssetProvider)}>
+                {providerOptions().map((item) => (
+                  <option key={item} value={item}>{providerLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Model
+              <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={isPollingModels && modelOptions.length === 0}>
+                <option value="">{isPollingModels ? "Loading models..." : modelOptions.length ? "Choose model…" : "No models loaded yet"}</option>
+                {modelOptions.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </section>
+
+          {(sourceKind === "character" || sourceKind === "scene_set") && (
+            <section className="asset-settings-box">
+              <h3>Assign a finished image to the series {sourceKind === "character" ? "character" : "scene"}</h3>
+              <p className="asset-muted">
+                Already have a final image (made elsewhere)? Save it straight to this {sourceKind === "character" ? "character" : "scene"}'s slot in the series database
+                {project.seriesId ? "." : " — assign this script to a series first (KB → Series)."}
+              </p>
+              <label>
+                Upload finished image
+                <input type="file" accept="image/*" disabled={!project.seriesId} onChange={(event) => handleAssignUpload(event.target.files?.[0])} />
+              </label>
+              {assignableAssets.length > 0 && (
+                <label>
+                  …or use one you already generated
+                  <select value="" disabled={!project.seriesId} onChange={(event) => { if (event.target.value) void handleAssignFromAsset(event.target.value); }}>
+                    <option value="">Pick a generated {sourceKind === "character" ? "portrait" : "scene"}…</option>
+                    {assignableAssets.map((a) => (
+                      <option key={a.id} value={a.id}>{assetName(a)}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </section>
           )}
 
           <section className="asset-settings-box asset-style-reference-box">

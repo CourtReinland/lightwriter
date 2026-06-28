@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { KBCharacter, KBWorldRule, KBPlotThread, KBCustomNote, KBScene } from "../../services/knowledgeBase";
+import SeriesImageField, { type SeriesImageValue } from "../Series/SeriesImageField";
 import "./KBEntryEditor.css";
 
 type EntryType = "character" | "scene" | "worldRule" | "plotThread" | "customNote";
@@ -7,11 +8,15 @@ type EntryType = "character" | "scene" | "worldRule" | "plotThread" | "customNot
 interface KBEntryEditorProps {
   type: EntryType;
   existing?: KBCharacter | KBScene | KBWorldRule | KBPlotThread | KBCustomNote;
+  /** Project id, used to scope a generated/uploaded image for this entry. */
+  projectId?: string;
   onSave: (type: EntryType, data: Record<string, unknown>) => void;
   onClose: () => void;
 }
 
-export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEntryEditorProps) {
+export default function KBEntryEditor({ type, existing, projectId, onSave, onClose }: KBEntryEditorProps) {
+  // Optional image attached to a character/scene entry (uploaded or generated).
+  const [image, setImage] = useState<SeriesImageValue | null>(null);
   // Character fields
   const [name, setName] = useState((existing as KBCharacter)?.name ?? "");
   const [sceneHeading, setSceneHeading] = useState((existing as KBScene)?.heading ?? "");
@@ -51,6 +56,7 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
           traits: traits.split(",").map(t => t.trim()).filter(Boolean),
           voiceNotes,
           relationships: (existing as KBCharacter)?.relationships ?? [],
+          __image: image || undefined,
         });
         break;
       case "scene":
@@ -58,6 +64,7 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
           heading: sceneHeading,
           sceneIndex: (existing as KBScene)?.sceneIndex,
           description,
+          __image: image || undefined,
         });
         break;
       case "worldRule":
@@ -97,6 +104,8 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
             <input className="kb-input" value={traits} onChange={e => setTraits(e.target.value)} placeholder="brave, sarcastic, loyal" />
             <label className="kb-label">Voice Notes</label>
             <textarea className="kb-textarea" value={voiceNotes} onChange={e => setVoiceNotes(e.target.value)} placeholder="How do they speak? Short sentences? Formal? Slang?" rows={2} />
+            <label className="kb-label">Image (upload or generate)</label>
+            <SeriesImageField scopeId={projectId || ""} kind="character" name={name} description={description} imageDataUrl={image?.dataUrl} onChange={setImage} />
           </>
         )}
 
@@ -106,6 +115,8 @@ export default function KBEntryEditor({ type, existing, onSave, onClose }: KBEnt
             <input className="kb-input" value={sceneHeading} onChange={e => setSceneHeading(e.target.value)} placeholder="INT. LIBRARY - NIGHT" autoFocus />
             <label className="kb-label">Description</label>
             <textarea className="kb-textarea" value={description} onChange={e => setDescription(e.target.value)} placeholder="What should this scene look and feel like?" rows={4} />
+            <label className="kb-label">Image (upload or generate)</label>
+            <SeriesImageField scopeId={projectId || ""} kind="scene_set" name={sceneHeading} description={description} imageDataUrl={image?.dataUrl} onChange={setImage} />
           </>
         )}
 

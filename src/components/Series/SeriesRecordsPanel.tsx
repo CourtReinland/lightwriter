@@ -243,7 +243,7 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
             </>
           )}
           <SeriesImageField
-            seriesId={seriesId}
+            scopeId={seriesId}
             kind={isScene ? "scene_set" : "character"}
             name={draft.name}
             description={draft.description}

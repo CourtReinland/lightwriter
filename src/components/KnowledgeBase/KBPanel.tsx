@@ -201,42 +201,86 @@ export default function KBPanel({
     }
   };
 
+  // Attach an uploaded/generated image to a character/scene entry as a per-project
+  // GeneratedAsset, so it merges into the KB list (by name) and feeds Export.
+  // Upserts by name+kind so re-saving an entry replaces its image instead of
+  // accumulating duplicate asset records.
+  const attachImageAsset = useCallback(async (type: string, name: string, image: { dataUrl: string; mimeType: string }, sceneIndex?: number) => {
+    if (!name.trim()) return;
+    const kind: AssetKind = type === "character" ? "character" : "scene_set";
+    try {
+      const filePath = await persistGeneratedImageFile({ projectId, name, mimeType: image.mimeType, dataUrl: image.dataUrl });
+      const request: ImageGenerationRequest = {
+        projectId,
+        kind,
+        provider: "gemini-nano-banana",
+        model: "",
+        name,
+        prompt: "",
+        // Carry the scene index when known so the export binds the image to the
+        // right scene (not the default "0"); a manual scene with no index stays
+        // unbound and is skipped from the manifest's locations.
+        scriptRef: { scriptHash: "", ...(type === "character" ? { characterName: name } : { sceneHeading: name, sceneIndex }) },
+        aspectRatio: type === "character" ? "2:3" : "16:9",
+      };
+      const generated = buildGeneratedAssetFromResult(request, { mimeType: image.mimeType, imageDataUrl: image.dataUrl, filePath: filePath || undefined });
+      const key = name.trim().toLowerCase();
+      const existing = AssetService.getAssets(projectId).find(
+        (a) => a.kind === kind && ((type === "character" ? a.scriptRef.characterName : a.scriptRef.sceneHeading) || a.name || "").trim().toLowerCase() === key,
+      );
+      if (existing) {
+        AssetService.updateAsset(projectId, existing.id, { imageDataUrl: generated.imageDataUrl, filePath: generated.filePath, mimeType: generated.mimeType });
+      } else {
+        AssetService.addAsset(projectId, generated);
+      }
+      onAssetsChange(AssetService.getAssets(projectId));
+    } catch {
+      /* best-effort; the text entry is already saved */
+    }
+  }, [projectId, onAssetsChange]);
+
   const handleSave = useCallback((type: string, data: Record<string, unknown>) => {
+    const { __image, ...fields } = data as { __image?: { dataUrl: string; mimeType: string } } & Record<string, unknown>;
     let updated = kb;
     const existingId = editTarget?.existing && "id" in editTarget.existing ? editTarget.existing.id : null;
 
     switch (type) {
       case "character":
         updated = existingId
-          ? KnowledgeBaseService.updateCharacter(kb, existingId, data as Partial<KBCharacter>)
-          : KnowledgeBaseService.addCharacter(kb, data as Omit<KBCharacter, "id">);
+          ? KnowledgeBaseService.updateCharacter(kb, existingId, fields as Partial<KBCharacter>)
+          : KnowledgeBaseService.addCharacter(kb, fields as Omit<KBCharacter, "id">);
         break;
       case "scene":
         updated = existingId
-          ? KnowledgeBaseService.updateScene(kb, existingId, data as Partial<KBScene>)
-          : KnowledgeBaseService.addScene(kb, data as Omit<KBScene, "id">);
+          ? KnowledgeBaseService.updateScene(kb, existingId, fields as Partial<KBScene>)
+          : KnowledgeBaseService.addScene(kb, fields as Omit<KBScene, "id">);
         break;
       case "worldRule":
         updated = existingId
-          ? KnowledgeBaseService.updateWorldRule(kb, existingId, data as Partial<KBWorldRule>)
-          : KnowledgeBaseService.addWorldRule(kb, data as Omit<KBWorldRule, "id">);
+          ? KnowledgeBaseService.updateWorldRule(kb, existingId, fields as Partial<KBWorldRule>)
+          : KnowledgeBaseService.addWorldRule(kb, fields as Omit<KBWorldRule, "id">);
         break;
       case "plotThread":
         updated = existingId
-          ? KnowledgeBaseService.updatePlotThread(kb, existingId, data as Partial<KBPlotThread>)
-          : KnowledgeBaseService.addPlotThread(kb, data as Omit<KBPlotThread, "id">);
+          ? KnowledgeBaseService.updatePlotThread(kb, existingId, fields as Partial<KBPlotThread>)
+          : KnowledgeBaseService.addPlotThread(kb, fields as Omit<KBPlotThread, "id">);
         break;
       case "customNote":
         updated = existingId
-          ? KnowledgeBaseService.updateCustomNote(kb, existingId, data as Partial<KBCustomNote>)
-          : KnowledgeBaseService.addCustomNote(kb, data as Omit<KBCustomNote, "id">);
+          ? KnowledgeBaseService.updateCustomNote(kb, existingId, fields as Partial<KBCustomNote>)
+          : KnowledgeBaseService.addCustomNote(kb, fields as Omit<KBCustomNote, "id">);
         break;
     }
 
     KnowledgeBaseService.saveKB(updated);
     onKBChange(updated);
+    if (__image && (type === "character" || type === "scene")) {
+      const name = (type === "character" ? fields.name : fields.heading) as string;
+      const sceneIndex = type === "scene" ? (fields.sceneIndex as number | undefined) : undefined;
+      void attachImageAsset(type, name || "", __image, sceneIndex);
+    }
     setEditTarget(null);
-  }, [kb, editTarget, onKBChange]);
+  }, [kb, editTarget, onKBChange, attachImageAsset]);
 
   const handleDelete = useCallback((type: string, id: string) => {
     let updated = kb;
@@ -789,6 +833,7 @@ export default function KBPanel({
         <KBEntryEditor
           type={editTarget.type}
           existing={editTarget.existing}
+          projectId={projectId}
           onSave={handleSave}
           onClose={() => setEditTarget(null)}
         />

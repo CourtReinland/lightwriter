@@ -43,6 +43,8 @@ interface SuggestionPanelProps {
   assets: GeneratedAsset[];
   onAssetsChange: (assets: GeneratedAsset[]) => void;
   onGenerationComplete?: (assets: GeneratedAsset[], kind: AssetKind) => void;
+  /** Bump App's worldVersion when a series scene/character image is assigned in image-gen. */
+  onWorldChange?: () => void;
   onApply: (text: string) => void;
   onInsertBelow: (text: string) => void;
   onReplaceScript: (text: string) => void;
@@ -105,6 +107,7 @@ export default function SuggestionPanel({
   assets,
   onAssetsChange,
   onGenerationComplete,
+  onWorldChange,
   onApply,
   onInsertBelow,
   onReplaceScript,
@@ -960,6 +963,7 @@ export default function SuggestionPanel({
                 assets={assets}
                 onAssetsChange={onAssetsChange}
                 onGenerationComplete={onGenerationComplete}
+                onWorldChange={onWorldChange}
               />
             </div>
           )}

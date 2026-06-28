@@ -103,6 +103,30 @@ describe("buildScript2ScreenManifest — series characters + script link", () =>
     expect(m.characters["AIDEN"].world_character_key).toBe(aiden.stsCharacterKey); // still tagged
   });
 
+  it("skips an unbound scene image (no scene index) so it can't clobber locations[0]", () => {
+    const s = WorldStateService.createSeries("S");
+    const asset: GeneratedAsset = {
+      id: "sc1", projectId: "p1", kind: "scene_set", provider: "gemini-nano-banana", model: "g",
+      name: "Loose kitchen note", prompt: "", mimeType: "image/png", filePath: "/imgs/note.png",
+      createdAt: 0, updatedAt: 0, scriptRef: { scriptHash: "", sceneHeading: "INT. KITCHEN - DAY" }, metadata: { promptVersion: 1 },
+    };
+    const m = buildScript2ScreenManifest({ project: project(s.id), assets: [asset] });
+    expect(m.locations["0"]).toBeUndefined();
+    expect(m._lightwriter_warnings?.some((w) => /isn't bound to a script scene/i.test(w))).toBe(true);
+  });
+
+  it("binds a scene image that has a scene index into locations", () => {
+    const s = WorldStateService.createSeries("S");
+    const asset: GeneratedAsset = {
+      id: "sc2", projectId: "p1", kind: "scene_set", provider: "gemini-nano-banana", model: "g",
+      name: "Kitchen", prompt: "", mimeType: "image/png", filePath: "/imgs/kitchen.png",
+      createdAt: 0, updatedAt: 0, scriptRef: { scriptHash: "", sceneHeading: "INT. KITCHEN - DAY", sceneIndex: 0 }, metadata: { promptVersion: 1 },
+    };
+    const m = buildScript2ScreenManifest({ project: project(s.id), assets: [asset] });
+    expect(m.locations["0"]).toBeTruthy();
+    expect((m.locations["0"] as Record<string, unknown>).file_path).toBe("/imgs/kitchen.png");
+  });
+
   it("omits the world layer for a script with no series", () => {
     const m = buildScript2ScreenManifest({ project: project(undefined), assets: [] });
     expect(m.world_characters).toBeUndefined();

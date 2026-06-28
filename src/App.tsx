@@ -774,6 +774,7 @@ export default function App() {
               assets={assets}
               onAssetsChange={setAssets}
               onGenerationComplete={handleAssetGenerationComplete}
+              onWorldChange={() => setWorldVersion((v) => v + 1)}
               onApply={handleApplySuggestion}
               onInsertBelow={handleInsertBelow}
               onReplaceScript={handleSuggestionReplaceScript}
@@ -812,6 +813,7 @@ export default function App() {
               assets={assets}
               onAssetsChange={setAssets}
               onGenerationComplete={handleAssetGenerationComplete}
+              onWorldChange={() => setWorldVersion((v) => v + 1)}
             />
           )}
           {activeView === "editor" && showExport && (

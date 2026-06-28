@@ -181,6 +181,16 @@ export function buildScript2ScreenManifest(args: {
         warnings.push(`Scene background "${sceneLabel}" skipped: no durable image file path (generate/persist it in the desktop app before export).`);
         continue;
       }
+      // A scene_set image not bound to a script scene (no scene index, no explicit
+      // key — e.g. a manual KB scene note) must NOT default to scene "0" or it
+      // would clobber the real first scene's location. Skip it from locations.
+      const hasSceneBinding =
+        (typeof asset.metadata.script2ScreenSceneKey === "string" && asset.metadata.script2ScreenSceneKey !== "") ||
+        asset.scriptRef.sceneIndex !== undefined;
+      if (!hasSceneBinding) {
+        warnings.push(`Scene image "${sceneLabel}" isn't bound to a script scene (no scene index); skipped from the manifest locations.`);
+        continue;
+      }
       const sceneKey = sceneKeyFor(asset);
       const stylePath = typeof asset.metadata.styleReferencePath === "string" ? asset.metadata.styleReferencePath : "";
       manifest.locations[sceneKey] = {
