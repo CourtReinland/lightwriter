@@ -1,0 +1,58 @@
+.add-series-popup {
+  position: fixed;
+  z-index: 1000;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-family: system-ui, sans-serif;
+}
+
+.asp-head {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8ab4f8;
+}
+
+.asp-input,
+.asp-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  background: #131313;
+  border: 1px solid #333;
+  color: #eee;
+  border-radius: 5px;
+  padding: 5px 7px;
+}
+.asp-textarea { resize: vertical; font-family: inherit; }
+
+.asp-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.asp-btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid #3a3a3a;
+  background: #222;
+  color: #ddd;
+  cursor: pointer;
+}
+.asp-btn:hover { background: #2b2b2b; }
+.asp-btn.primary { background: #2d5e48; border-color: #3f7d61; color: #eafff4; }
+.asp-btn.primary:hover { background: #356b53; }
+.asp-btn.primary:disabled { opacity: 0.5; cursor: default; }
+
+.asp-error {
+  font-size: 11px;
+  color: #e88;
+}

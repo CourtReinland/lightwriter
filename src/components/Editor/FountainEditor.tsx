@@ -7,7 +7,8 @@ import { fountainLanguage } from "../../codemirror/fountain-language";
 import { fountainEditorTheme, fountainHighlightStyle } from "../../codemirror/fountain-theme";
 import { overlayExtension, setOverlayBeats } from "../../codemirror/overlay-decorations";
 import { locationGutter, setLocationGutter } from "../../codemirror/location-gutter";
-import { screenplayFormatting } from "../../codemirror/screenplay-formatting";
+import { screenplayFormatting, classifyDocument } from "../../codemirror/screenplay-formatting";
+import { isSceneHeading, extractLocationToken, extractCharacterName } from "../../services/worldStateService";
 import { ALL_FRAMEWORKS, computeBeatRanges } from "../../frameworks";
 import type { ComputedBeat } from "../../frameworks";
 import { detectElementType, stripForcePrefix, type ElementType } from "./ElementBar";
@@ -125,7 +126,22 @@ interface FountainEditorProps {
   onCursorBeatChange?: (beats: ComputedBeat[]) => void;
   /** 1-based scene-heading line -> world location name, for the location gutter. */
   locationLines?: Map<number, string>;
+  /** Fired when the user clicks a scene heading or a CHARACTER cue (for add-to-series). */
+  onLineAffordance?: (info: LineAffordance) => void;
   viewRef?: React.MutableRefObject<EditorView | undefined>;
+}
+
+export interface LineAffordance {
+  kind: "scene" | "character";
+  /** Trimmed full line text (the heading or the cue). */
+  text: string;
+  /** Bare token/name (location token for scenes, character name for cues). */
+  name: string;
+  /** 1-based line number. */
+  lineNumber: number;
+  /** Viewport coordinates of the click (for popup positioning). */
+  x: number;
+  y: number;
 }
 
 export default function FountainEditor({
@@ -137,6 +153,7 @@ export default function FountainEditor({
   onElementChange,
   onCursorBeatChange,
   locationLines,
+  onLineAffordance,
   viewRef: externalViewRef,
 }: FountainEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -146,10 +163,12 @@ export default function FountainEditor({
   const onSelectionRef = useRef(onSelectionChange);
   const onElementRef = useRef(onElementChange);
   const onCursorBeatRef = useRef(onCursorBeatChange);
+  const onLineAffordanceRef = useRef(onLineAffordance);
   onChangeRef.current = onChange;
   onSelectionRef.current = onSelectionChange;
   onElementRef.current = onElementChange;
   onCursorBeatRef.current = onCursorBeatChange;
+  onLineAffordanceRef.current = onLineAffordance;
 
   const createView = useCallback(() => {
     if (!containerRef.current) return;
@@ -290,6 +309,47 @@ export default function FountainEditor({
             );
             onCursorBeatRef.current?.(matchingBeats);
           }
+        }),
+        // Click a scene heading or a CHARACTER cue → surface an add-to-series
+        // affordance. Returns false so normal cursor placement still happens.
+        EditorView.domEventHandlers({
+          click(event, view) {
+            const cb = onLineAffordanceRef.current;
+            if (!cb) return false;
+            // Single, on-text clicks only: skip double-click / drag-select gestures
+            // and clicks in the empty area below the last line.
+            if (event.detail > 1) return false;
+            const targetEl = event.target as HTMLElement | null;
+            if (!targetEl || !targetEl.closest(".cm-line")) return false;
+            const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos == null) return false;
+            const line = view.state.doc.lineAt(pos);
+            const text = line.text.trim();
+            if (!text) return false;
+
+            if (isSceneHeading(line.text)) {
+              const token = extractLocationToken(line.text);
+              if (token) {
+                cb({ kind: "scene", text, name: token, lineNumber: line.number, x: event.clientX, y: event.clientY });
+              }
+              return false;
+            }
+
+            // Only a CHARACTER cue can match here. Cheap pre-check (@-forced or
+            // all-caps) before the O(n) context-aware classification.
+            const couldBeCue = /^@/.test(text) || (text === text.toUpperCase() && /[A-Z]/.test(text));
+            if (!couldBeCue) return false;
+            const lineTexts: string[] = [];
+            for (let i = 1; i <= view.state.doc.lines; i++) lineTexts.push(view.state.doc.line(i).text);
+            const types = classifyDocument(lineTexts);
+            if (types[line.number - 1] === "character") {
+              const name = extractCharacterName(line.text);
+              if (name) {
+                cb({ kind: "character", text, name, lineNumber: line.number, x: event.clientX, y: event.clientY });
+              }
+            }
+            return false;
+          },
         }),
         EditorView.lineWrapping,
       ],

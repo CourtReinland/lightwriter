@@ -20,7 +20,7 @@ class LocationMarker extends GutterMarker {
     const el = document.createElement("span");
     el.className = "cm-loc-marker";
     el.textContent = "◆"; // ◆
-    if (this.name) el.title = `World location: ${this.name}`;
+    if (this.name) el.title = `Series scene: ${this.name}`;
     return el;
   }
 }

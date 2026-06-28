@@ -20,6 +20,8 @@ import AssetPanel from "./components/Assets/AssetPanel";
 import ExportPanel from "./components/Export/ExportPanel";
 import SeriesView from "./components/Series/SeriesView";
 import LocationBar from "./components/Editor/LocationBar";
+import AddToSeriesPopup, { type AddToSeriesTarget } from "./components/Series/AddToSeriesPopup";
+import type { LineAffordance } from "./components/Editor/FountainEditor";
 import { WorldStateService, findSceneAtLine, listSceneHeadings } from "./services/worldStateService";
 import { serializeEpisodeContext } from "./services/seriesContextService";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
@@ -551,6 +553,7 @@ export default function App() {
       totalEpisodes: WorldStateService.episodeCount(sid),
       arcs: WorldStateService.listArcs(sid),
       cliffhangers: WorldStateService.listCliffhangers(sid),
+      characters: WorldStateService.listCharacters(sid),
     });
   }, [project.seriesId, project.id, worldVersion]);
 
@@ -574,6 +577,44 @@ export default function App() {
     WorldStateService.bindScene(project.id, currentScene.index, loc.id);
     setWorldVersion((v) => v + 1);
   }, [currentScene, project.seriesId, project.id]);
+
+  // Clicking a scene heading or a CHARACTER cue offers to add it to the series.
+  // Only un-added entities prompt (matched ones are already represented), and the
+  // popup is dismissed by typing, Escape, or clicking away.
+  const [affordance, setAffordance] = useState<AddToSeriesTarget | null>(null);
+  const titleCase = (s: string) => s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  const handleLineAffordance = useCallback((info: LineAffordance) => {
+    const sid = project.seriesId;
+    if (!sid) return; // need a series to add to
+    if (info.kind === "scene") {
+      if (WorldStateService.matchForHeading(sid, info.text).length) return; // already represented
+      const sceneIndex = findSceneAtLine(project.content, info.lineNumber)?.index;
+      setAffordance({
+        kind: "scene",
+        name: titleCase(info.name),
+        alias: info.name.toUpperCase(),
+        seriesId: sid,
+        projectId: project.id,
+        sceneIndex,
+        x: info.x,
+        y: info.y,
+      });
+    } else {
+      if (WorldStateService.matchForCue(sid, info.text).length) return; // already represented
+      setAffordance({
+        kind: "character",
+        name: titleCase(info.name),
+        alias: info.name.toUpperCase(),
+        seriesId: sid,
+        projectId: project.id,
+        x: info.x,
+        y: info.y,
+      });
+    }
+  }, [project.seriesId, project.id, project.content]);
+
+  // Dismiss the add-to-series popup as soon as the user edits the script.
+  useEffect(() => { setAffordance(null); }, [project.content]);
 
   return (
     <ArtisticBorder>
@@ -665,7 +706,15 @@ export default function App() {
                 onElementChange={setCurrentElement}
                 onCursorBeatChange={setCursorBeats}
                 locationLines={locationGutterLines}
+                onLineAffordance={handleLineAffordance}
                 viewRef={editorViewRef}
+              />
+            )}
+            {activeView === "editor" && affordance && (
+              <AddToSeriesPopup
+                target={affordance}
+                onClose={() => setAffordance(null)}
+                onAdded={() => setWorldVersion((v) => v + 1)}
               />
             )}
             {activeView === "preview" && parsed && (
@@ -749,6 +798,8 @@ export default function App() {
               history={history}
               onRestoreVersion={handleRestoreVersion}
               onAssignSeries={handleAssignSeries}
+              onWorldChange={() => setWorldVersion((v) => v + 1)}
+              worldVersion={worldVersion}
               focusSection={kbFocus}
               notice={kbNotice}
               onClearNotice={() => setKbNotice("")}

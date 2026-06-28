@@ -60,8 +60,35 @@ export interface WorldLocation {
   updatedAt: number;
 }
 
+/**
+ * A portable, series-scoped character (sibling to WorldLocation): the same Aiden,
+ * with the same portrait and ScriptToScreen id, across every script in the series.
+ * Resolved from a Fountain CHARACTER cue via its uppercase `aliases`.
+ */
+export interface WorldCharacter {
+  id: string;
+  seriesId: string;
+  /** Human-facing name, e.g. "Aiden". */
+  name: string;
+  /** Uppercase CHARACTER-cue tokens that resolve to this character, e.g. ["AIDEN", "YOUNG AIDEN"]. */
+  aliases: string[];
+  /** Appearance / who they are — used for portrait generation & continuity. */
+  description: string;
+  traits?: string[];
+  voiceNotes?: string;
+  referenceImageDataUrl?: string;
+  referenceMimeType?: string;
+  /** Durable on-disk path of the portrait (Electron), for ScriptToScreen handoff. */
+  referenceFilePath?: string;
+  /** Stable key carried into the ScriptToScreen manifest's characters{}. */
+  stsCharacterKey: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 const SERIES_KEY = "lw-series";
 const LOCATIONS_KEY = "lw-world-locations";
+const CHARACTERS_KEY = "lw-world-characters";
 const BINDINGS_PREFIX = "lw-scene-locations-";
 const ARCS_KEY = "lw-series-arcs";
 const CLIFFHANGERS_KEY = "lw-series-cliffhangers";
@@ -124,6 +151,49 @@ export function matchLocations(locations: WorldLocation[], token: string): World
     .filter((x) => x.s < 99)
     .sort((a, b) => a.s - b.s)
     .map((x) => x.loc);
+}
+
+/**
+ * Pull the bare character name out of a Fountain CHARACTER cue:
+ *   "AIDEN"           -> "AIDEN"
+ *   "@Aiden"          -> "Aiden"
+ *   "AIDEN (V.O.)"    -> "AIDEN"
+ *   "AIDEN ^"         -> "AIDEN"  (dual-dialogue caret)
+ * Returns "" for an empty cue.
+ */
+export function extractCharacterName(cue: string): string {
+  let t = cue.trim();
+  if (!t) return "";
+  t = t.replace(/^@/, "");            // forced-character prefix
+  t = t.replace(/\^\s*$/, "");         // dual-dialogue caret
+  t = t.replace(/\s*\([^)]*\)\s*$/, ""); // trailing (V.O.) / (CONT'D) / (O.S.)
+  return t.trim();
+}
+
+/** Does a world character match a CHARACTER-cue name? */
+export function characterMatchesName(c: WorldCharacter, name: string): boolean {
+  const t = norm(name);
+  if (!t) return false;
+  const candidates = [c.name, ...c.aliases].map(norm).filter(Boolean);
+  return candidates.some((cand) => cand === t || cand.includes(t) || t.includes(cand));
+}
+
+/** Rank character matches: exact name/alias first, then contains. */
+export function matchCharacters(characters: WorldCharacter[], name: string): WorldCharacter[] {
+  const t = norm(name);
+  if (!t) return [];
+  const score = (c: WorldCharacter): number => {
+    const cands = [c.name, ...c.aliases].map(norm);
+    if (cands.some((cand) => cand === t)) return 0;
+    if (cands.some((cand) => cand.includes(t))) return 1;
+    if (cands.some((cand) => t.includes(cand))) return 2;
+    return 99;
+  };
+  return characters
+    .map((c) => ({ c, s: score(c) }))
+    .filter((x) => x.s < 99)
+    .sort((a, b) => a.s - b.s)
+    .map((x) => x.c);
 }
 
 const HEADING_RE = /^(INT\.|EXT\.|EST\.|INT\.?\/EXT\.?|I\/E\.?)/i;
@@ -268,6 +338,7 @@ export const WorldStateService = {
   deleteSeries(id: string): void {
     write(SERIES_KEY, read<Series>(SERIES_KEY).filter((s) => s.id !== id));
     write(LOCATIONS_KEY, read<WorldLocation>(LOCATIONS_KEY).filter((l) => l.seriesId !== id));
+    write(CHARACTERS_KEY, read<WorldCharacter>(CHARACTERS_KEY).filter((c) => c.seriesId !== id));
   },
 
   // Locations ---------------------------------------------------------------
@@ -319,6 +390,58 @@ export const WorldStateService = {
   /** Locations in a series that match a scene heading, best first. */
   matchForHeading(seriesId: string, heading: string): WorldLocation[] {
     return matchLocations(this.listLocations(seriesId), extractLocationToken(heading));
+  },
+
+  // Characters (portable across the series, sibling to locations) -----------
+  listCharacters(seriesId: string): WorldCharacter[] {
+    return read<WorldCharacter>(CHARACTERS_KEY)
+      .filter((c) => c.seriesId === seriesId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  getCharacter(id: string): WorldCharacter | null {
+    return read<WorldCharacter>(CHARACTERS_KEY).find((c) => c.id === id) || null;
+  },
+
+  addCharacter(seriesId: string, input: Partial<WorldCharacter> & { name: string }): WorldCharacter {
+    const now = Date.now();
+    const character: WorldCharacter = {
+      id: uid("char"),
+      seriesId,
+      name: input.name.trim(),
+      aliases: input.aliases && input.aliases.length ? input.aliases : [input.name.trim().toUpperCase()],
+      description: input.description || "",
+      traits: input.traits,
+      voiceNotes: input.voiceNotes,
+      referenceImageDataUrl: input.referenceImageDataUrl,
+      referenceMimeType: input.referenceMimeType,
+      referenceFilePath: input.referenceFilePath,
+      stsCharacterKey: input.stsCharacterKey || uid("stschar"),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const all = read<WorldCharacter>(CHARACTERS_KEY);
+    all.push(character);
+    write(CHARACTERS_KEY, all);
+    return character;
+  },
+
+  updateCharacter(id: string, updates: Partial<WorldCharacter>): WorldCharacter | null {
+    const all = read<WorldCharacter>(CHARACTERS_KEY);
+    const i = all.findIndex((c) => c.id === id);
+    if (i < 0) return null;
+    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: Date.now() };
+    write(CHARACTERS_KEY, all);
+    return all[i];
+  },
+
+  deleteCharacter(id: string): void {
+    write(CHARACTERS_KEY, read<WorldCharacter>(CHARACTERS_KEY).filter((c) => c.id !== id));
+  },
+
+  /** Characters in a series that match a CHARACTER cue, best first. */
+  matchForCue(seriesId: string, cue: string): WorldCharacter[] {
+    return matchCharacters(this.listCharacters(seriesId), extractCharacterName(cue));
   },
 
   // Per-script scene -> location bindings (override on top of alias auto-match)

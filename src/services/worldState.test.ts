@@ -3,6 +3,9 @@ import {
   extractLocationToken,
   locationMatchesToken,
   matchLocations,
+  extractCharacterName,
+  characterMatchesName,
+  matchCharacters,
   parseAliases,
   findSceneAtLine,
   isSceneHeading,
@@ -11,6 +14,7 @@ import {
   cliffhangerOpeningEpisode,
   WorldStateService,
   type WorldLocation,
+  type WorldCharacter,
   type SeriesArc,
 } from "./worldStateService";
 
@@ -41,6 +45,80 @@ function loc(name: string, aliases: string[]): WorldLocation {
     updatedAt: 0,
   };
 }
+
+function char(name: string, aliases: string[]): WorldCharacter {
+  return { id: "c", seriesId: "s", name, aliases, description: "", stsCharacterKey: "k", createdAt: 0, updatedAt: 0 };
+}
+
+describe("extractCharacterName", () => {
+  it("returns a plain cue unchanged", () => {
+    expect(extractCharacterName("AIDEN")).toBe("AIDEN");
+  });
+  it("strips the @ forced-character prefix", () => {
+    expect(extractCharacterName("@Aiden")).toBe("Aiden");
+  });
+  it("strips trailing parentheticals and the dual-dialogue caret", () => {
+    expect(extractCharacterName("AIDEN (V.O.)")).toBe("AIDEN");
+    expect(extractCharacterName("AIDEN (CONT'D)")).toBe("AIDEN");
+    expect(extractCharacterName("AIDEN ^")).toBe("AIDEN");
+    expect(extractCharacterName("AIDEN (O.S.) ^")).toBe("AIDEN");
+  });
+  it("returns empty for an empty cue", () => {
+    expect(extractCharacterName("   ")).toBe("");
+  });
+});
+
+describe("characterMatchesName / matchCharacters", () => {
+  const aiden = char("Aiden", ["AIDEN", "YOUNG AIDEN"]);
+  const mara = char("Mara", ["MARA"]);
+
+  it("matches a cue against name/aliases", () => {
+    expect(characterMatchesName(aiden, "AIDEN")).toBe(true);
+    expect(characterMatchesName(aiden, "YOUNG AIDEN")).toBe(true);
+    expect(characterMatchesName(aiden, "MARA")).toBe(false);
+  });
+
+  it("ranks exact match first and excludes non-matches", () => {
+    const ranked = matchCharacters([mara, aiden], "AIDEN");
+    expect(ranked.map((c) => c.name)).toEqual(["Aiden"]);
+    expect(matchCharacters([aiden, mara], "BORIS")).toEqual([]);
+  });
+});
+
+describe("series characters CRUD + cascade", () => {
+  beforeEach(() => installLocalStorage());
+
+  it("CRUDs characters scoped to a series, sorted by name, defaulting alias + key", () => {
+    const s = WorldStateService.createSeries("S");
+    const aiden = WorldStateService.addCharacter(s.id, { name: "Aiden", description: "immortal boy" });
+    WorldStateService.addCharacter(s.id, { name: "Bram", aliases: ["BRAM", "THE BROTHER"] });
+    expect(aiden.aliases).toEqual(["AIDEN"]); // defaults to upper(name)
+    expect(aiden.stsCharacterKey).toBeTruthy();
+    expect(WorldStateService.listCharacters(s.id).map((c) => c.name)).toEqual(["Aiden", "Bram"]);
+
+    WorldStateService.updateCharacter(aiden.id, { description: "older now", traits: ["brave"] });
+    expect(WorldStateService.getCharacter(aiden.id)).toMatchObject({ description: "older now", traits: ["brave"], seriesId: s.id });
+
+    WorldStateService.deleteCharacter(aiden.id);
+    expect(WorldStateService.listCharacters(s.id).map((c) => c.name)).toEqual(["Bram"]);
+  });
+
+  it("matchForCue resolves a Fountain cue to a series character", () => {
+    const s = WorldStateService.createSeries("S");
+    WorldStateService.addCharacter(s.id, { name: "Aiden", aliases: ["AIDEN"] });
+    expect(WorldStateService.matchForCue(s.id, "AIDEN (V.O.)").map((c) => c.name)).toEqual(["Aiden"]);
+    expect(WorldStateService.matchForCue(s.id, "MARA")).toEqual([]);
+  });
+
+  it("deleteSeries purges its locations AND characters", () => {
+    const s = WorldStateService.createSeries("S");
+    WorldStateService.addLocation(s.id, { name: "Kitchen" });
+    WorldStateService.addCharacter(s.id, { name: "Aiden" });
+    WorldStateService.deleteSeries(s.id);
+    expect(WorldStateService.listLocations(s.id)).toEqual([]);
+    expect(WorldStateService.listCharacters(s.id)).toEqual([]);
+  });
+});
 
 describe("extractLocationToken", () => {
   it("strips INT./EXT. and time of day", () => {

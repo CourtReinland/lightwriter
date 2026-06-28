@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { serializeEpisodeContext } from "./seriesContextService";
-import type { SeriesArc, SeriesCliffhanger } from "./worldStateService";
+import type { SeriesArc, SeriesCliffhanger, WorldCharacter } from "./worldStateService";
+
+function character(name: string, description: string, traits?: string[]): WorldCharacter {
+  return { id: name, seriesId: "s", name, aliases: [name.toUpperCase()], description, traits, stsCharacterKey: "k", createdAt: 0, updatedAt: 0 };
+}
 
 function arc(name: string, kind: "plot" | "character", start: number, end: number, description = "desc"): SeriesArc {
   return { id: name, seriesId: "s", kind, name, description, startEpisode: start, endEpisode: end, createdAt: 0, updatedAt: 0 };
@@ -30,6 +34,21 @@ describe("serializeEpisodeContext", () => {
     expect(out).toContain("Aiden's anger");
     expect(out).toContain("Aiden"); // character name surfaced
     expect(out).not.toContain("Finale push"); // not active in ep 2 (eps 5-6)
+  });
+
+  it("lists series characters for continuity, with traits", () => {
+    const chars = [character("Aiden", "an immortal boy with a pet dragon", ["brave", "impulsive"]), character("Mara", "the older sister")];
+    const out = serializeEpisodeContext({ seriesName: "Maddox", episodeIndex: 1, totalEpisodes: 6, arcs: [], cliffhangers: [], characters: chars });
+    expect(out).toContain("SERIES CHARACTERS");
+    expect(out).toContain("Aiden: an immortal boy with a pet dragon");
+    expect(out).toContain("[brave, impulsive]");
+    expect(out).toContain("Mara: the older sister");
+  });
+
+  it("emits context for characters alone even in a one-episode series", () => {
+    const out = serializeEpisodeContext({ seriesName: "Solo", episodeIndex: 0, totalEpisodes: 1, arcs: [], cliffhangers: [], characters: [character("Aiden", "boy")] });
+    expect(out).toContain("SERIES CHARACTERS");
+    expect(out).toContain("Aiden: boy");
   });
 
   it("flags the opening payoff, culmination, and the ending cliffhanger", () => {

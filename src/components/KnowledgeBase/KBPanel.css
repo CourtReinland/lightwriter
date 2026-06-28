@@ -89,10 +89,7 @@
 }
 
 .world-series-row select,
-.world-new-series input,
-.world-editor input,
-.world-editor textarea,
-.world-editor select {
+.world-new-series input {
   width: 100%;
   box-sizing: border-box;
 }
@@ -106,41 +103,6 @@
 .world-btn-row {
   display: flex;
   gap: 6px;
-}
-
-.world-loc-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 4px;
-}
-
-.world-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid #3a3a3a;
-  background: #151515;
-  border-radius: 4px;
-}
-
-.world-image-label {
-  font-size: 10px;
-  color: #9a7b52;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.world-editor-preview {
-  width: 100%;
-  max-height: 120px;
-  object-fit: cover;
-  border: 1px solid #555;
-  border-radius: 3px;
 }
 
 .kb-detected {

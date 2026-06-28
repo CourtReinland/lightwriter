@@ -27,6 +27,8 @@ import { downloadImageDataUrl, loadPersistedImageDataUrl, persistGeneratedImageF
 import { AssetService } from "../../services/assetService";
 import KBEntryEditor from "./KBEntryEditor";
 import WorldSection from "./WorldSection";
+import SeriesRecordsPanel from "../Series/SeriesRecordsPanel";
+import { WorldStateService } from "../../services/worldStateService";
 import "./KBPanel.css";
 
 const COMMON_GENRES = [
@@ -68,6 +70,10 @@ interface KBPanelProps {
   history?: VersionSnapshot[];
   onRestoreVersion?: (snap: VersionSnapshot) => void;
   onAssignSeries?: (seriesId: string | undefined) => void;
+  /** Bump App's worldVersion when series scenes/characters change (gutter + AI context). */
+  onWorldChange?: () => void;
+  /** App-level world version — recomputes series counts & lists when records change anywhere. */
+  worldVersion?: number;
   focusSection?: "characters" | "scenes" | null;
   notice?: string;
   onClearNotice?: () => void;
@@ -92,6 +98,8 @@ export default function KBPanel({
   history = [],
   onRestoreVersion,
   onAssignSeries,
+  onWorldChange,
+  worldVersion = 0,
   focusSection,
   notice,
   onClearNotice,
@@ -155,6 +163,12 @@ export default function KBPanel({
     }
     return [...map.values()];
   }, [kb.scenes, sceneAssetItems]);
+
+  // Series-scoped record counts, shown in the section headers alongside the
+  // per-project KB counts (the series records render via SeriesRecordsPanel).
+  const seriesId = project.seriesId;
+  const seriesSceneCount = useMemo(() => (seriesId ? WorldStateService.listLocations(seriesId).length : 0), [seriesId, worldVersion]);
+  const seriesCharacterCount = useMemo(() => (seriesId ? WorldStateService.listCharacters(seriesId).length : 0), [seriesId, worldVersion]);
 
   useEffect(() => {
     if (!focusSection) return;
@@ -528,10 +542,10 @@ export default function KBPanel({
         )}
       </div>
 
-      {/* World / Series — portable locations shared across scripts in a series */}
+      {/* Series — assign this script to a series; shared scenes & characters live in the sections below */}
       <div className="kb-section">
         <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("series")} onKeyDown={(e) => handleSectionKeyDown(e, "series")}>
-          <span>{expandedSections.series ? "v" : ">"} World / Series</span>
+          <span>{expandedSections.series ? "v" : ">"} Series</span>
         </div>
         {expandedSections.series && (
           <WorldSection project={project} onAssignSeries={onAssignSeries || (() => {})} />
@@ -541,12 +555,15 @@ export default function KBPanel({
       {/* Characters */}
       <div className="kb-section">
         <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("characters")} onKeyDown={(e) => handleSectionKeyDown(e, "characters")}>
-          <span>{expandedSections.characters ? "v" : ">"} Characters ({mergedCharacters.length})</span>
+          <span>{expandedSections.characters ? "v" : ">"} Characters ({mergedCharacters.length + seriesCharacterCount})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "character" }); }}>+</button>
         </div>
         {expandedSections.characters && (
           <>
-            {mergedCharacters.length === 0 && <div className="kb-empty">No characters yet — Scan Script, generate a portrait, or add one with +.</div>}
+            {project.seriesId && (
+              <SeriesRecordsPanel seriesId={project.seriesId} kind="character" onChange={onWorldChange} refreshKey={worldVersion} />
+            )}
+            {mergedCharacters.length === 0 && seriesCharacterCount === 0 && <div className="kb-empty">No characters yet — Scan Script, generate a portrait, or add one with +.</div>}
             {mergedCharacters.map(item => {
               const previewDataUrl = item.asset ? (item.asset.imageDataUrl || assetPreviewDataUrls[item.asset.id]) : null;
               return (
@@ -575,12 +592,15 @@ export default function KBPanel({
       {/* Scenes */}
       <div className="kb-section">
         <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("scenes")} onKeyDown={(e) => handleSectionKeyDown(e, "scenes")}>
-          <span>{expandedSections.scenes ? "v" : ">"} Scenes ({mergedScenes.length})</span>
+          <span>{expandedSections.scenes ? "v" : ">"} Scenes ({mergedScenes.length + seriesSceneCount})</span>
           <button className="kb-add-btn" onClick={e => { e.stopPropagation(); setEditTarget({ type: "scene" }); }}>+</button>
         </div>
         {expandedSections.scenes && (
           <>
-            {mergedScenes.length === 0 && <div className="kb-empty">No scenes yet — Scan Script, generate a scene image, or add one with +.</div>}
+            {project.seriesId && (
+              <SeriesRecordsPanel seriesId={project.seriesId} kind="scene" onChange={onWorldChange} refreshKey={worldVersion} />
+            )}
+            {mergedScenes.length === 0 && seriesSceneCount === 0 && <div className="kb-empty">No scenes yet — Scan Script, generate a scene image, or add one with +.</div>}
             {mergedScenes.map(item => {
               const previewDataUrl = item.asset ? (item.asset.imageDataUrl || assetPreviewDataUrls[item.asset.id]) : null;
               return (

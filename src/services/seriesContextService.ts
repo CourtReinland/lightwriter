@@ -4,6 +4,7 @@ import {
   cliffhangerOpeningEpisode,
   type SeriesArc,
   type SeriesCliffhanger,
+  type WorldCharacter,
 } from "./worldStateService";
 
 // Turns a series' arcs + cliffhangers + episode position into a compact prompt
@@ -18,9 +19,12 @@ export interface EpisodeContextInput {
   /** ALL arcs in the series (filtered to the active ones here). */
   arcs: SeriesArc[];
   cliffhangers: SeriesCliffhanger[];
+  /** Portable series characters (shared across episodes), for continuity. */
+  characters?: WorldCharacter[];
 }
 
 const ARC_DESC_MAX = 240;
+const CHAR_DESC_MAX = 160;
 
 function spanLabel(a: SeriesArc): string {
   return a.startEpisode === a.endEpisode ? `ep ${a.startEpisode + 1}` : `eps ${a.startEpisode + 1}-${a.endEpisode + 1}`;
@@ -33,12 +37,12 @@ function spanLabel(a: SeriesArc): string {
  */
 export function serializeEpisodeContext(input: EpisodeContextInput | null): string {
   if (!input || input.episodeIndex < 0) return "";
-  const { seriesName, episodeIndex, totalEpisodes, arcs, cliffhangers } = input;
+  const { seriesName, episodeIndex, totalEpisodes, arcs, cliffhangers, characters = [] } = input;
   const active = activeArcsForEpisode(arcs, episodeIndex);
   const ending = cliffhangerEndingEpisode(cliffhangers, episodeIndex);
   const opening = cliffhangerOpeningEpisode(cliffhangers, episodeIndex);
 
-  if (active.length === 0 && !ending && !opening && totalEpisodes <= 1) return "";
+  if (active.length === 0 && !ending && !opening && characters.length === 0 && totalEpisodes <= 1) return "";
 
   const ep = episodeIndex + 1;
   const lines: string[] = ["=== SERIES CONTEXT ==="];
@@ -48,6 +52,15 @@ export function serializeEpisodeContext(input: EpisodeContextInput | null): stri
 
   if (opening) {
     lines.push(`OPEN this episode by paying off the previous episode's cliffhanger: ${opening.description}`);
+  }
+
+  if (characters.length) {
+    lines.push("SERIES CHARACTERS — keep these consistent (appearance, voice, relationships); do not redesign or re-introduce them:");
+    for (const c of characters) {
+      const traits = c.traits && c.traits.length ? ` [${c.traits.join(", ")}]` : "";
+      const desc = c.description ? `: ${c.description.slice(0, CHAR_DESC_MAX)}` : "";
+      lines.push(`- ${c.name}${desc}${traits}`);
+    }
   }
 
   if (active.length) {

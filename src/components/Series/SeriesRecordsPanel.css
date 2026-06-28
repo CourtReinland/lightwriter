@@ -1,0 +1,40 @@
+.series-records {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.series-records-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.series-rec-badge {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8ab4f8;
+  border: 1px solid #2f3d52;
+  border-radius: 7px;
+  padding: 0 5px;
+  vertical-align: middle;
+}
+
+.series-rec-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #2c2c2c;
+  border-radius: 6px;
+  background: #161616;
+  margin-top: 4px;
+}
+
+.series-rec-btn-row {
+  display: flex;
+  gap: 6px;
+}

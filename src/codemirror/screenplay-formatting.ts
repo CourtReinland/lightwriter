@@ -101,8 +101,10 @@ function classifyLineRaw(trimmed: string): LineType {
 
 /**
  * Full document classification with context-aware character/dialogue detection.
+ * Exported so click handlers can confirm whether a clicked line is a real
+ * CHARACTER cue (needs surrounding context, unlike a single-line classifier).
  */
-function classifyDocument(lineTexts: string[]): LineType[] {
+export function classifyDocument(lineTexts: string[]): LineType[] {
   const n = lineTexts.length;
 
   // Pass 1: classify each line without context
