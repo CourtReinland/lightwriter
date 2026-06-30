@@ -38,3 +38,18 @@
   display: flex;
   gap: 6px;
 }
+
+/* Click a series record's thumbnail or name to open its editor (add/change image). */
+.series-rec-clickable { cursor: pointer; }
+.kb-entry-name.series-rec-clickable:hover { text-decoration: underline; }
+.kb-thumb-empty.series-rec-clickable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 10px;
+}
+.kb-thumb-empty.series-rec-clickable:hover {
+  border-color: #6aa988;
+  color: #9fe0c0;
+}

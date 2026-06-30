@@ -170,15 +170,18 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
 
       {records.map((rec) => {
         const portrait = !isScene;
+        const editTitle = `Edit ${rec.name} — add or change image`;
         return (
           <div key={rec.id} className="kb-asset-entry">
             {rec.referenceImageDataUrl ? (
-              <img className={`kb-asset-thumb ${portrait ? "" : "wide"}`} src={rec.referenceImageDataUrl} alt={rec.name} />
+              <img className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"}`} src={rec.referenceImageDataUrl} alt={rec.name} title={editTitle} onClick={() => startEdit(rec)} />
             ) : (
-              <div className={`kb-asset-thumb ${portrait ? "" : "wide"} kb-thumb-empty`}>no image</div>
+              <div className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => startEdit(rec)}>
+                + add image
+              </div>
             )}
             <div className="kb-asset-body">
-              <div className="kb-entry-name">{rec.name} <span className="series-rec-badge">series</span></div>
+              <div className="kb-entry-name series-rec-clickable" title={editTitle} onClick={() => startEdit(rec)}>{rec.name} <span className="series-rec-badge">series</span></div>
               <div className="kb-entry-preview">{rec.aliases.join(", ") || "—"}</div>
               {rec.description && (
                 <div className="kb-entry-preview">{rec.description.slice(0, 120)}{rec.description.length > 120 ? "…" : ""}</div>
