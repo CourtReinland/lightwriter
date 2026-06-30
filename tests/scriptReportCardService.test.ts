@@ -11,6 +11,7 @@ import {
   compareReportCards,
   type ScriptReportCard,
 } from "../src/services/scriptReportCardService";
+import { ALL_FRAMEWORKS } from "../src/frameworks";
 import type { KnowledgeBase } from "../src/services/knowledgeBase";
 import type { StyleProfile } from "../src/services/styleProfile";
 
@@ -102,7 +103,11 @@ describe("script report card parsing", () => {
           frameworkName: "Save the Cat",
           score: 72,
           summary: "Strong setup, weak midpoint.",
-          beatScores: [{ beatName: "Midpoint", score: 43, detectedEvidence: "book opens", missing: false, suggestions: ["Raise the stakes."] }],
+          // Full canonical beat ladder (the scorer now canonicalizes by name and
+          // averages over ALL of a framework's beats), every beat at 43.
+          beatScores: ALL_FRAMEWORKS.find((f) => f.id === "save-the-cat")!.beats.map((b) => ({
+            beatName: b.name, score: 43, detectedEvidence: b.name === "Midpoint" ? "book opens" : "", missing: false, suggestions: ["Raise the stakes."],
+          })),
         }],
         styleScore: { score: 88, matchedTraits: ["short action lines"], drift: ["generic jokes"], suggestions: ["tighten dialogue"] },
         characterScore: { score: 76, summary: "Aliyah is clear", suggestions: [] },

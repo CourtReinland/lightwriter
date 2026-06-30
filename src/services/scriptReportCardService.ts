@@ -5,6 +5,9 @@ import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { expandScriptToTargetPages, type ExpandProgress } from "./scriptExpansionService";
 import { normalizeShotLines } from "./fountainShotNormalizer";
+import { simpleScriptHash } from "./scriptStructure";
+import { getAnalystProviderSettings } from "./textAiSettingsService";
+import { loadStoredReportCard, saveStoredReportCard } from "./reportCardStore";
 
 type Completion = (system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
 
@@ -55,6 +58,14 @@ export interface ScriptReportPromptInput {
   targetPages: number;
   /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
   seriesContext?: string;
+  /** Frameworks to score. Default = all. Scoping to the writer's active framework(s)
+   *  keeps the payload small (so the last framework isn't truncated) and focuses the model. */
+  frameworks?: FrameworkDefinition[];
+}
+
+/** Normalize a beat name for cross-sample matching (case/punctuation-insensitive). */
+function normBeatName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 export interface ImproveMetricPromptInput extends ScriptReportPromptInput {
@@ -179,7 +190,8 @@ EXPANSION REQUIREMENT — THIS IS A MAJOR EXPANSION, NOT A POLISH:
 export function buildScriptReportCardPrompt(input: ScriptReportPromptInput): { system: string; user: string; temperature: number; maxTokens: number } {
   const lines = input.script.split("\n").length;
   const estimatedPages = estimatePages(lines);
-  const frameworkText = ALL_FRAMEWORKS
+  const frameworks = input.frameworks?.length ? input.frameworks : ALL_FRAMEWORKS;
+  const frameworkText = frameworks
     .map((framework) => frameworkBlueprint(framework, input.targetPages || estimatedPages, lines))
     .join("\n\n");
   const kbText = input.knowledgeBase ? KnowledgeBaseService.serializeForPrompt(input.knowledgeBase, 7000) : "No KB supplied.";
@@ -197,7 +209,7 @@ Be useful to a writer: concise, specific, and actionable.`;
 Target pages: ${input.targetPages || estimatedPages}
 Estimated current pages: ${estimatedPages}
 
-Evaluate these frameworks and every beat listed below:
+Evaluate these frameworks and every beat listed below. For each framework, return EXACTLY the beats listed for it, by their exact names, in the listed order — score every one (set missing:true and a 0-39 score if the beat is absent). Do not add, rename, reorder, merge, or omit beats.
 ${frameworkText}
 
 Evaluate additional craft metrics:
@@ -383,20 +395,41 @@ function extractJson(text: string): string {
   return text.trim();
 }
 
-export function normalizeReportCard(card: Partial<ScriptReportCard>): ScriptReportCard {
+export function normalizeReportCard(card: Partial<ScriptReportCard>, frameworks: FrameworkDefinition[] = ALL_FRAMEWORKS): ScriptReportCard {
   const supplied = Array.isArray(card.frameworkScores) ? card.frameworkScores : [];
-  const frameworkScores = ALL_FRAMEWORKS.map((framework) => {
+  const frameworkScores = frameworks.map((framework) => {
     const found = supplied.find((item) => item.frameworkId === framework.id || item.frameworkName === framework.name);
-    const beatScores = Array.isArray(found?.beatScores)
-      ? found.beatScores.map((beat) => ({
-          beatName: String(beat.beatName || "Unnamed beat"),
-          expectedPageRange: beat.expectedPageRange ? String(beat.expectedPageRange) : undefined,
-          detectedEvidence: String(beat.detectedEvidence || ""),
-          score: clampScore(beat.score),
-          missing: Boolean(beat.missing),
-          suggestions: asStringArray(beat.suggestions),
-        }))
-      : [];
+    const suppliedBeats = Array.isArray(found?.beatScores) ? found.beatScores : [];
+    // Canonicalize to the framework's FIXED beat ladder, matched by name. This is
+    // what makes scoring stable: every sample ends up with the SAME beat vector
+    // (same names, same order), so the cross-sample median in aggregateReportCards
+    // compares like-with-like instead of medianing beat i of one sample against an
+    // unrelated beat i of another. Beats the model OMITTED entirely are dropped
+    // (not zero-filled): if we zero-filled, a beat the model skipped in one pass
+    // would median in a 0 and tank the framework. The aggregator then medians
+    // each canonical beat only over the samples that actually returned it, and
+    // only emits a 0 for a beat NO sample returned.
+    let beatScores: ReportBeatScore[];
+    if (suppliedBeats.length) {
+      const byName = new Map<string, Partial<ReportBeatScore>>();
+      for (const beat of suppliedBeats) byName.set(normBeatName(String(beat.beatName || "")), beat);
+      beatScores = framework.beats
+        .map((canonical): ReportBeatScore | null => {
+          const m = byName.get(normBeatName(canonical.name));
+          if (!m) return null;
+          return {
+            beatName: canonical.name,
+            expectedPageRange: m.expectedPageRange ? String(m.expectedPageRange) : undefined,
+            detectedEvidence: String(m.detectedEvidence || ""),
+            score: clampScore(m.score),
+            missing: Boolean(m.missing),
+            suggestions: asStringArray(m.suggestions),
+          };
+        })
+        .filter((b): b is ReportBeatScore => b !== null);
+    } else {
+      beatScores = [];
+    }
     // Derive the framework score from the per-beat scores rather than trusting a
     // separate holistic 0-100 guess. Averaging the beats cancels noise and makes
     // the framework score a stable function of the (more concrete) beat judgments.
@@ -465,45 +498,50 @@ function median(values: number[]): number {
 // compound: a framework's ~8 medianed beats are far steadier than 3 medianed
 // framework totals. Text (summaries, evidence, fixes) comes from the sample
 // nearest the median so the prose matches the numbers.
-export function aggregateReportCards(cards: ScriptReportCard[]): ScriptReportCard {
+export function aggregateReportCards(cards: ScriptReportCard[], frameworks: FrameworkDefinition[] = ALL_FRAMEWORKS): ScriptReportCard {
   if (cards.length <= 1) return cards[0];
 
   const overallMedian = median(cards.map((c) => c.overallScore));
   const repCard = cards.reduce((best, c) =>
     Math.abs(c.overallScore - overallMedian) < Math.abs(best.overallScore - overallMedian) ? c : best, cards[0]);
 
-  const frameworkScores = ALL_FRAMEWORKS.map((framework) => {
+  const frameworkScores = frameworks.map((framework) => {
     const peers = cards
       .map((c) => c.frameworkScores.find((f) => f.frameworkId === framework.id))
       .filter((f): f is FrameworkReportScore => Boolean(f));
-    const beatCount = peers.reduce((max, p) => Math.max(max, p.beatScores.length), 0);
-    const beatScores = Array.from({ length: beatCount }, (_, i) => {
-      const beatPeers = peers.map((p) => p.beatScores[i]).filter((b): b is ReportBeatScore => Boolean(b));
-      const scoreMedian = median(beatPeers.map((b) => b.score));
-      // Representative beat = the sampled beat whose score is closest to the
-      // median, so evidence/suggestions describe the score we actually report.
-      const rep = beatPeers.reduce((best, b) =>
-        Math.abs(b.score - scoreMedian) < Math.abs(best.score - scoreMedian) ? b : best, beatPeers[0]);
-      const missingVotes = beatPeers.filter((b) => b.missing).length;
-      return {
-        beatName: rep?.beatName ?? "Unnamed beat",
-        expectedPageRange: rep?.expectedPageRange,
-        detectedEvidence: rep?.detectedEvidence ?? "",
-        score: scoreMedian,
-        missing: missingVotes * 2 > beatPeers.length,
-        suggestions: rep?.suggestions ?? [],
-      };
-    });
+    // Median each beat across samples by CANONICAL NAME (not array index), so a
+    // sample that reordered/omitted a beat can't contaminate the median with an
+    // unrelated beat. When NO sample returned beats for this framework (every
+    // pass only gave a holistic score), leave beats empty so normalizeReportCard
+    // falls back to the median framework score instead of averaging zeros to 0.
+    const anyBeats = peers.some((p) => p.beatScores.length > 0);
+    const beatScores = anyBeats
+      ? framework.beats.map((canonical) => {
+          const beatPeers = peers
+            .map((p) => p.beatScores.find((b) => normBeatName(b.beatName) === normBeatName(canonical.name)))
+            .filter((b): b is ReportBeatScore => Boolean(b));
+          const scoreMedian = median(beatPeers.map((b) => b.score));
+          const rep = beatPeers.reduce((best, b) =>
+            Math.abs(b.score - scoreMedian) < Math.abs(best.score - scoreMedian) ? b : best, beatPeers[0]);
+          const missingVotes = beatPeers.filter((b) => b.missing).length;
+          return {
+            beatName: canonical.name,
+            expectedPageRange: rep?.expectedPageRange,
+            detectedEvidence: rep?.detectedEvidence ?? "",
+            score: scoreMedian,
+            missing: beatPeers.length ? missingVotes * 2 > beatPeers.length : true,
+            suggestions: rep?.suggestions ?? [],
+          };
+        })
+      : [];
     const fwScoreMedian = median(peers.map((p) => p.score));
     const repFw = peers.reduce((best, p) =>
       Math.abs(p.score - fwScoreMedian) < Math.abs(best.score - fwScoreMedian) ? p : best, peers[0]);
     return {
       frameworkId: framework.id,
       frameworkName: framework.name,
-      // When beats are present, normalizeReportCard re-derives this from the
-      // medianed beats. When a sample set has NO beats for this framework (a
-      // truncated/omitted scoring pass), fall back to the median framework
-      // score rather than collapsing to 0.
+      // normalizeReportCard re-derives this from the medianed beats; the median
+      // here is only the fallback when a framework had no beats in any sample.
       score: fwScoreMedian,
       summary: repFw?.summary ?? "",
       beatScores,
@@ -520,15 +558,15 @@ export function aggregateReportCards(cards: ScriptReportCard[]): ScriptReportCar
     pacingScore: { ...repCard.pacingScore, score: median(cards.map((c) => c.pacingScore.score)) },
     topFixes: repCard.topFixes,
     recommendedNextAction: repCard.recommendedNextAction,
-  });
+  }, frameworks);
 }
 
-export function parseReportCardResponse(text: string, fallbackFrameworkId?: string): ScriptReportCard {
+export function parseReportCardResponse(text: string, fallbackFrameworkId?: string, frameworks: FrameworkDefinition[] = ALL_FRAMEWORKS): ScriptReportCard {
   const parsed = JSON.parse(extractJson(text)) as Partial<ScriptReportCard>;
   if (fallbackFrameworkId && Array.isArray(parsed.frameworkScores)) {
     parsed.frameworkScores = parsed.frameworkScores.map((score) => score.frameworkId ? score : { ...score, frameworkId: fallbackFrameworkId });
   }
-  return normalizeReportCard(parsed);
+  return normalizeReportCard(parsed, frameworks);
 }
 
 export function validateRewriteScript(script: string): RewriteValidationResult {
@@ -681,35 +719,69 @@ export function compareReportCards(before: ScriptReportCard, after: ScriptReport
 // models bounce a few points run-to-run even at temperature 0; medianing a
 // handful of samples (run in parallel, so wall-clock stays ~one call) makes the
 // score stable enough that "did the rewrite improve it?" is a real signal.
-export const SCORING_SAMPLES = 3;
+export const SCORING_SAMPLES = 5;
+// Bump when scoring logic changes so cached cards from an older method invalidate.
+const SCORER_VERSION = "2";
+
+export interface ReportCardCacheOptions {
+  projectId: string;
+  /** Skip the cache and recompute (the "Re-score" path), then overwrite the cache. */
+  force?: boolean;
+}
 
 export async function runScriptReportCard(
   input: ScriptReportPromptInput,
-  options?: { samples?: number; completeOverride?: Completion },
+  options?: { samples?: number; completeOverride?: Completion; cache?: ReportCardCacheOptions },
 ): Promise<ScriptReportCard> {
+  const frameworks = input.frameworks?.length ? input.frameworks : ALL_FRAMEWORKS;
   const prompt = buildScriptReportCardPrompt(input);
+  const n = Math.max(1, options?.samples ?? SCORING_SAMPLES);
+
+  // Content-addressed cache: identical scoring inputs return the IDENTICAL stored
+  // card, so re-scoring unchanged text gives the same score (and the card persists
+  // across tab switches / restarts). `force` bypasses and overwrites.
+  const cache = options?.cache;
+  let hash = "";
+  if (cache) {
+    const analyst = getAnalystProviderSettings();
+    // Include the FULL script (prompt.user truncates it at 120k, so edits past
+    // that window would otherwise not bust the cache) and targetPages explicitly.
+    hash = simpleScriptHash(
+      `v${SCORER_VERSION}|n${n}|${analyst.provider}:${analyst.model}|${frameworks.map((f) => f.id).sort().join(",")}|tp${input.targetPages}|len${input.script.length}|${input.script}|${prompt.system}\n${prompt.user}`,
+    );
+    if (!cache.force) {
+      const stored = loadStoredReportCard(cache.projectId);
+      if (stored && stored.hash === hash) return stored.card;
+    }
+  }
+
   // Scoring is an ANALYST task — use the analyst model (e.g. grok), not the
   // creative writer model, which tends to score loose and high.
   const service = TextAiService.forAnalyst();
   const complete: Completion = options?.completeOverride ?? service.complete.bind(service);
   const runOnce = () =>
     complete(prompt.system, prompt.user, { temperature: prompt.temperature, maxTokens: prompt.maxTokens }).then((r) =>
-      parseReportCardResponse(r));
+      parseReportCardResponse(r, undefined, frameworks));
 
-  const n = Math.max(1, options?.samples ?? SCORING_SAMPLES);
-  if (n === 1) return runOnce();
-
-  // Run the samples concurrently and median whatever comes back. A flaky
-  // sample (network/parse) is dropped; we only fail if every sample fails.
-  const settled = await Promise.allSettled(Array.from({ length: n }, runOnce));
-  const cards = settled
-    .filter((s): s is PromiseFulfilledResult<ScriptReportCard> => s.status === "fulfilled")
-    .map((s) => s.value);
-  if (!cards.length) {
-    const firstRejection = settled.find((s) => s.status === "rejected") as PromiseRejectedResult | undefined;
-    throw firstRejection?.reason ?? new Error("Report card scoring failed for every sample.");
+  let card: ScriptReportCard;
+  if (n === 1) {
+    card = await runOnce();
+  } else {
+    // Run the samples concurrently and median whatever comes back. A flaky
+    // sample (network/parse) is dropped; we only fail if every sample fails.
+    const settled = await Promise.allSettled(Array.from({ length: n }, runOnce));
+    const cards = settled
+      .filter((s): s is PromiseFulfilledResult<ScriptReportCard> => s.status === "fulfilled")
+      .map((s) => s.value);
+    if (!cards.length) {
+      const firstRejection = settled.find((s) => s.status === "rejected") as PromiseRejectedResult | undefined;
+      throw firstRejection?.reason ?? new Error("Report card scoring failed for every sample.");
+    }
+    card = aggregateReportCards(cards, frameworks);
   }
-  return aggregateReportCards(cards);
+
+  if (cache) saveStoredReportCard(cache.projectId, hash, card);
+  return card;
 }
 
 export async function generateMetricImprovementPlan(input: ImproveMetricPromptInput): Promise<string> {

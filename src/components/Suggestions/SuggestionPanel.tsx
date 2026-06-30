@@ -1,4 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { ALL_FRAMEWORKS } from "../../frameworks";
+import { loadStoredReportCard, clearStoredReportCard } from "../../services/reportCardStore";
 import { getSelectedTextAiProviderSettings, textAiProviderLabel, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import { generateFromPrompt, type GenerationUnit } from "../../services/promptGenerationService";
@@ -129,6 +131,18 @@ export default function SuggestionPanel({
   const [shotPassProgress, setShotPassProgress] = useState<ShotPassProgress | null>(null);
   const [reportCard, setReportCard] = useState<ScriptReportCard | null>(null);
   const [reportCollapsed, setReportCollapsed] = useState(false);
+  // Score only the writer's active framework(s) (default all) — a small payload
+  // keeps the model focused and stops the last framework from being truncated.
+  const scoringFrameworks = useMemo(() => {
+    const subset = ALL_FRAMEWORKS.filter((f) => activeFrameworks?.includes(f.id));
+    return subset.length ? subset : undefined;
+  }, [activeFrameworks]);
+  // Persistence: restore the last report card for this project so it survives
+  // leaving the AI tab (this panel unmounts) and app restarts.
+  useEffect(() => {
+    const stored = loadStoredReportCard(project.id);
+    setReportCard(stored?.card ?? null);
+  }, [project.id]);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
   const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
   // Story Generator (direct single-call generation from the WRITER model)
@@ -434,7 +448,7 @@ export default function SuggestionPanel({
     handleSuggest("custom", customPrompt.trim());
   }, [customPrompt, handleSuggest]);
 
-  const handleReportCard = useCallback(async () => {
+  const handleReportCard = useCallback(async (force = false) => {
     const currentSettings = getSelectedTextAiProviderSettings();
     setTextAiSettings(currentSettings);
     if (!currentSettings.apiKey.trim()) {
@@ -452,12 +466,16 @@ export default function SuggestionPanel({
     setLastMode(null);
     setScriptDoctorStage("diagnosing");
     try {
-      const report = await runScriptReportCard({
-        script: fullScript,
-        knowledgeBase,
-        styleProfile,
-        targetPages,
-      });
+      const report = await runScriptReportCard(
+        {
+          script: fullScript,
+          knowledgeBase,
+          styleProfile,
+          targetPages,
+          frameworks: scoringFrameworks,
+        },
+        { cache: { projectId: project.id, force } },
+      );
       setReportCard(report);
       setRewriteReview(null);
       setScriptDoctorStage("treatment");
@@ -466,7 +484,7 @@ export default function SuggestionPanel({
     } finally {
       setLoading(false);
     }
-  }, [fullScript, knowledgeBase, styleProfile, targetPages]);
+  }, [fullScript, knowledgeBase, styleProfile, targetPages, scoringFrameworks, project.id]);
 
   const handleImproveMetric = useCallback(async (metricId: string, metricName: string) => {
     if (!reportCard) return;
@@ -645,6 +663,7 @@ export default function SuggestionPanel({
         knowledgeBase,
         styleProfile,
         targetPages,
+        frameworks: scoringFrameworks,
       });
       const comparison = compareReportCards(rewriteReview.beforeReport, afterReport);
       setReportCard(afterReport);
@@ -657,7 +676,7 @@ export default function SuggestionPanel({
     } finally {
       setLoading(false);
     }
-  }, [knowledgeBase, rewriteReview, styleProfile, targetPages]);
+  }, [knowledgeBase, rewriteReview, styleProfile, targetPages, scoringFrameworks]);
 
   const handleApplyRewriteToDraft = useCallback(() => {
     if (!rewriteReview) return;
@@ -667,11 +686,15 @@ export default function SuggestionPanel({
     }
     onAiCommit?.(rewriteReview.label || "Rewrite", rewriteReview.afterScript);
     onReplaceScript(rewriteReview.afterScript);
+    // The editor content just changed to the rewrite — drop the persisted card so
+    // a stale pre-rewrite score isn't restored on remount; the next Run/Re-score
+    // recomputes (and re-caches) against the new content.
+    clearStoredReportCard(project.id);
     setRewriteReview({ ...rewriteReview, applied: true });
     setScriptDoctorStage("applied");
     setSuggestion("Rewrite applied to the main editor. You can Re-score, Revert to the pre-rewrite snapshot, or Accept the rewrite.");
     setLastMode(null);
-  }, [onReplaceScript, onAiCommit, rewriteReview]);
+  }, [onReplaceScript, onAiCommit, rewriteReview, project.id]);
 
   const handleDiscardRewritePreview = useCallback(() => {
     setRewriteReview(null);
@@ -864,14 +887,24 @@ export default function SuggestionPanel({
         <div className="full-shot-pass">
           <button
             className="full-shot-pass-btn report-card-btn"
-            onClick={handleReportCard}
+            onClick={() => handleReportCard(false)}
             disabled={loading || !fullScript.trim()}
             title="Score the whole script against structure frameworks, style match, character consistency, and pacing"
           >
             Run Script Report Card
           </button>
+          {reportCard && (
+            <button
+              className="full-shot-pass-btn report-card-rescore-btn"
+              onClick={() => handleReportCard(true)}
+              disabled={loading || !fullScript.trim()}
+              title="Recompute from scratch (bypass the cached result for unchanged text)"
+            >
+              Re-score
+            </button>
+          )}
           <div className="full-shot-pass-hint">
-            Diagnose, plan a fix, and preview targeted/framework rewrites. Scores Hero's Journey, Save the Cat, Propp, Aristotle, Dan Harmon, style, characters, and pacing.
+            Diagnose, plan a fix, and preview targeted/framework rewrites. Same text returns the same score (cached); use Re-score to recompute. Scores your active framework(s), style, characters, and pacing.
           </div>
         </div>
       </div>
@@ -1107,7 +1140,7 @@ export default function SuggestionPanel({
                 {reportCard.overallScore}/100
               </span>
             </button>
-            <button className="report-card-clear" onClick={() => { setReportCard(null); setReportCollapsed(false); }} title="Dismiss scorecard">✕</button>
+            <button className="report-card-clear" onClick={() => { setReportCard(null); setReportCollapsed(false); clearStoredReportCard(project.id); }} title="Dismiss scorecard">✕</button>
           </div>
           {!reportCollapsed && (
             <ReportCard
