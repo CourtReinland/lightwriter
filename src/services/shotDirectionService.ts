@@ -1,6 +1,8 @@
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import type { TextAiProviderSettings } from "./textAiSettingsService";
+import { correctFountainFormatting } from "./fountainFormatCorrector";
+import { extractCharacters } from "./scriptStructure";
 
 export interface ShotSceneBlock {
   idx: number;
@@ -80,6 +82,7 @@ CRITICAL OUTPUT RULES:
 - Do not summarize. Do not explain. Do not wrap in markdown.
 - Keep existing shot lines that start with !! unless they are clearly malformed.
 - Add missing shot direction lines before the action/dialogue beats they cover.
+- NEVER place a shot line directly above a CHARACTER cue with no blank line between them. A character cue must always be preceded by a blank line and immediately followed by its dialogue — keep that cue→dialogue block intact and put any covering shot line BEFORE the blank line that precedes the cue.
 - Every added shot line MUST start with !! so it is parsed as a Fountain shot.
 - The FIRST token after !! MUST be exactly one of: WS, MS, CU, ECU, LS, OTS, POV. These are the only shot types the downstream image/video parser recognizes. Any other opener (ESTABLISHING, INSERT, ANGLE, TRACKING, AERIAL, WIDE) will NOT be parsed as a shot — express those as plain words AFTER the required token, e.g. !!WS AERIAL OVER THE CITY or !!CU INSERT ON THE LETTER.
 - Use the compact shot vocabulary primarily as: WS, MS, CU.
@@ -174,5 +177,16 @@ export async function rewriteScriptWithShotDirections(
   const parts: string[] = [];
   if (preamble.trim()) parts.push(preamble.trimEnd());
   parts.push(...rewrittenScenes);
-  return parts.join("\n\n");
+  const joined = parts.join("\n\n");
+
+  // The model often places a shot line directly above a CHARACTER cue (no blank
+  // line), which makes the cue render as left-justified action and its dialogue
+  // lose its indent. Run the deterministic Fountain corrector to re-seat cues +
+  // dialogue. Seed it with names from the ORIGINAL (well-formed) script so cues
+  // are reliably identified even where the model broke their spacing.
+  const characterNames = [
+    ...extractCharacters(content).map((c) => c.name),
+    ...(knowledgeBase?.characters.map((c) => c.name) ?? []),
+  ];
+  return correctFountainFormatting(joined, characterNames);
 }
