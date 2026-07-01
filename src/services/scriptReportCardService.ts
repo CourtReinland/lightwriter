@@ -482,6 +482,15 @@ export function normalizeReportCard(card: Partial<ScriptReportCard>, frameworks:
   };
 }
 
+/** Read a single metric's 0-100 score from a card (framework id, style/character/pacing, or overall). */
+export function metricScoreFromCard(card: ScriptReportCard, metricId: string): number {
+  if (metricId === "style") return card.styleScore.score;
+  if (metricId === "character") return card.characterScore.score;
+  if (metricId === "pacing") return card.pacingScore.score;
+  if (metricId === "overall") return card.overallScore;
+  return card.frameworkScores.find((f) => f.frameworkId === metricId)?.score ?? card.overallScore;
+}
+
 function median(values: number[]): number {
   const xs = values.filter((n) => typeof n === "number" && !Number.isNaN(n)).sort((a, b) => a - b);
   if (!xs.length) return 0;

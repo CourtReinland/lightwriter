@@ -1,11 +1,12 @@
 import { useRef, useEffect, useCallback } from "react";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Compartment } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { fountainLanguage } from "../../codemirror/fountain-language";
 import { fountainEditorTheme, fountainHighlightStyle } from "../../codemirror/fountain-theme";
 import { overlayExtension, setOverlayBeats } from "../../codemirror/overlay-decorations";
+import { inlineDiffExtension } from "../../codemirror/inline-diff";
 import { locationGutter, setLocationGutter } from "../../codemirror/location-gutter";
 import { screenplayFormatting, classifyDocument } from "../../codemirror/screenplay-formatting";
 import { isSceneHeading, extractLocationToken, extractCharacterName } from "../../services/worldStateService";
@@ -129,6 +130,10 @@ interface FountainEditorProps {
   /** Fired when the user clicks a scene heading or a CHARACTER cue (for add-to-series). */
   onLineAffordance?: (info: LineAffordance) => void;
   viewRef?: React.MutableRefObject<EditorView | undefined>;
+  /** When true, the editor is locked (used while a rewrite-diff preview is shown so
+   * edits can't drift out from under the pending candidates, which would clobber
+   * user changes on Accept). Programmatic Accept dispatch still applies. */
+  readOnly?: boolean;
 }
 
 export interface LineAffordance {
@@ -155,9 +160,13 @@ export default function FountainEditor({
   locationLines,
   onLineAffordance,
   viewRef: externalViewRef,
+  readOnly = false,
 }: FountainEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView>(null as unknown as EditorView);
+  // Stable compartment so the read-only state can be reconfigured without rebuilding
+  // the whole editor (which would lose scroll/selection).
+  const readOnlyCompartment = useRef(new Compartment());
   const beatsRef = useRef<ComputedBeat[]>([]);
   const onChangeRef = useRef(onChange);
   const onSelectionRef = useRef(onSelectionChange);
@@ -186,6 +195,8 @@ export default function FountainEditor({
         fountainHighlightStyle,
         screenplayFormatting,
         overlayExtension,
+        inlineDiffExtension,
+        readOnlyCompartment.current.of([]),
         locationGutter,
         keymap.of([
           {
@@ -368,8 +379,29 @@ export default function FountainEditor({
 
   useEffect(() => {
     const view = createView();
-    return () => view?.destroy();
+    return () => {
+      view?.destroy();
+      // Drop the parent's handle so it never dispatches into a destroyed view
+      // (e.g. an orphaned rewrite-diff overlay after the editor unmounts).
+      if (externalViewRef && externalViewRef.current === view) {
+        externalViewRef.current = undefined;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createView]);
+
+  // Lock / unlock the editor when a rewrite-diff preview is shown. Programmatic
+  // Accept dispatch still applies; this only blocks user typing so the doc can't
+  // drift out from under the pending candidates.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: readOnlyCompartment.current.reconfigure(
+        readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
+      ),
+    });
+  }, [readOnly]);
 
   // Update overlays when frameworks or target pages change
   useEffect(() => {

@@ -1,5 +1,8 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { type EditorView } from "@codemirror/view";
+import { setPendingDiff } from "./codemirror/inline-diff";
+import { computeInlineDiff, type RewriteDiffCandidate } from "./services/inlineDiffService";
+import RewriteDiffBar from "./components/Editor/RewriteDiffBar";
 import ArtisticBorder from "./components/Layout/ArtisticBorder";
 import EditorToolbar from "./components/Editor/EditorToolbar";
 import FountainEditor from "./components/Editor/FountainEditor";
@@ -377,6 +380,69 @@ export default function App() {
     setHistory(VersionHistoryService.recordAiCommit(project.id, text, label));
   }, [project.id]);
 
+  // ── Inline rewrite-diff overlay: show a pending rewrite in the editor itself
+  // (deletions struck through, additions highlighted) with Accept/Reject/Cycle,
+  // instead of a side pane. The doc stays UNMUTATED until Accept.
+  const [pendingRewrite, setPendingRewrite] = useState<
+    { candidates: RewriteDiffCandidate[]; index: number; label: string; beforeScript: string } | null
+  >(null);
+
+  const handleShowRewriteDiff = useCallback((candidates: RewriteDiffCandidate[], label: string) => {
+    const view = editorViewRef.current;
+    const beforeScript = view ? view.state.doc.toString() : project.content;
+    // Drop empty AND no-op candidates (afterScript identical to the current doc):
+    // showing an Accept/Reject bar for "no change" is confusing and, on Accept,
+    // pointlessly reflows the whole doc.
+    const usable = candidates.filter((c) => c.afterScript.trim() && c.afterScript.trim() !== beforeScript.trim());
+    if (!usable.length) return;
+    setPendingRewrite({ candidates: usable, index: 0, label, beforeScript });
+  }, [project.content]);
+
+  // A project switch or leaving the editor tab invalidates any live rewrite preview:
+  // its candidates were built against the previous doc, so applying them later would
+  // clobber the newly-loaded content (and pollute its version history). Drop it.
+  useEffect(() => {
+    if (!pendingRewrite) return;
+    setPendingRewrite(null);
+    try { editorViewRef.current?.dispatch({ effects: setPendingDiff.of(null) }); } catch { /* view may be gone */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, activeView]);
+
+  // Draw / redraw the overlay whenever the pending rewrite or selected candidate changes.
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || !pendingRewrite) return;
+    const after = pendingRewrite.candidates[pendingRewrite.index].afterScript;
+    const diff = computeInlineDiff(pendingRewrite.beforeScript, after);
+    view.dispatch({ effects: setPendingDiff.of(diff) });
+  }, [pendingRewrite]);
+
+  const handleAcceptRewrite = useCallback(() => {
+    const view = editorViewRef.current;
+    if (!view || !pendingRewrite) return;
+    const cand = pendingRewrite.candidates[pendingRewrite.index];
+    // Seal the version-history snapshot with the applied text FIRST (so the
+    // editor-replace autosave dedups), then replace the doc + clear the overlay
+    // in one transaction (no flash).
+    handleAiCommit(pendingRewrite.label, cand.afterScript);
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: cand.afterScript },
+      selection: { anchor: Math.min(cand.afterScript.length, view.state.selection.main.head) },
+      effects: setPendingDiff.of(null),
+    });
+    view.focus();
+    setPendingRewrite(null);
+  }, [pendingRewrite, handleAiCommit]);
+
+  const handleRejectRewrite = useCallback(() => {
+    editorViewRef.current?.dispatch({ effects: setPendingDiff.of(null) });
+    setPendingRewrite(null);
+  }, []);
+
+  const handleCycleRewrite = useCallback(() => {
+    setPendingRewrite((pr) => (pr && pr.candidates.length > 1 ? { ...pr, index: (pr.index + 1) % pr.candidates.length } : pr));
+  }, []);
+
   const handleApplyToolReview = useCallback(() => {
     handleAiCommit(toolReview?.label || "AI tool", toolReviewEdit);
     handleReplaceScript(toolReviewEdit);
@@ -735,6 +801,7 @@ export default function App() {
                 locationLines={locationGutterLines}
                 onLineAffordance={handleLineAffordance}
                 viewRef={editorViewRef}
+                readOnly={!!pendingRewrite}
               />
             )}
             {activeView === "editor" && affordance && (
@@ -742,6 +809,17 @@ export default function App() {
                 target={affordance}
                 onClose={() => setAffordance(null)}
                 onAdded={() => setWorldVersion((v) => v + 1)}
+              />
+            )}
+            {activeView === "editor" && pendingRewrite && (
+              <RewriteDiffBar
+                label={pendingRewrite.label}
+                index={pendingRewrite.index}
+                total={pendingRewrite.candidates.length}
+                score={pendingRewrite.candidates[pendingRewrite.index].score}
+                onAccept={handleAcceptRewrite}
+                onReject={handleRejectRewrite}
+                onCycle={handleCycleRewrite}
               />
             )}
             {activeView === "preview" && parsed && (
@@ -809,6 +887,8 @@ export default function App() {
               onAiCommit={handleAiCommit}
               seriesContext={seriesContextString}
               onOpenToolReview={handleOpenToolReview}
+              onShowRewriteDiff={handleShowRewriteDiff}
+              editorViewRef={editorViewRef}
             />
           )}
           {activeView === "editor" && showKB && (

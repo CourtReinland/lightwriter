@@ -26,8 +26,14 @@ const LABELS = ["Faithful", "Balanced", "Wild"];
 export async function generateReRollVariants(
   ctx: OrchestratorContext,
   temps: number[] = DEFAULT_TEMPS,
+  maxTokensOverride?: number,
 ): Promise<ReRollVariant[]> {
-  const { system, user, maxTokens } = buildPrompt({ ...ctx, mode: "re_roll" });
+  const built = buildPrompt({ ...ctx, mode: "re_roll" });
+  const { system, user } = built;
+  // re_roll's default budget (2048 tokens) truncates large passages — a whole-doc
+  // re-roll would come back cut off and, on Accept, replace the whole script with a
+  // fragment. Let callers scale the budget to the passage length.
+  const maxTokens = maxTokensOverride ?? built.maxTokens;
   const names = ctx.knowledgeBase?.characters.map((c) => c.name) ?? [];
   const service = new TextAiService();
 
