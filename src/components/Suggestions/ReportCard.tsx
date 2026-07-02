@@ -5,10 +5,12 @@ interface ReportCardProps {
   report: ScriptReportCard;
   onImproveMetric: (metricId: string, metricName: string) => void;
   onRewriteMetric: (metricId: string, metricName: string) => void;
+  /** Full multi-stage Writers' Room pipeline (memo → board → draft → punch-up → table read). */
+  onWritersRoom?: (metricId: string, metricName: string) => void;
   loading?: boolean;
 }
 
-export default function ReportCard({ report, onImproveMetric, onRewriteMetric, loading = false }: ReportCardProps) {
+export default function ReportCard({ report, onImproveMetric, onRewriteMetric, onWritersRoom, loading = false }: ReportCardProps) {
   // The one-button rewrite targets the WEAKEST framework: one pass does it all —
   // restructures to that framework's beat ladder (writing any missing beats),
   // expands to the target page count, and keeps voice/KB/arcs — across every
@@ -32,7 +34,11 @@ export default function ReportCard({ report, onImproveMetric, onRewriteMetric, l
       )}
 
       <div className="report-howto">
-        <strong>Rewrite w/ AI</strong> does it all in one pass: restructures to the framework&apos;s beats (writing any that are missing), completes to your target page count, and keeps your voice, KB, and series arcs — you approve the inline diff before anything changes. <strong>Plan</strong> just explains the fix.
+        {onWritersRoom ? (
+          <><strong>Writers&apos; Room</strong> develops the draft the way a room would: every engine pitches a beat board, a judge merges and iterates the outline, one voice drafts scene-by-scene, a second engine punches up dialogue and cuts, and a rival model runs the table read — you approve the inline diff at the end. <strong>Rewrite w/ AI</strong> (per row) is the faster single-stage doctor. <strong>Plan</strong> just explains the fix.</>
+        ) : (
+          <><strong>Rewrite w/ AI</strong> does it all in one pass: restructures to the framework&apos;s beats (writing any that are missing), completes to your target page count, and keeps your voice, KB, and series arcs — you approve the inline diff before anything changes. <strong>Plan</strong> just explains the fix.</>
+        )}
       </div>
 
       {weakest && (
@@ -40,10 +46,12 @@ export default function ReportCard({ report, onImproveMetric, onRewriteMetric, l
           <button
             className="report-rewrite-btn"
             disabled={loading}
-            title={`Full rewrite toward ${weakest.frameworkName} (your weakest framework): fills missing beats AND completes to your target pages in the same pass.`}
-            onClick={() => onRewriteMetric(weakest.frameworkId, weakest.frameworkName)}
+            title={onWritersRoom
+              ? `Memo → beat-sheet pitches from every engine → merged board iterated at outline level → scene-by-scene draft → dialogue + cut punch-ups → table read. Targets ${weakest.frameworkName} (your weakest framework), fills missing beats, and completes to your target pages.`
+              : `Full rewrite toward ${weakest.frameworkName} (your weakest framework): fills missing beats AND completes to your target pages in the same pass.`}
+            onClick={() => (onWritersRoom ?? onRewriteMetric)(weakest.frameworkId, weakest.frameworkName)}
           >
-            Rewrite Draft — {weakest.frameworkName} (beats + pages)
+            {onWritersRoom ? `Writers' Room rewrite — ${weakest.frameworkName}` : `Rewrite Draft — ${weakest.frameworkName} (beats + pages)`}
           </button>
         </div>
       )}

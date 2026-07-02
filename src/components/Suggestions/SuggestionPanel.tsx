@@ -3,6 +3,7 @@ import { ALL_FRAMEWORKS } from "../../frameworks";
 import { loadStoredReportCard, clearStoredReportCard } from "../../services/reportCardStore";
 import { getSelectedTextAiProviderSettings, getTextAiProviderSettings, getTextAiSettings, textAiProviderLabel, textAiProviderOptions, type TextAiProvider, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { runMultiProviderRewrite } from "../../services/multiProviderRewriteService";
+import { runWritersRoom } from "../../services/writersRoomService";
 import { TextAiService } from "../../services/textAiService";
 import type { RewriteDiffCandidate, RewriteReRollHandler, ReRollSelection } from "../../services/inlineDiffService";
 import { collectAllowedCast, findInventedCharacters } from "../../services/castLockService";
@@ -838,6 +839,7 @@ export default function SuggestionPanel({
     setLoading(true);
     setError(null);
     setSuggestion(null);
+    setLastMode(null); // status text must render as a banner, never an applyable suggestion
     setScriptDoctorStage("requesting");
     try {
       let candidates: RewriteDiffCandidate[] = [];
@@ -916,6 +918,76 @@ export default function SuggestionPanel({
       setShotPassProgress(null);
     }
   }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, scoringFrameworks, allowedCast, annotateCast, makeReRollHandler]);
+
+  // The Writers' Room: the full multi-stage development pass (showrunner memo →
+  // engine pitches → judged board iterated at OUTLINE level → one-voice scene-by-
+  // scene draft → dialogue + cut punch-ups on a second engine → rival-model table
+  // read with targeted fixes → final score). One click, whole room.
+  const handleWritersRoom = useCallback(async (metricId: string, metricName: string) => {
+    if (!ensureRewriteReady() || !reportCard || !onShowRewriteDiff) return;
+    const writer = getTextAiSettings().selectedProvider;
+    const keyed = Array.from(new Set([writer, ...rewriteProviders])).filter((p) => getTextAiProviderSettings(p).apiKey.trim());
+    if (!keyed.length) {
+      setError("The Writers' Room needs at least one engine with an API key. Pick engines (Rewrite engines ▾) or add a key in Settings.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuggestion(null);
+    setLastMode(null); // status text must render as a banner, never an applyable suggestion
+    setScriptDoctorStage("requesting");
+    try {
+      const result = await runWritersRoom({
+        script: fullScript,
+        frameworkId: metricId,
+        frameworkName: metricName,
+        targetPages,
+        reportCard,
+        knowledgeBase,
+        styleProfile,
+        seriesContext,
+        allowedCast,
+        engines: keyed,
+      }, setShotPassProgress);
+
+      if (!result.finalScript.trim() || result.finalScript.trim() === fullScript.trim()) {
+        setError("The room returned the draft unchanged. Try again.");
+        setScriptDoctorStage("treatment");
+        return;
+      }
+      const reRoll = makeReRollHandler({
+        usedProviders: keyed,
+        buildWholeDoc: (before) => ({
+          ...buildMetricRewritePrompt({ script: before, knowledgeBase, styleProfile, targetPages, seriesContext, reportCard, metricId, metricName, allowedCast }),
+          temperature: 0.65,
+          kind: "json" as const,
+        }),
+      });
+      const candidates = annotateCast([{
+        afterScript: result.finalScript,
+        label: `Writers' Room · ${metricName}`, // the bar shows the score chip separately
+        score: result.finalScore,
+      }]);
+      onShowRewriteDiff(candidates, `Writers' Room — ${metricName}`, reRoll);
+      const start = metricScoreFromCard(reportCard, metricId);
+      if (result.warnings.length) console.warn("Writers' Room warnings:", result.warnings);
+      setSuggestion(
+        `Writers' Room wrapped — ${result.seats.drafter} drafted, ${result.seats.judge} ran the board, ${result.seats.coverage} gave coverage. ` +
+        `Board: ${result.board.length} scenes, outline ${result.outlineScores.join(" → ") || "unscored"}.` +
+        (result.finalScore !== null ? ` ${metricName}: ${start} → ${result.finalScore}.` : "") +
+        (result.memo.theme ? ` Theme: "${result.memo.theme}"` : "") +
+        (result.warnings.length ? ` (${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"} — see console.)` : ""),
+      );
+      setScriptDoctorStage("treatment");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Writers' Room failed");
+      setScriptDoctorStage(reportCard ? "treatment" : "idle");
+    } finally {
+      setLoading(false);
+      setShotPassProgress(null);
+    }
+  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast, makeReRollHandler]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;
@@ -1447,6 +1519,7 @@ export default function SuggestionPanel({
               report={reportCard}
               onImproveMetric={handleImproveMetric}
               onRewriteMetric={onShowRewriteDiff ? handleMultiRewrite : handleRewriteMetric}
+              onWritersRoom={onShowRewriteDiff ? handleWritersRoom : undefined}
               loading={loading}
             />
           )}
