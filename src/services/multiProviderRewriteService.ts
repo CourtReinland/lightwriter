@@ -42,6 +42,8 @@ export async function runMultiProviderRewrite(args: {
   completeOverride?: ProviderCompletion;
   /** Max providers to fan out to (default 4). */
   maxProviders?: number;
+  /** Known character names, fed to the deterministic Fountain cleanup pass. */
+  characterNames?: string[];
 }): Promise<MultiRewriteResult> {
   const active = providersWithKeys(args.providers).slice(0, args.maxProviders ?? 4);
   if (!active.length) throw new Error("None of the selected providers has an API key configured. Add a key in Settings.");
@@ -55,7 +57,7 @@ export async function runMultiProviderRewrite(args: {
       const raw = args.completeOverride
         ? await args.completeOverride(provider, system, user, { temperature, maxTokens })
         : await TextAiService.forProvider(provider).complete(system, user, { temperature, maxTokens });
-      const parsed = parseRewriteResponse(raw);
+      const parsed = parseRewriteResponse(raw, args.characterNames);
       return {
         provider,
         providerLabel: textAiProviderLabel(provider),

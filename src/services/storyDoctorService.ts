@@ -34,6 +34,8 @@ export interface StoryDoctorInput {
   styleProfile: StyleProfile | null;
   /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
   seriesContext?: string;
+  /** Cast lock: the only character names the rewrite may use (see castLockService). */
+  allowedCast?: string[];
 }
 
 export interface StoryDoctorResult extends ScriptRewriteResult {
@@ -90,6 +92,7 @@ function buildRestructurePrompt(args: {
   knowledgeBase: KnowledgeBase | null;
   styleProfile: StyleProfile | null;
   seriesContext?: string;
+  allowedCast?: string[];
 }): { system: string; user: string } {
   const styleText = args.styleProfile ? StyleProfileService.serializeForPrompt(args.styleProfile) : "";
   const kbText = args.knowledgeBase ? KnowledgeBaseService.serializeForPrompt(args.knowledgeBase, 5000) : "";
@@ -110,7 +113,7 @@ RULES:
 - ADD any genuinely missing beat as a new, distinct scene; CUT or MERGE filler, repeats, and digressions.
 - Net the length to about ${args.targetPages} pages by BALANCING cuts and additions — do not pad with repetition, and do not pad with restated material to hit the count.
 - CRAFT (this is what earns a high score): each beat must turn on a clear character CHOICE with visible stakes, and connect causally to the beats before and after it (this happened, THEREFORE that — not "and then"). Escalate the consequences from You through Take. End on a Change beat that mirrors the opening You beat with a new emotional charge. Mere presence of a beat is not enough; it must do real dramatic work.
-- Preserve the writer's voice, the existing characters, and all established plot facts. Do not invent unrelated characters or events.
+- Preserve the writer's voice, the existing characters, and all established plot facts. Do not invent unrelated characters or events.${args.allowedCast?.length ? `\n- CAST LOCK (hard rule): the ONLY characters allowed are: ${args.allowedCast.join(", ")}. NEVER invent, add, or name any other character — no new named or speaking characters. Incidental presences (a waiter, a guard) stay unnamed and non-speaking, or the moment goes to an existing cast member. Every character cue in your output MUST be one of these names.` : ""}
 - PRESERVE FOUNTAIN FORMAT exactly: keep camera shots prefixed with "!!" (e.g. "!!WS LIVING ROOM", "!!CU ALIYAH'S FACE") — a shot WITHOUT the "!!" is mis-parsed as a character name. Character cues are ALL CAPS with a blank line before and dialogue on the next line; action is sentence-case prose (never ALL CAPS); keep a blank line between elements. Any NEW scene you add must follow these same conventions.
 - Return the COMPLETE revised screenplay (every scene in order), not notes or a diff.${args.seriesContext ? "\n- Honor the SERIES CONTEXT below: keep the active arcs advancing through the episode, open on the prior cliffhanger if given, and end the episode on its cliffhanger if given." : ""}
 ${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${args.seriesContext ? `\n${args.seriesContext}\n` : ""}
@@ -185,12 +188,13 @@ export async function runStoryDoctor(
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
       seriesContext: input.seriesContext,
+      allowedCast: input.allowedCast,
     });
 
     let rewrite: ScriptRewriteResult | null = null;
     try {
       const response = await complete(system, user, { temperature: 0.5, maxTokens: REWRITE_MAX_TOKENS, timeoutMs: REWRITE_TIMEOUT_MS });
-      rewrite = parseRewriteResponse(response);
+      rewrite = parseRewriteResponse(response, input.allowedCast);
     } catch {
       allWarnings.push(`Pass ${i + 1}: rewrite failed or was truncated — retrying from best.`);
     }
@@ -274,6 +278,7 @@ export async function runStoryDoctor(
           knowledgeBase: input.knowledgeBase,
           styleProfile: input.styleProfile,
           seriesContext: input.seriesContext,
+          allowedCast: input.allowedCast,
         },
         onProgress,
         complete,

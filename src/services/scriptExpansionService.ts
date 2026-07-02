@@ -41,6 +41,8 @@ export interface ExpandContext {
   styleProfile: StyleProfile | null;
   /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
   seriesContext?: string;
+  /** Cast lock: when set, new scenes may ONLY use these characters (see castLockService). */
+  allowedCast?: string[];
 }
 
 export interface ExpandResult {
@@ -196,7 +198,7 @@ RULES:
 - Every new scene is a DISTINCT event that does NOT repeat any existing scene above. Do not re-stage a meeting, arrival, or reveal that already happened.
 - New scenes connect causally to the scenes around them (this happened, therefore that).
 - Characters already in the draft are established — new scenes must NOT re-introduce or re-describe them.
-- "insert_after" MUST be the EXACT slugline of an existing scene above (copied verbatim), or "START" for the very beginning.
+- "insert_after" MUST be the EXACT slugline of an existing scene above (copied verbatim), or "START" for the very beginning.${ctx.allowedCast?.length ? `\n- CAST LOCK: plan scenes using ONLY these characters: ${ctx.allowedCast.join(", ")}. Never plan a scene that needs a new named character.` : ""}
 ${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${ctx.seriesContext ? `\n${ctx.seriesContext}\nNew scenes must advance the active arcs and respect this episode's cliffhanger duties.\n` : ""}
 Return ONLY: {"newScenes":[{"insert_after":"<existing slugline verbatim or START>","beat":"<purpose/beat>","synopsis":"<the NEW thing that happens>","pages":<number>}]}`;
 
@@ -213,7 +215,7 @@ function buildExpansionScenePrompt(
   const system = `${SCREENPLAY_SYSTEM}
 
 You are writing ONE NEW scene to insert into a screenplay that ALREADY EXISTS.
-- The characters are ALREADY introduced and acquainted. Refer to them by name. Do NOT re-introduce or re-describe them, and do NOT stage any first meeting between them. Introduce a brand-new character only if this beat genuinely brings one in.
+- The characters are ALREADY introduced and acquainted. Refer to them by name. Do NOT re-introduce or re-describe them, and do NOT stage any first meeting between them.${ctx.allowedCast?.length ? " NEVER introduce, invent, or name a new character — use ONLY the established cast; incidental presences stay unnamed and non-speaking." : " Introduce a brand-new character only if this beat genuinely brings one in."}
 - Match the existing draft's voice, tense, and Fountain formatting.
 - Do NOT repeat, recap, or rewrite the neighbouring scene shown below or any other existing material — write NEW story that advances causally.
 - No title page. Return ONLY the new Fountain scene text.`;
@@ -298,7 +300,10 @@ export async function expandScriptToTargetPages(
   }
 
   // PHASE 2 — write each planned scene with continuity, collect insertions.
-  const castNames = ctx.knowledgeBase?.characters.map((c) => c.name) ?? [];
+  const castNames = Array.from(new Set([
+    ...(ctx.knowledgeBase?.characters.map((c) => c.name) ?? []),
+    ...(ctx.allowedCast ?? []),
+  ]));
   const insertions: SceneInsertion[] = [];
   for (let i = 0; i < planned.length; i++) {
     const p = planned[i];

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { type EditorView } from "@codemirror/view";
 import { setPendingDiff } from "./codemirror/inline-diff";
-import { computeInlineDiff, type RewriteDiffCandidate } from "./services/inlineDiffService";
+import { computeInlineDiff, type RewriteDiffCandidate, type RewriteReRollHandler } from "./services/inlineDiffService";
 import RewriteDiffBar from "./components/Editor/RewriteDiffBar";
 import ArtisticBorder from "./components/Layout/ArtisticBorder";
 import EditorToolbar from "./components/Editor/EditorToolbar";
@@ -384,10 +384,12 @@ export default function App() {
   // (deletions struck through, additions highlighted) with Accept/Reject/Cycle,
   // instead of a side pane. The doc stays UNMUTATED until Accept.
   const [pendingRewrite, setPendingRewrite] = useState<
-    { candidates: RewriteDiffCandidate[]; index: number; label: string; beforeScript: string } | null
+    { id: number; candidates: RewriteDiffCandidate[]; index: number; label: string; beforeScript: string; reRoll?: RewriteReRollHandler; reRollLabel?: string; reRollError?: string } | null
   >(null);
+  const [barReRolling, setBarReRolling] = useState(false);
+  const rewriteIdRef = useRef(0);
 
-  const handleShowRewriteDiff = useCallback((candidates: RewriteDiffCandidate[], label: string) => {
+  const handleShowRewriteDiff = useCallback((candidates: RewriteDiffCandidate[], label: string, reRoll?: RewriteReRollHandler) => {
     const view = editorViewRef.current;
     const beforeScript = view ? view.state.doc.toString() : project.content;
     // Drop empty AND no-op candidates (afterScript identical to the current doc):
@@ -395,8 +397,37 @@ export default function App() {
     // pointlessly reflows the whole doc.
     const usable = candidates.filter((c) => c.afterScript.trim() && c.afterScript.trim() !== beforeScript.trim());
     if (!usable.length) return;
-    setPendingRewrite({ candidates: usable, index: 0, label, beforeScript });
+    setBarReRolling(false);
+    setPendingRewrite({ id: ++rewriteIdRef.current, candidates: usable, index: 0, label, beforeScript, reRoll, reRollLabel: reRoll?.nextLabel });
   }, [project.content]);
+
+  // Bar Re-roll: generate a fresh take with the NEXT installed engine — scoped to
+  // the current editor selection when there is one (the doc is read-only during
+  // preview, so the selection maps cleanly onto beforeScript), else the whole draft.
+  const handleBarReRoll = useCallback(async () => {
+    const pr = pendingRewrite;
+    const view = editorViewRef.current;
+    if (!pr?.reRoll || !view || barReRolling) return;
+    const generationId = pr.id; // tie the result to THIS preview — a new preview or
+    // project switch mid-flight must not receive a stale take (or rotation label).
+    const sel = view.state.selection.main;
+    const selection = sel.empty
+      ? null
+      : { from: sel.from, to: sel.to, text: view.state.doc.sliceString(sel.from, sel.to) };
+    setBarReRolling(true);
+    try {
+      const { candidates, nextLabel, error } = await pr.reRoll.run(selection);
+      const usable = candidates.filter((c) => c.afterScript.trim() && c.afterScript.trim() !== pr.beforeScript.trim());
+      setPendingRewrite((prev) => {
+        if (!prev || prev.id !== generationId) return prev; // preview replaced/cleared while generating
+        return usable.length
+          ? { ...prev, candidates: [...prev.candidates, ...usable], index: prev.candidates.length, reRollLabel: nextLabel, reRollError: undefined }
+          : { ...prev, reRollLabel: nextLabel, reRollError: error ?? "Re-roll produced no usable take." };
+      });
+    } finally {
+      setBarReRolling(false);
+    }
+  }, [pendingRewrite, barReRolling]);
 
   // A project switch or leaving the editor tab invalidates any live rewrite preview:
   // its candidates were built against the previous doc, so applying them later would
@@ -440,7 +471,7 @@ export default function App() {
   }, []);
 
   const handleCycleRewrite = useCallback(() => {
-    setPendingRewrite((pr) => (pr && pr.candidates.length > 1 ? { ...pr, index: (pr.index + 1) % pr.candidates.length } : pr));
+    setPendingRewrite((pr) => (pr && pr.candidates.length > 1 ? { ...pr, index: (pr.index + 1) % pr.candidates.length, reRollError: undefined } : pr));
   }, []);
 
   const handleApplyToolReview = useCallback(() => {
@@ -813,13 +844,18 @@ export default function App() {
             )}
             {activeView === "editor" && pendingRewrite && (
               <RewriteDiffBar
-                label={pendingRewrite.label}
+                label={pendingRewrite.candidates[pendingRewrite.index].label || pendingRewrite.label}
                 index={pendingRewrite.index}
                 total={pendingRewrite.candidates.length}
                 score={pendingRewrite.candidates[pendingRewrite.index].score}
+                castWarnings={pendingRewrite.candidates[pendingRewrite.index].castWarnings}
                 onAccept={handleAcceptRewrite}
                 onReject={handleRejectRewrite}
                 onCycle={handleCycleRewrite}
+                onReRoll={pendingRewrite.reRoll ? handleBarReRoll : undefined}
+                reRolling={barReRolling}
+                nextEngine={pendingRewrite.reRollLabel}
+                error={pendingRewrite.reRollError}
               />
             )}
             {activeView === "preview" && parsed && (

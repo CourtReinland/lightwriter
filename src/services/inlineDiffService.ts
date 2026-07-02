@@ -36,6 +36,29 @@ export interface RewriteDiffCandidate {
   label: string;
   /** Metric score of this candidate, if available. */
   score: number | null;
+  /** Cast-lock violations: character names this candidate invented (flagged + demoted). */
+  castWarnings?: string[];
+}
+
+/** The editor selection a bar re-roll applies to (offsets into the before-doc). */
+export interface ReRollSelection {
+  from: number;
+  to: number;
+  text: string;
+}
+
+/**
+ * Re-roll hook carried by a pending rewrite: regenerates a fresh take with the
+ * NEXT installed engine. `run(selection)` re-rolls just the highlighted passage,
+ * or the whole draft when selection is null; the returned candidates are appended
+ * to the pending set and `nextLabel` names the engine the following click will use.
+ */
+export interface RewriteReRollHandler {
+  /** Engine label the next re-roll will use (shown on the bar button). */
+  nextLabel: string;
+  /** `error` is set when the roll failed — shown on the bar itself (the side panel
+   *  may be closed, so failures must not be reported only there). */
+  run(selection: ReRollSelection | null): Promise<{ candidates: RewriteDiffCandidate[]; nextLabel: string; error?: string }>;
 }
 
 export function computeInlineDiff(before: string, after: string): InlineDiff {

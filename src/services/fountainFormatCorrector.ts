@@ -70,9 +70,53 @@ function dialogueLike(t: string): boolean {
   return t !== "" && !isAllCaps(t) && !SCENE_HEADING.test(t) && !FORCED_OR_SPECIAL.test(t) && !isTransition(t);
 }
 
-export function correctFountainFormatting(script: string, extraNames: string[] = []): string {
-  const lines = script.split("\n");
+// "NAME: dialogue" on one line — a chat-style habit the rewrite models fall into.
+// Fountain has no such form, so the whole line classifies as action and the
+// dialogue renders left-justified. Split it into a proper cue + dialogue line.
+const COLON_CUE = /^([A-Za-z][A-Za-z0-9 .'\-]{0,30}?)(\s*\([^)]*\))?\s*:\s+(\S.*)$/;
 
+/** Strip a dual-dialogue caret ("JONAS ^" -> "JONAS") for name matching. */
+function stripDualCaret(s: string): string {
+  return s.replace(/\s*\^$/, "");
+}
+
+function splitColonCues(lines: string[], names: Set<string>): string[] {
+  const out: string[] = [];
+  // Track whether we're inside a dialogue block: a dialogue line that happens to
+  // START with a known name + colon ("JONAS" cue, then "Mara: that's her name,
+  // her curse.") is Jonas SPEAKING — splitting it would re-attribute the line.
+  let inDialogue = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t === "") {
+      inDialogue = false;
+      out.push(line);
+      continue;
+    }
+    const isCueLine = t.startsWith("@") || names.has(cueNameOf(stripDualCaret(t)));
+    if (!inDialogue && isCueLine) {
+      inDialogue = true;
+      out.push(line);
+      continue;
+    }
+    const m = !inDialogue ? t.match(COLON_CUE) : null;
+    if (m) {
+      const upper = m[1].trim().toUpperCase();
+      // Only split on KNOWN character names (KB / script cues) — never on prose
+      // like "NOTE: the door is locked" — and never on transitions ("CUT TO:").
+      if (names.has(upper) && !isTransition(t) && !SCENE_HEADING.test(t) && !TITLE_KEY.test(t)) {
+        out.push(upper + (m[2] ? " " + m[2].trim() : ""));
+        out.push(m[3]);
+        inDialogue = true;
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+export function correctFountainFormatting(script: string, extraNames: string[] = []): string {
   // --- Build the character-name set from every available signal. ---
   const names = new Set<string>();
   for (const character of extractCharacters(script)) names.add(character.name.toUpperCase());
@@ -80,6 +124,10 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
     const clean = name.trim().toUpperCase();
     if (clean) names.add(clean);
   }
+
+  // Split "NAME: dialogue" lines FIRST so the recurrence heuristic below sees
+  // proper cue/dialogue pairs.
+  const lines = splitColonCues(script.split("\n"), names);
   // Recurrence: a name-like line that shows up 2+ times, each followed (after an
   // optional stray blank) by dialogue, is a character — even if every cue is
   // mis-spaced and extractCharacters missed them all.
@@ -109,21 +157,60 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
   const ensureBlankBefore = () => {
     if (out.length && out[out.length - 1] !== "") out.push("");
   };
+  const isParenthetical = (s: string) => /^\(.*\)$/.test(s);
 
   let i = 0;
   let inTitlePage = true;
+  let sawTitleKey = false;
+
+  // Attach a cue's dialogue block (parentheticals + lines) starting at lines[i].
+  const attachDialogue = () => {
+    // Drop a single stray blank between the cue and its first wryly/dialogue.
+    if (i + 1 < lines.length && lines[i].trim() === "" && (dialogueLike(lines[i + 1].trim()) || isParenthetical(lines[i + 1].trim()))) i++;
+    // Attach until a blank or a STRUCTURAL element (a new cue/scene/shot/transition).
+    // ALL-CAPS lines that are not structural stay attached — shouted dialogue
+    // ("GET OUT!") must not be detached from its cue and forced to action.
+    while (i < lines.length) {
+      const dt = lines[i].trim();
+      if (dt === "") break;
+      if (isParenthetical(dt)) {
+        out.push(dt);
+        i++;
+        if (i + 1 < lines.length && lines[i].trim() === "" && dialogueLike(lines[i + 1].trim())) i++;
+        continue;
+      }
+      if (isStructuralStart(stripDualCaret(dt), names)) break;
+      out.push(dt);
+      i++;
+    }
+    out.push("");
+  };
+
   while (i < lines.length) {
     const raw = lines[i];
     const t = raw.trim();
 
     if (t === "") {
+      if (sawTitleKey) inTitlePage = false; // Fountain: the title page ends at the first blank line
       if (out.length && out[out.length - 1] !== "") out.push("");
       i++;
       continue;
     }
 
-    if (inTitlePage && TITLE_KEY.test(t)) { out.push(raw); i++; continue; }
+    if (inTitlePage && TITLE_KEY.test(t)) { out.push(raw); sawTitleKey = true; i++; continue; }
+    // Indented continuation of a multi-line title value ("Title:" + "\t_**BRICK**_").
+    if (inTitlePage && sawTitleKey && /^[ \t]/.test(raw)) { out.push(raw); i++; continue; }
     if (inTitlePage) inTitlePage = false;
+
+    // Forced mixed-case character cue ("@McClane") — keep it AND its dialogue paired
+    // (the generic forced-line branch below would let a blank slip between them).
+    if (t.startsWith("@")) {
+      ensureBlankBefore();
+      out.push(t);
+      i++;
+      attachDialogue();
+      continue;
+    }
 
     // Already-forced / special lines: keep as written.
     if (FORCED_OR_SPECIAL.test(t)) { ensureBlankBefore(); out.push(t); i++; continue; }
@@ -137,30 +224,12 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
     if (isTransition(t)) { ensureBlankBefore(); out.push(`> ${t.toUpperCase()}`); out.push(""); i++; continue; }
 
     // Character cue + its dialogue (pulling the dialogue up under the cue).
-    if (names.has(cueNameOf(t))) {
+    // A dual-dialogue cue ("JONAS ^") matches on the bare name and keeps its caret.
+    if (names.has(cueNameOf(stripDualCaret(t)))) {
       ensureBlankBefore();
       out.push(t.toUpperCase());
       i++;
-      const isParenthetical = (s: string) => /^\(.*\)$/.test(s);
-      // Drop a single stray blank between the cue and its first wryly/dialogue.
-      if (i + 1 < lines.length && lines[i].trim() === "" && (dialogueLike(lines[i + 1].trim()) || isParenthetical(lines[i + 1].trim()))) i++;
-      // Attach the dialogue block — runs until a blank, an all-caps line (a new
-      // shot/cue/action), or another element. A parenthetical (V.O.)/(wryly) line
-      // stays attached to the cue, and a stray blank after it is dropped too.
-      while (i < lines.length) {
-        const dt = lines[i].trim();
-        if (dt === "") break;
-        if (isParenthetical(dt)) {
-          out.push(dt);
-          i++;
-          if (i + 1 < lines.length && lines[i].trim() === "" && dialogueLike(lines[i + 1].trim())) i++;
-          continue;
-        }
-        if (isAllCaps(dt) || isStructuralStart(dt, names)) break;
-        out.push(dt);
-        i++;
-      }
-      out.push("");
+      attachDialogue();
       continue;
     }
 

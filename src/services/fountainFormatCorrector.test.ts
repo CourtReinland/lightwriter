@@ -123,3 +123,84 @@ describe("correctFountainFormatting", () => {
     expect(out.split("\n").filter((l) => l.trim() === "ALIYAH")).toHaveLength(0);
   });
 });
+
+describe("colon-cue splitting (\"NAME: dialogue\" on one line)", () => {
+  it("splits a known-name colon cue into cue + dialogue", () => {
+    const out = correctFountainFormatting("INT. ROOM - DAY\n\nMARA: We should go.", ["MARA"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA");
+    expect(cueAt).toBeGreaterThanOrEqual(0);
+    expect(lines[cueAt + 1]).toBe("We should go.");
+  });
+
+  it("splits a mixed-case colon cue when the name is in the KB", () => {
+    const out = correctFountainFormatting("Mara: We should go.", ["Mara"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA");
+    expect(cueAt).toBeGreaterThanOrEqual(0);
+    expect(lines[cueAt + 1]).toBe("We should go.");
+  });
+
+  it("keeps the (V.O.) extension on the cue line", () => {
+    const out = correctFountainFormatting("MARA (V.O.): It was over.", ["MARA"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA (V.O.)");
+    expect(cueAt).toBeGreaterThanOrEqual(0);
+    expect(lines[cueAt + 1]).toBe("It was over.");
+  });
+
+  it("does NOT split prose like 'NOTE: the door is locked' (unknown name)", () => {
+    const out = correctFountainFormatting("NOTE: the door is locked.");
+    expect(out).not.toContain("\nNOTE\n");
+  });
+
+  it("leaves transitions like 'CUT TO:' alone", () => {
+    const out = correctFountainFormatting("CUT TO:\n\nINT. HALL - NIGHT", ["CUT"]);
+    expect(out).toContain("CUT TO:");
+  });
+});
+
+describe("review regressions: constructs the corrector must NOT mangle", () => {
+  it("keeps ALL-CAPS shouted dialogue attached to its cue (not forced to action)", () => {
+    const out = correctFountainFormatting("MARA\nGET OUT!", ["MARA"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA");
+    expect(cueAt).toBeGreaterThanOrEqual(0);
+    expect(lines[cueAt + 1]).toBe("GET OUT!");
+    expect(out).not.toContain("!GET OUT!");
+  });
+
+  it("keeps a dual-dialogue cue (JONAS ^) as a cue, not forced action", () => {
+    const out = correctFountainFormatting("MARA\nNow.\n\nJONAS ^\nNever.", ["MARA", "JONAS"]);
+    const lines = out.split("\n");
+    const dualAt = lines.indexOf("JONAS ^");
+    expect(dualAt).toBeGreaterThanOrEqual(0);
+    expect(lines[dualAt + 1]).toBe("Never.");
+    expect(out).not.toContain("!JONAS ^");
+  });
+
+  it("keeps multi-line title-page values verbatim", () => {
+    const input = "Title:\n\t_**BRICK & STEEL**_\nCredit: Written by\n\nINT. ROOM - DAY";
+    const out = correctFountainFormatting(input);
+    expect(out).toContain("\t_**BRICK & STEEL**_");
+    expect(out).not.toContain("!_**BRICK & STEEL**_");
+  });
+
+  it("keeps a forced @cue paired with its dialogue (no blank inserted)", () => {
+    const out = correctFountainFormatting("@McClane\nYippee ki-yay.");
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("@McClane");
+    expect(cueAt).toBeGreaterThanOrEqual(0);
+    expect(lines[cueAt + 1]).toBe("Yippee ki-yay.");
+  });
+
+  it("does NOT re-attribute a dialogue line that starts with another character's name + colon", () => {
+    const out = correctFountainFormatting("JONAS\nMara: that's her name, her curse.", ["JONAS", "MARA"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("JONAS");
+    expect(cueAt).toBeGreaterThanOrEqual(0);
+    expect(lines[cueAt + 1]).toBe("Mara: that's her name, her curse.");
+    // MARA must not have been minted as a cue for this line
+    expect(lines.filter((l) => l === "MARA")).toHaveLength(0);
+  });
+});

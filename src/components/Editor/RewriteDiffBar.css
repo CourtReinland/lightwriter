@@ -5,6 +5,8 @@
   transform: translateX(-50%);
   z-index: 900;
   display: flex;
+  flex-wrap: wrap; /* keep the ⚠ cast warning + engine label visible on narrow windows */
+  justify-content: center;
   align-items: center;
   gap: 14px;
   background: #1c1c1c;
@@ -33,6 +35,8 @@
 .rdb-label { color: #eee; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .rdb-score { color: #8ab4f8; }
 .rdb-variant { color: #999; font-size: 11px; }
+.rdb-cast-warning { color: #e8b04b; font-size: 11px; white-space: nowrap; }
+.rdb-error { color: #e08080; font-size: 11px; white-space: nowrap; }
 
 .rdb-actions { display: flex; gap: 6px; }
 
@@ -51,3 +55,6 @@
 .rdb-btn.accept:hover { background: #356b53; }
 .rdb-btn.reject { background: #4a2f2f; border-color: #5c3a3a; color: #f0d5d5; }
 .rdb-btn.reject:hover { background: #573838; }
+.rdb-btn.reroll { background: #2c3a52; border-color: #40557a; color: #dbe7ff; }
+.rdb-btn.reroll:hover { background: #354764; }
+.rdb-btn:disabled { opacity: 0.55; cursor: default; }

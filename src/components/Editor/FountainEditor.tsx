@@ -373,6 +373,8 @@ export default function FountainEditor({
 
     viewRef.current = view;
     if (externalViewRef) externalViewRef.current = view;
+    // Dev-only hook so preview tests can drive selections programmatically.
+    if (import.meta.env.DEV) (window as unknown as { __lwView?: EditorView }).__lwView = view;
     return view;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -392,13 +394,15 @@ export default function FountainEditor({
 
   // Lock / unlock the editor when a rewrite-diff preview is shown. Programmatic
   // Accept dispatch still applies; this only blocks user typing so the doc can't
-  // drift out from under the pending candidates.
+  // drift out from under the pending candidates. NOTE: EditorState.readOnly only
+  // (NOT EditorView.editable(false)) so the caret and text SELECTION keep working —
+  // the diff bar's Re-roll uses the live selection to re-roll just a passage.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
       effects: readOnlyCompartment.current.reconfigure(
-        readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
+        readOnly ? EditorState.readOnly.of(true) : [],
       ),
     });
   }, [readOnly]);

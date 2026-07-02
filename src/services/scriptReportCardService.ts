@@ -5,6 +5,8 @@ import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { expandScriptToTargetPages, type ExpandProgress } from "./scriptExpansionService";
 import { normalizeShotLines } from "./fountainShotNormalizer";
+import { cleanupGeneratedScreenplay } from "./generatedScriptCleanup";
+import { castLockBlock } from "./castLockService";
 import { simpleScriptHash } from "./scriptStructure";
 import { getAnalystProviderSettings } from "./textAiSettingsService";
 import { loadStoredReportCard, saveStoredReportCard } from "./reportCardStore";
@@ -61,6 +63,9 @@ export interface ScriptReportPromptInput {
   /** Frameworks to score. Default = all. Scoping to the writer's active framework(s)
    *  keeps the payload small (so the last framework isn't truncated) and focuses the model. */
   frameworks?: FrameworkDefinition[];
+  /** Cast lock: the only character names a rewrite may use (script + KB + series).
+   *  See castLockService. When set, rewrite prompts forbid inventing characters. */
+  allowedCast?: string[];
 }
 
 /** Normalize a beat name for cross-sample matching (case/punctuation-insensitive). */
@@ -300,6 +305,17 @@ function selectedMetricPayload(input: ImproveMetricPromptInput): unknown {
     (input.metricId === "style" ? input.reportCard.styleScore : input.metricId === "character" ? input.reportCard.characterScore : input.reportCard.pacingScore);
 }
 
+// Shared hard formatting rules for every prompt that writes screenplay text.
+// The editor classifies elements from Fountain shape, so a violation doesn't just
+// look wrong — cues/dialogue land left-justified as action.
+export const FOUNTAIN_FORMAT_RULES = `FOUNTAIN FORMAT RULES (hard requirements — violations break the editor's rendering):
+- Character cue: the name ALONE, ALL CAPS, on its own line, one blank line BEFORE it, and the dialogue starting on the VERY NEXT line (no blank line between cue and dialogue).
+- NEVER write dialogue as "NAME: dialogue" on a single line.
+- Action lines: sentence-case prose (never ALL CAPS), separated from other elements by a blank line.
+- Camera shots keep the "!!" prefix (e.g. "!!WS THE ROOM"); a shot without "!!" is mis-read as a character cue.
+- Transitions ("CUT TO:", "FADE OUT.") on their own line.
+- Scene headings: "INT./EXT. LOCATION - TIME" in caps.`;
+
 function rewriteJsonInstructions(): string {
   return `Return ONLY this JSON shape:
 {
@@ -322,7 +338,7 @@ export function buildMetricRewritePrompt(input: ImproveMetricPromptInput): { sys
 
 SELECTED REWRITE METRIC: ${input.metricName} (${input.metricId})
 CURRENT REPORT DETAIL:
-${JSON.stringify(metricPayload, null, 2)}${structureBlock}${expansion}${input.seriesContext ? `\n\n${input.seriesContext}` : ""}
+${JSON.stringify(metricPayload, null, 2)}${structureBlock}${expansion}${input.seriesContext ? `\n\n${input.seriesContext}` : ""}${castLockBlock(input.allowedCast)}
 
 Rewrite the current script to improve this selected metric, expanding the draft toward its target length.
 Rules:
@@ -330,8 +346,10 @@ Rules:
 - Keep existing scene headings and useful dialogue where they still work.
 - Add, expand, cut, or reorder what materially improves ${input.metricName}; when below target length, that means writing substantial NEW scenes for the metric's weak/missing beats.
 - Preserve the STYLE CONTRACT and target/director style.
-- Preserve KB continuity and character voice.${input.seriesContext ? "\n- Honor the SERIES CONTEXT above: keep the active arcs advancing, open on the prior cliffhanger if given, and end this episode on its cliffhanger if given." : ""}
+- Preserve KB continuity and character voice.${input.seriesContext ? "\n- Honor the SERIES CONTEXT above: keep the active arcs advancing, open on the prior cliffhanger if given, and end this episode on its cliffhanger if given." : ""}${input.allowedCast?.length ? "\n- Obey the CAST LOCK above: never invent or add characters that are not in the listed cast." : ""}
 - Honor the EXPANSION REQUIREMENT above when present: reach roughly ${input.targetPages} pages with real new scenes, not padding.
+
+${FOUNTAIN_FORMAT_RULES}
 
 ${rewriteJsonInstructions()}`,
     temperature: 0.45,
@@ -363,7 +381,7 @@ export function buildFillGapsRewritePrompt(input: FillGapsRewritePromptInput): {
 
 FILL GAPS / COMPLETE TO TARGET PAGES
 Mode: ${modeLabel}
-Target pages: ${input.targetPages}${structureBlock}${expansion}${input.seriesContext ? `\n\n${input.seriesContext}` : ""}
+Target pages: ${input.targetPages}${structureBlock}${expansion}${input.seriesContext ? `\n\n${input.seriesContext}` : ""}${castLockBlock(input.allowedCast)}
 
 Priority missing beats / weak beats:
 ${missingBeatSummary(input.reportCard, input.targetFrameworkId)}
@@ -377,8 +395,10 @@ Rules:
 - Fill missing beats with real dramatic scenes, not outline notes.
 - Complete toward target pages by adding causally connected scenes, reversals, character choices, and payoffs.
 - Keep the writer's style contract and target/director style visible in the prose.
-- Keep all additions consistent with the KB and current script.
+- Keep all additions consistent with the KB and current script.${input.allowedCast?.length ? "\n- Obey the CAST LOCK above: never invent or add characters that are not in the listed cast." : ""}
 - Expand fully to the target page count with real new scenes. Use warnings ONLY for a genuine creative constraint — never as an excuse to return a short draft.
+
+${FOUNTAIN_FORMAT_RULES}
 
 ${rewriteJsonInstructions()}`,
     temperature: 0.5,
@@ -622,7 +642,15 @@ function rewriteSummaryFromParsed(parsed: Record<string, unknown>): string[] {
       : asStringArray(parsed.changes);
 }
 
-export function parseRewriteResponse(text: string): ScriptRewriteResult {
+/** Full deterministic formatting pass on a rewrite candidate, with a safety net:
+ *  if the reclassification ever produces something that no longer validates as an
+ *  apply-ready screenplay, fall back to the light shot-normalization only. */
+function cleanRewriteScript(script: string, characterNames: string[]): string {
+  const cleaned = cleanupGeneratedScreenplay(script, characterNames);
+  return validateRewriteScript(cleaned).canApply ? cleaned : normalizeShotLines(script);
+}
+
+export function parseRewriteResponse(text: string, characterNames: string[] = []): ScriptRewriteResult {
   const preview = rawPreview(text);
   let parsed: Record<string, unknown> | null = null;
   let jsonError: unknown = null;
@@ -643,7 +671,10 @@ export function parseRewriteResponse(text: string): ScriptRewriteResult {
     }
     const recoveredWarnings = candidate.field === "rewrittenScript" ? [] : [`Recovered screenplay from provider field "${candidate.field}"; preferred field is "rewrittenScript".`];
     return {
-      rewrittenScript: normalizeShotLines(candidate.script),
+      // Full deterministic formatting pass (cues/dialogue/shots/transitions), not
+      // just shot normalization — rewrite models emit sloppy Fountain (mis-spaced
+      // cues, "NAME: dialogue") that otherwise renders left-justified as action.
+      rewrittenScript: cleanRewriteScript(candidate.script, characterNames),
       changeSummary: rewriteSummaryFromParsed(parsed),
       warnings: [...recoveredWarnings, ...asStringArray(parsed.warnings)],
       rawResponsePreview: preview,
@@ -655,7 +686,7 @@ export function parseRewriteResponse(text: string): ScriptRewriteResult {
   const validation = validateRewriteScript(plainText);
   if (validation.canApply) {
     return {
-      rewrittenScript: normalizeShotLines(plainText),
+      rewrittenScript: cleanRewriteScript(plainText, characterNames),
       changeSummary: ["Recovered plain screenplay text from a non-JSON provider response."],
       warnings: [`Provider response was not valid JSON (${jsonError instanceof Error ? jsonError.message : "parse failed"}); recovered because it looked like screenplay text.`],
       rawResponsePreview: preview,
@@ -820,7 +851,7 @@ function beatGuidanceFor(reportCard: ScriptReportCard, frameworkId: string | und
 // count, grow it to target by inserting whole new scenes (reliable expansion).
 export async function expandToTargetIfNeeded(
   result: ScriptRewriteResult,
-  opts: { targetPages: number; frameworkId?: string; reportCard: ScriptReportCard; knowledgeBase: KnowledgeBase | null; styleProfile: StyleProfile | null; seriesContext?: string },
+  opts: { targetPages: number; frameworkId?: string; reportCard: ScriptReportCard; knowledgeBase: KnowledgeBase | null; styleProfile: StyleProfile | null; seriesContext?: string; allowedCast?: string[] },
   onProgress?: (p: ExpandProgress) => void,
   completeOverride?: Completion,
 ): Promise<ScriptRewriteResult> {
@@ -838,6 +869,7 @@ export async function expandToTargetIfNeeded(
       knowledgeBase: opts.knowledgeBase,
       styleProfile: opts.styleProfile,
       seriesContext: opts.seriesContext,
+      allowedCast: opts.allowedCast,
     },
     onProgress,
     completeOverride,
@@ -861,7 +893,7 @@ export async function rewriteScriptForMetric(
     temperature: prompt.temperature,
     maxTokens: prompt.maxTokens,
   });
-  const result = parseRewriteResponse(response);
+  const result = parseRewriteResponse(response, input.allowedCast);
   return expandToTargetIfNeeded(
     result,
     {
@@ -871,6 +903,7 @@ export async function rewriteScriptForMetric(
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
       seriesContext: input.seriesContext,
+      allowedCast: input.allowedCast,
     },
     onProgress,
   );
@@ -887,7 +920,7 @@ export async function fillScriptGaps(
     temperature: prompt.temperature,
     maxTokens: prompt.maxTokens,
   });
-  const result = parseRewriteResponse(response);
+  const result = parseRewriteResponse(response, input.allowedCast);
   if (input.mode !== "target_pages") return result;
   return expandToTargetIfNeeded(
     result,
@@ -898,6 +931,7 @@ export async function fillScriptGaps(
       knowledgeBase: input.knowledgeBase,
       styleProfile: input.styleProfile,
       seriesContext: input.seriesContext,
+      allowedCast: input.allowedCast,
     },
     onProgress,
   );

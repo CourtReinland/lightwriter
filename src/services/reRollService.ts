@@ -18,28 +18,42 @@ export interface ReRollVariant {
 const DEFAULT_TEMPS = [0.6, 0.85, 1.1];
 const LABELS = ["Faithful", "Balanced", "Wild"];
 
+export interface ReRollOptions {
+  /** Temperatures — one variant per entry (default [0.6, 0.85, 1.1]). */
+  temps?: number[];
+  /** re_roll's default budget (2048 tokens) truncates large passages — a whole-doc
+   *  re-roll would come back cut off and, on Accept, replace the whole script with
+   *  a fragment. Scale this to the passage length. */
+  maxTokens?: number;
+  /** Run on a specific engine (TextAiService.forProvider) instead of the writer. */
+  service?: TextAiService;
+  /** Per-variant label override (default Faithful/Balanced/Wild). */
+  labels?: string[];
+}
+
 /**
  * Generate re-roll variants for the current selection. Builds the prompt once
  * (re_roll mode, which carries the full OrchestratorContext including
- * seriesContext) and varies only the temperature per variant.
+ * seriesContext and the cast lock) and varies only the temperature per variant.
  */
 export async function generateReRollVariants(
   ctx: OrchestratorContext,
-  temps: number[] = DEFAULT_TEMPS,
-  maxTokensOverride?: number,
+  opts: ReRollOptions = {},
 ): Promise<ReRollVariant[]> {
   const built = buildPrompt({ ...ctx, mode: "re_roll" });
   const { system, user } = built;
-  // re_roll's default budget (2048 tokens) truncates large passages — a whole-doc
-  // re-roll would come back cut off and, on Accept, replace the whole script with a
-  // fragment. Let callers scale the budget to the passage length.
-  const maxTokens = maxTokensOverride ?? built.maxTokens;
-  const names = ctx.knowledgeBase?.characters.map((c) => c.name) ?? [];
-  const service = new TextAiService();
+  const temps = opts.temps ?? DEFAULT_TEMPS;
+  const labels = opts.labels ?? LABELS;
+  const maxTokens = opts.maxTokens ?? built.maxTokens;
+  const names = Array.from(new Set([
+    ...(ctx.knowledgeBase?.characters.map((c) => c.name) ?? []),
+    ...(ctx.allowedCast ?? []),
+  ]));
+  const service = opts.service ?? new TextAiService();
 
   return Promise.all(
     temps.map(async (temperature, id): Promise<ReRollVariant> => {
-      const label = LABELS[id] ?? `Take ${id + 1}`;
+      const label = labels[id] ?? `Take ${id + 1}`;
       try {
         const raw = await service.complete(system, user, { temperature, maxTokens });
         return { id, temperature, label, text: cleanupGeneratedScreenplay(raw, names).trim() };

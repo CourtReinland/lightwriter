@@ -4,7 +4,9 @@ import { loadStoredReportCard, clearStoredReportCard } from "../../services/repo
 import { getSelectedTextAiProviderSettings, getTextAiProviderSettings, getTextAiSettings, textAiProviderLabel, textAiProviderOptions, type TextAiProvider, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { runMultiProviderRewrite } from "../../services/multiProviderRewriteService";
 import { TextAiService } from "../../services/textAiService";
-import type { RewriteDiffCandidate } from "../../services/inlineDiffService";
+import type { RewriteDiffCandidate, RewriteReRollHandler, ReRollSelection } from "../../services/inlineDiffService";
+import { collectAllowedCast, findInventedCharacters } from "../../services/castLockService";
+import { cleanupGeneratedScreenplay } from "../../services/generatedScriptCleanup";
 import type { EditorView } from "@codemirror/view";
 import { rewriteScriptWithShotDirections, type ShotPassProgress } from "../../services/shotDirectionService";
 import { generateFromPrompt, type GenerationUnit } from "../../services/promptGenerationService";
@@ -13,11 +15,12 @@ import { fillSceneDescriptions } from "../../services/expandDescriptionsService"
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
 import { correctFountainFormatting } from "../../services/fountainFormatCorrector";
-import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, buildMetricRewritePrompt, metricScoreFromCard, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, buildMetricRewritePrompt, buildFillGapsRewritePrompt, parseRewriteResponse, metricScoreFromCard, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import { runStoryDoctor, isFrameworkMetric } from "../../services/storyDoctorService";
 import {
   generate,
   isAnalysisMode,
+  buildPrompt,
   type OrchestratorMode,
   type OrchestratorContext,
 } from "../../services/aiOrchestrator";
@@ -62,7 +65,7 @@ interface SuggestionPanelProps {
   seriesContext?: string;
   onOpenToolReview: (review: { label: string; beforeScript: string; afterScript: string }) => void;
   /** Show a pending rewrite as an inline diff overlay in the editor (best-first candidates). */
-  onShowRewriteDiff?: (candidates: RewriteDiffCandidate[], label: string) => void;
+  onShowRewriteDiff?: (candidates: RewriteDiffCandidate[], label: string, reRoll?: RewriteReRollHandler) => void;
   /** The shared editor view, for reading the live selection (scoped re-roll). */
   editorViewRef?: React.MutableRefObject<EditorView | undefined>;
 }
@@ -177,6 +180,99 @@ export default function SuggestionPanel({
   }, []);
   const [rewriteReview, setRewriteReview] = useState<RewriteReviewState | null>(null);
   const [scriptDoctorStage, setScriptDoctorStage] = useState<ScriptDoctorStage>("idle");
+
+  // ── Cast lock: every character the story already knows about (script cues +
+  // KB + series world characters + character arcs). Fed to every rewrite prompt
+  // as a hard "do not invent characters" rule, and enforced deterministically on
+  // each candidate below.
+  const allowedCast = useMemo(
+    () => collectAllowedCast({ script: fullScript, knowledgeBase, seriesId: project.seriesId }),
+    [fullScript, knowledgeBase, project.seriesId],
+  );
+
+  // Flag candidates that invented characters anyway (label ⚠ + castWarnings) and
+  // demote them below clean takes — the model was told, now we check its work.
+  const annotateCast = useCallback((cands: RewriteDiffCandidate[]): RewriteDiffCandidate[] => {
+    const flagged = cands.map((c) => {
+      const invented = findInventedCharacters(c.afterScript, allowedCast);
+      return invented.length ? { ...c, castWarnings: invented } : c;
+    });
+    // Stable sort: clean takes first, violators last (score order preserved within groups).
+    return flagged.sort((a, b) => Number(Boolean(a.castWarnings?.length)) - Number(Boolean(b.castWarnings?.length)));
+  }, [allowedCast]);
+
+  /**
+   * Bar Re-roll factory: rotates through the INSTALLED (keyed) engines, starting
+   * after the ones that produced the initial candidates. A re-roll with a live
+   * selection regenerates just that passage (re_roll mode, spliced back into the
+   * draft); with no selection it re-runs the source task's own prompt whole-doc
+   * on the next engine. One take per click, cleaned + cast-checked.
+   */
+  const makeReRollHandler = useCallback((cfg: {
+    usedProviders: TextAiProvider[];
+    /** Rebuild the source task's whole-doc prompt against the current before-text. */
+    buildWholeDoc: (before: string) => { system: string; user: string; temperature: number; maxTokens: number; kind: "json" | "raw" };
+  }): RewriteReRollHandler | undefined => {
+    const keyed = textAiProviderOptions().filter((p) => getTextAiProviderSettings(p).apiKey.trim());
+    if (!keyed.length) return undefined;
+    let idx = keyed.findIndex((p) => !cfg.usedProviders.includes(p));
+    if (idx < 0) idx = 0; // every engine already used -> cycle from the top
+    const peek = () => textAiProviderLabel(keyed[idx % keyed.length]);
+    return {
+      nextLabel: peek(),
+      run: async (selection: ReRollSelection | null) => {
+        const provider = keyed[idx % keyed.length];
+        idx += 1;
+        const service = TextAiService.forProvider(provider);
+        const before = editorViewRef?.current ? editorViewRef.current.state.doc.toString() : fullScript;
+        setError(null);
+        try {
+          let after: string;
+          let scope = "re-roll";
+          if (selection && selection.text.trim() && !(selection.from === 0 && selection.to === before.length)) {
+            scope = "selection re-roll";
+            const variants = await generateReRollVariants({
+              selectedText: selection.text,
+              surroundingContext: before.slice(Math.max(0, selection.from - 400), Math.min(before.length, selection.to + 400)),
+              fullScript: before,
+              cursorLine,
+              cursorBeats,
+              knowledgeBase,
+              styleProfile,
+              mode: "re_roll",
+              targetPages,
+              seriesContext,
+              allowedCast,
+            }, {
+              temps: [0.9],
+              service,
+              maxTokens: selection.text.length > 4000 ? Math.min(16000, Math.max(2048, Math.ceil(selection.text.length / 3))) : undefined,
+            });
+            const v = variants.find((x) => !x.error && x.text.trim());
+            if (!v) throw new Error(variants.find((x) => x.error)?.error ?? "Re-roll produced nothing usable.");
+            after = before.slice(0, selection.from) + v.text + before.slice(selection.to);
+          } else {
+            const p = cfg.buildWholeDoc(before);
+            const raw = await service.complete(p.system, p.user, { temperature: p.temperature, maxTokens: p.maxTokens, timeoutMs: 300_000 });
+            after = p.kind === "json"
+              ? parseRewriteResponse(raw, allowedCast).rewrittenScript
+              : cleanupGeneratedScreenplay(raw, allowedCast).trim();
+            // Whole-doc guard for BOTH kinds: a result far shorter than the source is
+            // a truncated/partial rewrite — Accept would shrink the script to a fragment.
+            if (after.length < before.length * 0.5) {
+              throw new Error("Re-roll came back truncated (too short for a whole-script rewrite). Try re-rolling a smaller selection.");
+            }
+          }
+          const cand: RewriteDiffCandidate = { afterScript: after, label: `${textAiProviderLabel(provider)} · ${scope}`, score: null };
+          return { candidates: annotateCast([cand]), nextLabel: peek() };
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Re-roll failed";
+          setError(message); // panel banner (when open)
+          return { candidates: [], nextLabel: peek(), error: message }; // bar display (always visible)
+        }
+      },
+    };
+  }, [editorViewRef, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast]);
   // Story Generator (direct single-call generation from the WRITER model)
   const [genPrompt, setGenPrompt] = useState("");
   const [genAmount, setGenAmount] = useState(23);
@@ -315,7 +411,7 @@ export default function SuggestionPanel({
         const rewritten = await run(currentSettings, setShotPassProgress);
         // Show the result as an inline diff overlay in the editor (deletions
         // struck through, additions highlighted) instead of a side pane.
-        if (onShowRewriteDiff) onShowRewriteDiff([{ afterScript: rewritten, label, score: null }], label);
+        if (onShowRewriteDiff) onShowRewriteDiff(annotateCast([{ afterScript: rewritten, label, score: null }]), label);
         else onOpenToolReview({ label, beforeScript: fullScript, afterScript: rewritten });
       } catch (e) {
         setError(e instanceof Error ? e.message : `${label} failed`);
@@ -324,7 +420,7 @@ export default function SuggestionPanel({
         setShotPassProgress(null);
       }
     },
-    [fullScript, onOpenToolReview, onShowRewriteDiff],
+    [fullScript, onOpenToolReview, onShowRewriteDiff, annotateCast],
   );
 
   const handleExpandDescriptions = useCallback(
@@ -421,6 +517,7 @@ export default function SuggestionPanel({
           characterName,
           targetPages,
           seriesContext,
+          allowedCast,
         };
 
         const result = await generate(ctx);
@@ -431,7 +528,7 @@ export default function SuggestionPanel({
         setLoading(false);
       }
     },
-    [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext],
+    [selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast],
   );
 
   // Re-roll the selected passage into several variants (varied weighting).
@@ -491,7 +588,8 @@ export default function SuggestionPanel({
         mode: "re_roll",
         targetPages,
         seriesContext,
-      }, undefined, rollMaxTokens);
+        allowedCast,
+      }, { maxTokens: rollMaxTokens });
       // For a whole-doc re-roll, a result far shorter than the source is almost
       // certainly a truncated (cut-off) generation — drop it rather than let Accept
       // shrink the script to a fragment.
@@ -512,8 +610,35 @@ export default function SuggestionPanel({
           label: `Re-roll · ${v.label}`,
           score: null,
         }));
-        onShowRewriteDiff(candidates, wholeDoc ? "Re-roll (whole script)" : "Re-roll selection");
-        setSuggestion(`Re-rolled ${wholeDoc ? "the whole script" : "the selection"} into ${usable.length} takes. Review the inline diff, then Accept, Reject, or Compare next.`);
+        // Bar Re-roll: a fresh take on the next installed engine. The live editor
+        // selection (which persists through the preview) re-rolls just that passage;
+        // with nothing selected it re-rolls the whole draft.
+        const reRoll = makeReRollHandler({
+          usedProviders: [getTextAiSettings().selectedProvider],
+          buildWholeDoc: (beforeNow) => {
+            const built = buildPrompt({
+              selectedText: beforeNow,
+              surroundingContext: "",
+              fullScript: beforeNow,
+              cursorLine,
+              cursorBeats,
+              knowledgeBase,
+              styleProfile,
+              mode: "re_roll",
+              targetPages,
+              seriesContext,
+              allowedCast,
+            });
+            return {
+              ...built,
+              temperature: 0.9,
+              maxTokens: Math.min(16000, Math.max(2048, Math.ceil(beforeNow.length / 3))),
+              kind: "raw" as const,
+            };
+          },
+        });
+        onShowRewriteDiff(annotateCast(candidates), wholeDoc ? "Re-roll (whole script)" : "Re-roll selection", reRoll);
+        setSuggestion(`Re-rolled ${wholeDoc ? "the whole script" : "the selection"} into ${usable.length} takes. Review the inline diff, then Accept, Reject, Compare next, or Re-roll on the next engine.`);
       } else {
         setReRollVariants(variants);
       }
@@ -522,7 +647,7 @@ export default function SuggestionPanel({
     } finally {
       setReRolling(false);
     }
-  }, [editorViewRef, selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext, onShowRewriteDiff]);
+  }, [editorViewRef, selectedText, contextText, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext, onShowRewriteDiff, allowedCast, annotateCast, makeReRollHandler]);
 
   const applyReRoll = useCallback((text: string) => {
     onApply(text);
@@ -668,6 +793,7 @@ export default function SuggestionPanel({
             knowledgeBase,
             styleProfile,
             seriesContext,
+            allowedCast,
           }, setShotPassProgress)
         : await rewriteScriptForMetric({
             script: fullScript,
@@ -678,6 +804,7 @@ export default function SuggestionPanel({
             metricId,
             metricName,
             seriesContext,
+            allowedCast,
           }, setShotPassProgress);
       setScriptDoctorStage("validating");
       stageRewritePreview(result, `${metricName} rewrite`, fullScript, reportCard);
@@ -688,7 +815,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, seriesContext]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, seriesContext, allowedCast]);
 
   // Multi-provider rewrite: run the selected providers in parallel and show the best
   // as an inline diff overlay (with Compare-next to cycle).
@@ -714,8 +841,6 @@ export default function SuggestionPanel({
     setScriptDoctorStage("requesting");
     try {
       let candidates: RewriteDiffCandidate[] = [];
-      let bestLabel = "?";
-      let bestScore: number | null = null;
       let okCount = 0;
 
       if (isFrameworkMetric(metricId)) {
@@ -723,7 +848,7 @@ export default function SuggestionPanel({
         const settled = await Promise.allSettled(providers.map(async (p) => {
           const svc = TextAiService.forProvider(p);
           const res = await runStoryDoctor(
-            { script: fullScript, metricId, metricName, targetPages, reportCard, knowledgeBase, styleProfile, seriesContext },
+            { script: fullScript, metricId, metricName, targetPages, reportCard, knowledgeBase, styleProfile, seriesContext, allowedCast },
             (prog) => setShotPassProgress({ ...prog, label: `${labelFor(p)}: ${prog.label}` }),
             svc.complete.bind(svc),
           );
@@ -737,12 +862,12 @@ export default function SuggestionPanel({
         candidates = done
           .filter((d) => d.res.rewrittenScript.trim() && d.res.rewrittenScript.trim() !== fullScript.trim())
           .map((d) => ({ afterScript: d.res.rewrittenScript, label: `${d.label} · ${metricName} ${d.res.finalScore}`, score: d.res.finalScore }));
-        if (done.length) { bestLabel = done[0].label; bestScore = done[0].res.finalScore; }
       } else {
-        const prompt = buildMetricRewritePrompt({ script: fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, reportCard, metricId, metricName });
+        const prompt = buildMetricRewritePrompt({ script: fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, reportCard, metricId, metricName, allowedCast });
         const result = await runMultiProviderRewrite({
           providers,
           prompt,
+          characterNames: allowedCast,
           onProgress: (label) => setShotPassProgress({ completed: 0, total: 1, label }),
           scoreCandidate: async (after) => {
             const card = await runScriptReportCard(
@@ -756,7 +881,6 @@ export default function SuggestionPanel({
         candidates = result.candidates
           .filter((c) => !c.error && c.afterScript.trim() && c.afterScript.trim() !== fullScript.trim())
           .map((c) => ({ afterScript: c.afterScript, label: `${c.providerLabel}${c.score !== null ? ` · ${metricName} ${c.score}` : ""}`, score: c.score }));
-        if (result.best) { bestLabel = result.best.providerLabel; bestScore = result.best.score; }
       }
 
       if (!candidates.length) {
@@ -764,9 +888,24 @@ export default function SuggestionPanel({
         setScriptDoctorStage("treatment");
         return;
       }
-      onShowRewriteDiff(candidates, `${metricName} rewrite`);
+      // Bar Re-roll: one fresh single-pass take on the next installed engine, using
+      // this metric's own prompt (or the highlighted passage when one is selected).
+      const reRoll = makeReRollHandler({
+        usedProviders: providers,
+        buildWholeDoc: (before) => ({
+          ...buildMetricRewritePrompt({ script: before, knowledgeBase, styleProfile, targetPages, seriesContext, reportCard, metricId, metricName, allowedCast }),
+          temperature: 0.65, // hotter than the fan-out pass — a re-roll wants a different take
+          kind: "json" as const,
+        }),
+      });
+      // Annotate BEFORE composing the status line: cast-lock demotion can reorder
+      // the takes, and the message must describe the take the bar actually shows.
+      const annotated = annotateCast(candidates);
+      const shown = annotated[0];
+      const flaggedCount = annotated.filter((c) => c.castWarnings?.length).length;
+      onShowRewriteDiff(annotated, `${metricName} rewrite`, reRoll);
       setSuggestion(
-        `Rewrote with ${okCount} engine${okCount === 1 ? "" : "s"}. Best: ${bestLabel}${bestScore !== null ? ` (${metricName} ${start} → ${bestScore})` : ""}. Review the inline diff in the editor, then Accept, Reject, or Compare next.`,
+        `Rewrote with ${okCount} engine${okCount === 1 ? "" : "s"}. Showing: ${shown.label}${shown.score !== null ? ` (${metricName} ${start} → ${shown.score})` : ""}.${flaggedCount ? ` ${flaggedCount} take${flaggedCount === 1 ? " was" : "s were"} flagged for invented characters and demoted.` : ""} Review the inline diff, then Accept, Reject, Compare next, or Re-roll.`,
       );
       setScriptDoctorStage("treatment");
     } catch (e) {
@@ -776,7 +915,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, scoringFrameworks]);
+  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, scoringFrameworks, allowedCast, annotateCast, makeReRollHandler]);
 
   const handleFillGaps = useCallback(async (mode: "missing_beats" | "target_pages") => {
     if (!ensureRewriteReady() || !reportCard) return;
@@ -801,6 +940,7 @@ export default function SuggestionPanel({
         mode,
         targetFrameworkId,
         seriesContext,
+        allowedCast,
       }, setShotPassProgress);
       setScriptDoctorStage("validating");
       const focusSuffix = targetFrameworkId ? " (focused on active framework)" : "";
@@ -809,8 +949,15 @@ export default function SuggestionPanel({
         // Consistent with the metric rewrites: preview as an inline diff overlay
         // rather than the old side-pane review card.
         if (result.rewrittenScript.trim() && result.rewrittenScript.trim() !== fullScript.trim()) {
-          onShowRewriteDiff([{ afterScript: result.rewrittenScript, label: gapLabel, score: null }], gapLabel);
-          setSuggestion(`${gapLabel} ready. Review the inline diff in the editor, then Accept or Reject.`);
+          const reRoll = makeReRollHandler({
+            usedProviders: [getTextAiSettings().selectedProvider],
+            buildWholeDoc: (before) => ({
+              ...buildFillGapsRewritePrompt({ script: before, knowledgeBase, styleProfile, targetPages, reportCard, mode, targetFrameworkId, seriesContext, allowedCast }),
+              kind: "json" as const,
+            }),
+          });
+          onShowRewriteDiff(annotateCast([{ afterScript: result.rewrittenScript, label: gapLabel, score: null }]), gapLabel, reRoll);
+          setSuggestion(`${gapLabel} ready. Review the inline diff in the editor, then Accept, Reject, or Re-roll on the next engine.`);
           setScriptDoctorStage("treatment");
         } else {
           setError("Gap fill returned the script unchanged. Try again or adjust the target.");
@@ -826,7 +973,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks, seriesContext, onShowRewriteDiff]);
+  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks, seriesContext, onShowRewriteDiff, allowedCast, annotateCast, makeReRollHandler]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;

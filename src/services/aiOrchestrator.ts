@@ -1,4 +1,5 @@
 import { TextAiService } from "./textAiService";
+import { castLockBlock } from "./castLockService";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import type { ComputedBeat } from "../frameworks/utils";
@@ -48,6 +49,8 @@ export interface OrchestratorContext {
   targetPages?: number;
   /** Pre-serialized series/arc/cliffhanger context for this episode (see seriesContextService). */
   seriesContext?: string;
+  /** Cast lock: the only character names writing modes may use (see castLockService). */
+  allowedCast?: string[];
 }
 
 // ── Mode Configs ──
@@ -271,6 +274,11 @@ export function buildPrompt(ctx: OrchestratorContext): {
     if (kbText) {
       sections.push("\n" + kbText);
     }
+  }
+
+  // Cast lock: writing modes may not invent characters outside the known cast.
+  if (!config.isAnalysis && ctx.allowedCast?.length) {
+    sections.push(castLockBlock(ctx.allowedCast));
   }
 
   const systemPrompt = sections.join("\n");
