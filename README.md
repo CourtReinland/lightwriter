@@ -83,22 +83,26 @@ The core differentiator. Set a target page count and toggle color-coded story st
 - Multiple frameworks can be active simultaneously (colors stack)
 - Beat Map legend in the sidebar shows all active beats sorted by page
 
-### AI Writing Assistant (Grok)
-Powered by xAI's Grok API with these modes:
-- **Improve** — Sharpen dialogue for naturalness and character voice
-- **Expand** — Add detail, atmosphere, and action lines
-- **Compress** — Tighten content while preserving beats
-- **Alt Lines** — Generate 3 alternative versions with different tones
-- **Action** — Add vivid visual description around content
-- **Shots** — Add context-aware `MS`/`WS`/`CU` camera direction lines in forced Fountain shot format
-- **Fix Fmt** — Correct Fountain formatting errors
-- **Custom Prompt** — Free-text: ask anything about the selected text
+### AI Writing Assistant (multi-provider)
+LightWriter drives five text-AI providers — **xAI Grok, OpenAI, Anthropic Claude, OpenRouter, Kimi (Moonshot)** — in three roles: a **writer** (generation, re-rolls), an **analyst** (scoring, planning), and up to four parallel **rewrite engines**. Selection modes:
+- **Improve / Expand / Compress / Alt Lines / Action / Shots / Fix Fmt / Custom Prompt** — targeted passes on the selected text
+- **Smart Continue, Scene Builder, Character Voice, Critique, Plot Holes, Beat Check** — advanced tools
+- **Re-roll** — regenerate the highlighted passage (or the whole script) as multiple takes, Midjourney-style
 
-Suggestions can be applied as a replacement or inserted below the selection. LLM explanatory text is automatically stripped — only screenplay content is inserted.
+Whole-script tools: **Story Generator** (direct or plan-then-write long-form), **Expand Shots**, **Expand Descriptions**, **Clean Up**, **Fix Shot Lines**, and a deterministic **Formatting Correction** pass.
 
-For production visualization workflows, **Full Script Shot Pass** analyzes the screenplay scene-by-scene and automatically rewrites the editor content with dense professional shot coverage for downstream image/video generation tools.
+### The Writers' Room (flagship rewrite)
+One click on the Script Report Card runs a staged, multi-model development pass modeled on a real writers' room:
+1. **Showrunner memo** — theme, problems, sacred scenes, direction
+2. **Break the story** — every engine pitches a beat-sheet board; a judge merges the strongest; the *outline* is scored and iterated (cheap, low-noise) before any pages are written
+3. **Draft** — one writer voice scripts the board card-by-card; kept scenes are copied byte-exact
+4. **Punch-up** — dialogue pass + continuity/cut pass on a second engine
+5. **Table read** — coverage from a model that didn't write, with targeted fixes on flagged scenes only
 
-The **Script Report Card / Script Doctor** workflow is intentionally safer: Run Script Report Card diagnoses the draft, Plan Fix returns strategy only, Preview Rewrite / Fill Missing Beats / Complete To Target Pages create a validation-gated rewrite preview, and the editor is not changed until the writer clicks **Apply To Draft**. See `docs/AI-WRITING-GUIDE.md` for the full pipeline contract.
+### Inline diff review, cast lock, and re-roll
+Every rewrite lands as an **inline diff overlay** directly in the editor — deletions struck through, additions highlighted, the document untouched and locked read-only until you click **Accept** (or **Reject**, **Compare next** to cycle takes, **↻ Re-roll** for a fresh take on the next installed engine — re-rolling just your selection, or the whole draft). A **cast lock** forbids every rewrite from inventing characters outside your script/KB/series cast, deterministically flags violators (⚠), and demotes them below clean takes. All AI output runs through a deterministic Fountain normalization pass so characters and dialogue always land in the correct screenplay slots.
+
+The **Script Report Card** scores the draft against your active framework(s) plus style/character/pacing (median-of-N sampling, cached per content hash), with **Plan Fix** (strategy only) and **Rewrite w/ AI** (per-metric multi-engine rewrite) on every row. See `docs/AI-WRITING-GUIDE.md` for the full pipeline contract.
 
 ### Views
 - **Write** — The main editor with syntax highlighting, overlays, and element bar
@@ -125,7 +129,7 @@ The **Script Report Card / Script Doctor** workflow is intentionally safer: Run 
 | Vite 6 | Build tool and dev server |
 | CodeMirror 6 | Text editor engine |
 | fountain-js | Fountain format parser |
-| xAI Grok API | AI writing suggestions |
+| xAI Grok · OpenAI · Anthropic Claude · OpenRouter · Kimi | AI writing, rewriting, and scoring |
 
 No backend required. Everything runs client-side. API keys are stored locally in your browser.
 
@@ -141,6 +145,8 @@ src/
 │   ├── fountain-language.ts          # Fountain syntax tokenizer (StreamLanguage)
 │   ├── fountain-theme.ts             # Editor theme and highlight colors
 │   ├── overlay-decorations.ts        # Beat pill widgets and line decorations
+│   ├── inline-diff.ts                # Rewrite preview overlay (strikethrough + highlight)
+│   ├── location-gutter.ts            # World-location gutter markers
 │   └── screenplay-formatting.ts      # Auto-indentation by element type
 │
 ├── components/
@@ -173,8 +179,16 @@ src/
 │   ├── utils.ts                      # computeBeatRanges(), estimatePages()
 │   └── index.ts                      # Barrel exports, ALL_FRAMEWORKS array
 │
-├── services/
-│   ├── grokService.ts                # Grok API client with response cleaning
+├── services/                         # (key modules — see docs/FEATURES.md for the full map)
+│   ├── textAiService.ts              # Multi-provider client (writer / analyst / engine seats)
+│   ├── writersRoomService.ts         # Writers' Room pipeline (memo→board→draft→punch-up→table read)
+│   ├── storyDoctorService.ts         # Closed-loop framework rewrite (restructure→re-score)
+│   ├── multiProviderRewriteService.ts# Parallel engine fan-out + ranking
+│   ├── scriptReportCardService.ts    # Scoring, rewrite prompts, parsing/validation
+│   ├── castLockService.ts            # "No invented characters" prompt rule + detection
+│   ├── inlineDiffService.ts          # Diff spans for the in-editor rewrite overlay
+│   ├── fountainFormatCorrector.ts    # Deterministic Fountain reclassification
+│   ├── worldStateService.ts          # Series, arcs, world characters/locations
 │   ├── fountainExporter.ts           # Export to .fountain, .fdx, PDF
 │   ├── fileImporter.ts               # Import from .fountain, .fdx, .celtx
 │   └── storageService.ts             # localStorage project persistence
@@ -218,11 +232,13 @@ Prefixes are visible in the editor but automatically stripped in Preview and PDF
 
 ## API Key Setup
 
-To use AI suggestions, you need an xAI API key:
-1. Click the **AI** button in the toolbar
-2. Click **Set Key** in the sidebar
-3. Enter your xAI API key (starts with `xai-`)
-4. Your key is stored locally in your browser — never sent anywhere except xAI's API
+To use AI features, add a key for at least one provider:
+1. Click **Settings** in the toolbar (or **Set Text AI** in the AI panel)
+2. Pick a provider — xAI Grok, OpenAI, Anthropic Claude, OpenRouter, or Kimi — and enter its API key; the model dropdown lists that provider's live models
+3. Optionally set a separate **analyst** provider/model for scoring, and check up to four **rewrite engines** in the AI panel for parallel rewrites and the Writers' Room
+4. Keys are stored locally — never sent anywhere except the provider's own API
+
+More keyed providers = more seats in the Writers' Room (drafter, judge/punch-up, coverage) and more takes to compare on every rewrite.
 
 ## License
 

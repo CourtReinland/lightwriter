@@ -6,7 +6,7 @@ This guide documents the AI generation, version history, export, and **World
 State** features added recently, with code pointers so an agent can extend them.
 
 - Build/typecheck: `npm run build` (runs `tsc -b && vite build`)
-- Tests: `npm test` (vitest) — currently 178 passing
+- Tests: `npm test` (vitest) — currently 255 passing
 - Package the Mac app: `npm run build:mac-arm` → `release/mac-arm64/LightWriter.app`
   (ad‑hoc signed; reinstall by copying to `/Applications` and
   `codesign --force --deep --sign - /Applications/LightWriter.app`)
@@ -85,15 +85,44 @@ No‑LLM, instant, preview‑before‑apply (review pane). In `SuggestionPanel.t
 
 ---
 
-## 4. Rewrite / Story Doctor (AI tab → Run Script Report Card)
+## 4. Rewrite stack (AI tab → Run Script Report Card)
 
-`storyDoctorService.runStoryDoctor` loops: score (`runScriptReportCard`,
-median‑of‑N) → restructure rewrite → re‑score, keeping the best. When the draft
-is below the page target it calls `expandToTargetIfNeeded` →
-**`scriptExpansionService.expandScriptToTargetPages`**, which is now
-**plan‑then‑write** (analyst plans the new scenes against the full existing scene
-list; writer drafts each with continuity; inserted at anchors). This replaced an
-8‑pass blind loop that re‑padded scenes.
+Three tiers, all landing in the **inline diff overlay** (see §4c):
+
+### 4a. The Writers' Room (primary button) — `writersRoomService.runWritersRoom`
+Staged multi-model development pass; the report card's primary button runs it
+on the weakest framework. Stages: **showrunner memo** (judge seat, JSON) →
+**break the story** (every keyed engine pitches a beat-sheet board of scene
+cards `{beat, slugline, keep|rework|new, intent, conflict, turn, characters,
+pages}` in parallel; judge merges; the *outline* is scored by the analyst and
+revised up to 3 rounds, target 85) → **draft** (one writer voice, card by card,
+story-so-far carried; `keep` cards copy the original scene byte-exact,
+occurrence-aware slugline resolution for repeated sluglines) → **punch-up**
+(dialogue pass + continuity/cut pass on a second engine, truncation-guarded) →
+**table read** (coverage from a seat that didn't write; drafter revises ≤4
+flagged scenes only) → final report-card score. Seats: drafter = session
+writer; judge/punch-up = Claude when keyed, else next engine; coverage = third
+distinct engine. All completions injectable (`WritersRoomDeps`) for tests.
+
+### 4b. Story Doctor / multi-engine rewrite — per-row "Rewrite w/ AI"
+Framework metrics run `storyDoctorService.runStoryDoctor` **per engine in
+parallel** (restructure → re-score → keep best, ≤4 passes, then
+`expandToTargetIfNeeded` → plan-then-write expansion), ranked by final score.
+Craft metrics (style/character/pacing) run `multiProviderRewriteService`
+single-pass fan-out, scored (2 samples) and ranked.
+
+### 4c. Inline diff review + cast lock
+Every candidate shows as an in-editor overlay (`codemirror/inline-diff.ts`,
+`inlineDiffService.ts`): deletions struck through, additions highlighted, the
+document UNMUTATED and locked read-only (`EditorState.readOnly` — selection
+still works) until **Accept**. The floating bar offers Accept / Reject /
+Compare next / **↻ Re-roll** (a fresh take on the next installed engine —
+selection-scoped when text is highlighted, whole-doc otherwise). `castLockService`
+injects a hard "no invented characters" rule into every rewrite prompt (cast =
+script cues ∪ KB ∪ series characters ∪ arcs) and deterministically flags
+violating candidates (⚠, demoted). All rewrite output passes through
+`cleanupGeneratedScreenplay` (full Fountain reclassification incl. "NAME:
+dialogue" colon-cue splitting) with a validation fallback.
 
 ---
 
@@ -179,7 +208,11 @@ the export can hand off a durable path.
 | Direct generation | `src/services/promptGenerationService.ts` |
 | Plan‑then‑write | `src/services/planThenWriteService.ts` |
 | Page‑target expansion (plan‑then‑write) | `src/services/scriptExpansionService.ts` |
+| Writers' Room pipeline | `src/services/writersRoomService.ts` |
 | Story Doctor / rewrite / scoring | `src/services/storyDoctorService.ts`, `scriptReportCardService.ts` |
+| Multi-engine fan-out + re-roll | `src/services/multiProviderRewriteService.ts`, `reRollService.ts` |
+| Cast lock | `src/services/castLockService.ts` |
+| Inline diff overlay | `src/services/inlineDiffService.ts`, `src/codemirror/inline-diff.ts`, `components/Editor/RewriteDiffBar.tsx` |
 | Formatting passes | `fountainShotNormalizer.ts`, `fountainFormatCorrector.ts`, `generatedScriptCleanup.ts` |
 | Version history | `src/services/versionHistoryService.ts` |
 | Export panel | `src/components/Export/ExportPanel.tsx` |
@@ -191,5 +224,6 @@ the export can hand off a durable path.
 ## localStorage keys
 `lw-projects`, `lw-active-project`, `lw-kb-{projectId}`, `lw-assets-{projectId}`,
 `lw-style-{projectId}`, `lw-history-{projectId}`, `lw-analysis-{projectId}`,
-`lw-series`, `lw-world-locations`, `lw-scene-locations-{projectId}`,
-`lw-text-ai-*`, `lw-style-reference-{scope}-{projectId}`.
+`lw-series`, `lw-world-locations`, `lw-world-characters`,
+`lw-scene-locations-{projectId}`, `lw-text-ai-*`, `lw-rewrite-providers`,
+`lw-reportcard-{projectId}`, `lw-style-reference-{scope}-{projectId}`.
