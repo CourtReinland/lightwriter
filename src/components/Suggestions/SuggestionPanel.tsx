@@ -15,7 +15,7 @@ import { fillSceneDescriptions } from "../../services/expandDescriptionsService"
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
 import { correctFountainFormatting } from "../../services/fountainFormatCorrector";
-import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, fillScriptGaps, summarizeRewriteDiff, compareReportCards, validateRewriteScript, buildMetricRewritePrompt, buildFillGapsRewritePrompt, parseRewriteResponse, metricScoreFromCard, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, summarizeRewriteDiff, compareReportCards, validateRewriteScript, buildMetricRewritePrompt, parseRewriteResponse, metricScoreFromCard, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import { runStoryDoctor, isFrameworkMetric } from "../../services/storyDoctorService";
 import {
   generate,
@@ -917,64 +917,6 @@ export default function SuggestionPanel({
     }
   }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, scoringFrameworks, allowedCast, annotateCast, makeReRollHandler]);
 
-  const handleFillGaps = useCallback(async (mode: "missing_beats" | "target_pages") => {
-    if (!ensureRewriteReady() || !reportCard) return;
-    const label = mode === "target_pages" ? "complete toward target pages" : "fill missing beats";
-    const confirmed = window.confirm(`Ask AI to ${label}? This will create a rewrite preview first and will NOT change the editor until you click Apply To Draft.`);
-    if (!confirmed) return;
-
-    setLoading(true);
-    setError(null);
-    setSuggestion(null);
-    setScriptDoctorStage("requesting");
-    try {
-      // If the writer has exactly one framework overlay active, complete toward THAT framework's
-      // beat ladder; otherwise consider all frameworks (broad gap fill).
-      const targetFrameworkId = activeFrameworks && activeFrameworks.length === 1 ? activeFrameworks[0] : undefined;
-      const result = await fillScriptGaps({
-        script: fullScript,
-        knowledgeBase,
-        styleProfile,
-        targetPages,
-        reportCard,
-        mode,
-        targetFrameworkId,
-        seriesContext,
-        allowedCast,
-      }, setShotPassProgress);
-      setScriptDoctorStage("validating");
-      const focusSuffix = targetFrameworkId ? " (focused on active framework)" : "";
-      const gapLabel = (mode === "target_pages" ? "Target-page completion" : "Missing-beat fill") + focusSuffix;
-      if (onShowRewriteDiff) {
-        // Consistent with the metric rewrites: preview as an inline diff overlay
-        // rather than the old side-pane review card.
-        if (result.rewrittenScript.trim() && result.rewrittenScript.trim() !== fullScript.trim()) {
-          const reRoll = makeReRollHandler({
-            usedProviders: [getTextAiSettings().selectedProvider],
-            buildWholeDoc: (before) => ({
-              ...buildFillGapsRewritePrompt({ script: before, knowledgeBase, styleProfile, targetPages, reportCard, mode, targetFrameworkId, seriesContext, allowedCast }),
-              kind: "json" as const,
-            }),
-          });
-          onShowRewriteDiff(annotateCast([{ afterScript: result.rewrittenScript, label: gapLabel, score: null }]), gapLabel, reRoll);
-          setSuggestion(`${gapLabel} ready. Review the inline diff in the editor, then Accept, Reject, or Re-roll on the next engine.`);
-          setScriptDoctorStage("treatment");
-        } else {
-          setError("Gap fill returned the script unchanged. Try again or adjust the target.");
-          setScriptDoctorStage("treatment");
-        }
-      } else {
-        stageRewritePreview(result, gapLabel, fullScript, reportCard);
-      }
-    } catch (e) {
-      setScriptDoctorStage(reportCard ? "treatment" : "idle");
-      setError(e instanceof Error ? e.message : "Fill gaps rewrite failed");
-    } finally {
-      setLoading(false);
-      setShotPassProgress(null);
-    }
-  }, [stageRewritePreview, ensureRewriteReady, fullScript, knowledgeBase, reportCard, styleProfile, targetPages, activeFrameworks, seriesContext, onShowRewriteDiff, allowedCast, annotateCast, makeReRollHandler]);
-
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;
     if (!rewriteReview.applied) {
@@ -1505,7 +1447,6 @@ export default function SuggestionPanel({
               report={reportCard}
               onImproveMetric={handleImproveMetric}
               onRewriteMetric={onShowRewriteDiff ? handleMultiRewrite : handleRewriteMetric}
-              onFillGaps={handleFillGaps}
               loading={loading}
             />
           )}

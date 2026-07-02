@@ -5,11 +5,18 @@ interface ReportCardProps {
   report: ScriptReportCard;
   onImproveMetric: (metricId: string, metricName: string) => void;
   onRewriteMetric: (metricId: string, metricName: string) => void;
-  onFillGaps: (mode: "missing_beats" | "target_pages") => void;
   loading?: boolean;
 }
 
-export default function ReportCard({ report, onImproveMetric, onRewriteMetric, onFillGaps, loading = false }: ReportCardProps) {
+export default function ReportCard({ report, onImproveMetric, onRewriteMetric, loading = false }: ReportCardProps) {
+  // The one-button rewrite targets the WEAKEST framework: one pass does it all —
+  // restructures to that framework's beat ladder (writing any missing beats),
+  // expands to the target page count, and keeps voice/KB/arcs — across every
+  // installed engine, shown as an inline diff. Per-framework buttons below let
+  // the writer pick a specific framework instead.
+  const weakest = report.frameworkScores.length
+    ? report.frameworkScores.reduce((lo, f) => (f.score < lo.score ? f : lo))
+    : null;
   return (
     <div className="script-report-card">
       <div className="report-header">
@@ -25,13 +32,21 @@ export default function ReportCard({ report, onImproveMetric, onRewriteMetric, o
       )}
 
       <div className="report-howto">
-        Apply improvements with AI: <strong>Plan</strong> explains the fix (no rewrite); <strong>Rewrite w/ AI</strong> generates an editable revised draft you approve before it touches the editor.
+        <strong>Rewrite w/ AI</strong> does it all in one pass: restructures to the framework&apos;s beats (writing any that are missing), completes to your target page count, and keeps your voice, KB, and series arcs — you approve the inline diff before anything changes. <strong>Plan</strong> just explains the fix.
       </div>
 
-      <div className="report-action-row">
-        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("missing_beats")}>Rewrite: Fill Missing Beats</button>
-        <button className="report-rewrite-btn" disabled={loading} onClick={() => onFillGaps("target_pages")}>Rewrite: Complete To Target Pages</button>
-      </div>
+      {weakest && (
+        <div className="report-action-row">
+          <button
+            className="report-rewrite-btn"
+            disabled={loading}
+            title={`Full rewrite toward ${weakest.frameworkName} (your weakest framework): fills missing beats AND completes to your target pages in the same pass.`}
+            onClick={() => onRewriteMetric(weakest.frameworkId, weakest.frameworkName)}
+          >
+            Rewrite Draft — {weakest.frameworkName} (beats + pages)
+          </button>
+        </div>
+      )}
 
       <div className="report-section-title">Frameworks</div>
       {report.frameworkScores.map((framework) => (
