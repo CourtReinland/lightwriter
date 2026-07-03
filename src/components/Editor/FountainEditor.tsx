@@ -373,8 +373,11 @@ export default function FountainEditor({
 
     viewRef.current = view;
     if (externalViewRef) externalViewRef.current = view;
-    // Dev-only hook so preview tests can drive selections programmatically.
-    if (import.meta.env.DEV) (window as unknown as { __lwView?: EditorView }).__lwView = view;
+    // Dev-only hooks so preview tests can drive selections and audit classification.
+    if (import.meta.env.DEV) {
+      (window as unknown as { __lwView?: EditorView }).__lwView = view;
+      (window as unknown as { __lwClassify?: typeof classifyDocument }).__lwClassify = classifyDocument;
+    }
     return view;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

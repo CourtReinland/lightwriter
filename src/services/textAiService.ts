@@ -121,11 +121,17 @@ export class TextAiService {
   }
 
   private async completeClaude(systemPrompt: string, userMessage: string, options?: TextCompleteOptions): Promise<string> {
+    // OAuth access tokens (e.g. from `claude setup-token`, prefix sk-ant-oat…)
+    // authenticate via Bearer + the oauth beta header; API keys use x-api-key.
+    const key = this.settings.apiKey.trim();
+    const auth: Record<string, string> = key.startsWith("sk-ant-oat")
+      ? { Authorization: `Bearer ${key}`, "anthropic-beta": "oauth-2025-04-20" }
+      : { "x-api-key": key };
     const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": this.settings.apiKey,
+        ...auth,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({

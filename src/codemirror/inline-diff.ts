@@ -1,5 +1,6 @@
 import { StateField, StateEffect, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { classifyDocument } from "./screenplay-formatting";
 import type { InlineDiff } from "../services/inlineDiffService";
 
 // A React-driven "pending diff" overlay. The editor document stays UNMUTATED
@@ -13,6 +14,22 @@ export const setPendingDiff = StateEffect.define<InlineDiff | null>();
 
 const deletionMark = Decoration.mark({ class: "cm-diff-del" });
 
+// Element classes matching screenplay-formatting's LINE_CLASS_MAP, so added
+// text in the overlay renders with REAL screenplay layout (cues centered,
+// dialogue indented) instead of a flat left-justified green block — a flat
+// block reads as "the rewrite broke my formatting" when it hasn't.
+const ADD_LINE_CLASS: Record<string, string> = {
+  scene: "cm-fmt-scene",
+  character: "cm-fmt-character",
+  dialogue: "cm-fmt-dialogue",
+  parenthetical: "cm-fmt-parenthetical",
+  transition: "cm-fmt-transition",
+  centered: "cm-fmt-centered",
+  section: "cm-fmt-section",
+  titlepage: "cm-fmt-titlepage",
+  shot: "cm-fmt-shot",
+};
+
 class AddWidget extends WidgetType {
   constructor(readonly text: string) {
     super();
@@ -21,10 +38,26 @@ class AddWidget extends WidgetType {
     return other.text === this.text;
   }
   toDOM(): HTMLElement {
-    const el = document.createElement("span");
-    el.className = "cm-diff-add";
-    el.textContent = this.text;
-    return el;
+    const lines = this.text.split("\n");
+    // Single-line additions stay inline with the surrounding text.
+    if (lines.length === 1) {
+      const span = document.createElement("span");
+      span.className = "cm-diff-add";
+      span.textContent = this.text;
+      return span;
+    }
+    // Multi-line additions render as a block with per-line screenplay formatting.
+    const block = document.createElement("div");
+    block.className = "cm-diff-add-block";
+    const types = classifyDocument(lines);
+    lines.forEach((line, i) => {
+      const row = document.createElement("div");
+      const fmt = ADD_LINE_CLASS[String(types[i])];
+      row.className = `cm-diff-add-line${fmt ? ` ${fmt}` : ""}`;
+      row.textContent = line || " ";
+      block.appendChild(row);
+    });
+    return block;
   }
   ignoreEvent(): boolean {
     return true;
@@ -80,6 +113,17 @@ const diffTheme = EditorView.baseTheme({
     color: "#153",
     borderRadius: "2px",
     boxShadow: "inset 2px 0 0 #4a9d6b",
+  },
+  ".cm-diff-add-block": {
+    display: "block",
+    background: "rgba(90, 180, 120, 0.14)",
+    color: "#153",
+    borderLeft: "2px solid #4a9d6b",
+    borderRadius: "0",
+  },
+  ".cm-diff-add-line": {
+    whiteSpace: "pre-wrap",
+    minHeight: "1.2em",
   },
 });
 

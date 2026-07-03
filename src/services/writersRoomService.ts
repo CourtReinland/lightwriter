@@ -168,17 +168,33 @@ function coerceCards(raw: unknown): SceneCard[] {
   const arr = Array.isArray(raw) ? raw : [];
   return arr
     .map((c) => {
-      const card = c as Partial<SceneCard>;
-      if (!card || typeof card.slugline !== "string" || !card.slugline.trim()) return null;
+      // Models drift on field names (observed live: the judge returned
+      // location/cast/"pages":"1-2" instead of slugline/characters/number) —
+      // accept the common aliases rather than discarding a good board.
+      const card = c as Record<string, unknown>;
+      if (!card || typeof card !== "object") return null;
+      const slugline = String(card.slugline ?? card.location ?? card.scene ?? card.heading ?? "").trim();
+      if (!slugline) return null;
+      const rawChars = card.characters ?? card.cast ?? [];
+      const characters = Array.isArray(rawChars)
+        ? rawChars.map((n) => String(n).trim()).filter(Boolean)
+        : String(rawChars).split(/[,;]/).map((n) => n.trim()).filter(Boolean);
+      let pages = Number(card.pages);
+      if (!Number.isFinite(pages)) {
+        // "pages": "1-2" (a page RANGE) → span length; "pages": "2" → 2.
+        const m = String(card.pages ?? "").match(/^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)$/);
+        pages = m ? Math.max(0.5, Number(m[2]) - Number(m[1]) + 1) : Number(String(card.pages ?? "").replace(/[^\d.]/g, ""));
+      }
+      const source = card.source === "keep" || card.source === "rework" ? card.source : "new";
       return {
         beat: String(card.beat ?? "").trim() || "—",
-        slugline: card.slugline.trim(),
-        source: card.source === "keep" || card.source === "rework" ? card.source : "new",
+        slugline,
+        source,
         intent: String(card.intent ?? "").trim(),
         conflict: String(card.conflict ?? "").trim(),
         turn: String(card.turn ?? "").trim(),
-        characters: Array.isArray(card.characters) ? card.characters.map((n) => String(n).trim()).filter(Boolean) : [],
-        pages: Math.max(0.5, Math.min(6, Number(card.pages) || 1)),
+        characters,
+        pages: Math.max(0.5, Math.min(6, Number.isFinite(pages) && pages > 0 ? pages : 1)),
       } satisfies SceneCard;
     })
     .filter((c): c is SceneCard => c !== null);
@@ -306,11 +322,19 @@ Pitch the board: one scene card per scene, covering EVERY beat in order, page bu
 "source" rules: "keep" = an existing scene used as-is (EXACT slugline from the list); "rework" = an existing scene rewritten (EXACT slugline); "new" = a brand-new scene.
 Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source":"keep|rework|new","intent":"what it accomplishes","conflict":"who wants what against what","turn":"how it ends changed","characters":["FROM THE CAST ONLY"],"pages":1.5}]}`;
 
+  // Cards can come back under different keys (or as a bare array) — accept them all.
+  const cardsFromRaw = (raw: string, what: string): SceneCard[] => {
+    const parsed = parseJson<Record<string, unknown> | unknown[]>(raw, what);
+    if (Array.isArray(parsed)) return coerceCards(parsed);
+    const obj = parsed as Record<string, unknown>;
+    return coerceCards(obj.cards ?? obj.board ?? obj.scenes ?? obj.beatSheet ?? []);
+  };
+
   tick(`${input.engines.length} engine${input.engines.length === 1 ? "" : "s"} pitch beat sheets in parallel`);
   const pitchResults = await Promise.allSettled(
     input.engines.map(async (engine) => {
       const raw = await complete(engine, pitchSystem, pitchUser, { temperature: 0.8, maxTokens: 2400, timeoutMs: STAGE_TIMEOUT_MS });
-      const cards = coerceCards(parseJson<{ cards?: unknown }>(raw, "pitch").cards);
+      const cards = cardsFromRaw(raw, "pitch");
       if (!cards.length) throw new Error("empty pitch");
       tick(`${textAiProviderLabel(engine)}'s pitch is in`);
       return { engine, cards };
@@ -320,22 +344,6 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
     .filter((r): r is PromiseFulfilledResult<{ engine: TextAiProvider; cards: SceneCard[] }> => r.status === "fulfilled")
     .map((r) => r.value);
   if (!pitches.length) throw new Error("No engine produced a usable beat sheet. Try again or check your engine keys.");
-
-  tick(`${textAiProviderLabel(seats.judge)} merges the board`);
-  let board: SceneCard[] = pitches[0].cards;
-  if (pitches.length > 1) {
-    try {
-      const pitchesText = pitches.map((p, i) => `PITCH ${i + 1} (${textAiProviderLabel(p.engine)}):\n${boardText(p.cards)}`).join("\n\n");
-      const raw = await complete(seats.judge, `You are the showrunner assembling the story board from the room's pitches. Take the strongest version of each beat wherever it came from; keep the memo's sacred scenes; keep causality tight (this happened, THEREFORE that). Return ONLY valid JSON.`,
-        `${memoBlock}\n\nBEAT BLUEPRINT:\n${blueprintText}\n\n${pitchesText}\n\nTARGET: ${input.targetPages} pages.${castBlock}\nReturn the merged board, same schema: {"cards":[...]}`,
-        { temperature: 0.4, maxTokens: 2400, timeoutMs: STAGE_TIMEOUT_MS });
-      const merged = coerceCards(parseJson<{ cards?: unknown }>(raw, "board merge").cards);
-      if (merged.length) board = merged;
-      else warnings.push("Board merge returned no cards; using the strongest single pitch.");
-    } catch (e) {
-      warnings.push(`Board merge failed (${e instanceof Error ? e.message : "error"}); using the strongest single pitch.`);
-    }
-  }
 
   // Iterate the OUTLINE (cheap, low-noise) instead of iterating 20 pages of prose.
   const scoreOutline = deps.scoreOutline ?? (async (cards: SceneCard[], blueprint: string) => {
@@ -348,6 +356,32 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
     return { score: Math.max(0, Math.min(100, Number(parsed.score) || 0)), notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : [] };
   });
 
+  tick(`${textAiProviderLabel(seats.judge)} merges the board`);
+  let board: SceneCard[] = pitches[0].cards;
+  if (pitches.length > 1) {
+    try {
+      const pitchesText = pitches.map((p, i) => `PITCH ${i + 1} (${textAiProviderLabel(p.engine)}):\n${boardText(p.cards)}`).join("\n\n");
+      const raw = await complete(seats.judge, `You are the showrunner assembling the story board from the room's pitches. Take the strongest version of each beat wherever it came from; keep the memo's sacred scenes; keep causality tight (this happened, THEREFORE that). Return ONLY valid JSON.`,
+        `${memoBlock}\n\nBEAT BLUEPRINT:\n${blueprintText}\n\n${pitchesText}\n\nTARGET: ${input.targetPages} pages.${castBlock}\nReturn the merged board, same schema: {"cards":[...]}`,
+        { temperature: 0.4, maxTokens: 2400, timeoutMs: STAGE_TIMEOUT_MS });
+      const merged = cardsFromRaw(raw, "board merge");
+      if (merged.length) board = merged;
+      else throw new Error("merge returned no cards");
+    } catch (e) {
+      // Merge failed: actually FIND the strongest pitch (score each) rather than
+      // silently taking whichever engine happened to resolve first.
+      warnings.push(`Board merge failed (${e instanceof Error ? e.message : "error"}); scoring the pitches to pick the strongest.`);
+      try {
+        const scored = await Promise.all(pitches.map(async (p) => ({ p, s: (await scoreOutline(p.cards, blueprintText)).score })));
+        scored.sort((a, b) => b.s - a.s);
+        board = scored[0].p.cards;
+        changeSummary.push(`Merge fallback: used ${textAiProviderLabel(scored[0].p.engine)}'s pitch (outline ${scored.map((x) => `${textAiProviderLabel(x.p.engine)} ${x.s}`).join(", ")}).`);
+      } catch {
+        warnings.push("Pitch scoring failed too; using the first pitch.");
+      }
+    }
+  }
+
   const outlineScores: number[] = [];
   for (let i = 0; i < OUTLINE_MAX_ITERATIONS; i++) {
     tick(`scoring the board (round ${i + 1})`);
@@ -359,12 +393,17 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
       break;
     }
     outlineScores.push(verdict.score);
-    if (verdict.score >= OUTLINE_TARGET || !verdict.notes.length || i === OUTLINE_MAX_ITERATIONS - 1) break;
+    if (verdict.score >= OUTLINE_TARGET || i === OUTLINE_MAX_ITERATIONS - 1) break;
+    // A low score with NO notes must still trigger a revision — "the executive
+    // didn't say why" is not "nothing to fix".
+    const notes = verdict.notes.length
+      ? verdict.notes
+      : [`The board scored ${verdict.score}/100 against ${input.frameworkName}. Strengthen beat coverage, order, page placement, and causality; make every beat turn on a clear character choice with visible stakes.`];
     try {
       const raw = await complete(seats.judge, `You are the showrunner revising the story board from the executive's structural notes. Fix exactly what the notes flag; keep everything that already works. Return ONLY valid JSON.`,
-        `${memoBlock}\n\nBEAT BLUEPRINT:\n${blueprintText}\n\nCURRENT BOARD:\n${boardText(board)}\n\nNOTES TO FIX:\n${verdict.notes.map((n, j) => `${j + 1}. ${n}`).join("\n")}\n\nTARGET: ${input.targetPages} pages.${castBlock}\nReturn the revised board: {"cards":[...]}`,
+        `${memoBlock}\n\nBEAT BLUEPRINT:\n${blueprintText}\n\nCURRENT BOARD:\n${boardText(board)}\n\nNOTES TO FIX:\n${notes.map((n, j) => `${j + 1}. ${n}`).join("\n")}\n\nTARGET: ${input.targetPages} pages.${castBlock}\nReturn the revised board: {"cards":[...]}`,
         { temperature: 0.4, maxTokens: 2400, timeoutMs: STAGE_TIMEOUT_MS });
-      const revised = coerceCards(parseJson<{ cards?: unknown }>(raw, "board revision").cards);
+      const revised = cardsFromRaw(raw, "board revision");
       if (revised.length) board = revised;
       else break;
     } catch {
@@ -483,9 +522,17 @@ Return ONLY: {"rewrittenScript":"<the complete revised screenplay>","changeSumma
   // ── Stage 4: Table read — coverage from a rival, targeted fixes only ──────
   tick(`table read (${textAiProviderLabel(seats.coverage)})`);
   try {
-    const raw = await complete(seats.coverage, `You are giving hard-nosed studio coverage on a draft you did not write. Find the weakest MOMENTS (not general notes): scenes that don't turn, dead dialogue, unearned beats. Return ONLY valid JSON.`,
-      `TARGET: ${input.targetPages} pages as ${input.frameworkName}.\n${memoBlock}\n\nTHE DRAFT:\n---\n${script}\n---\n\nReturn ONLY: {"flagged":[{"slugline":"<exact slugline>","note":"what fails and the fix"}],"summary":"one paragraph"}. Flag at most 4 scenes; empty list if it genuinely holds.`,
-      { temperature: 0.4, maxTokens: 900, timeoutMs: STAGE_TIMEOUT_MS });
+    const coverageSystem = `You are giving hard-nosed studio coverage on a draft you did not write. Find the weakest MOMENTS (not general notes): scenes that don't turn, dead dialogue, unearned beats. Return ONLY valid JSON.`;
+    const coverageUser = `TARGET: ${input.targetPages} pages as ${input.frameworkName}.\n${memoBlock}\n\nTHE DRAFT:\n---\n${script}\n---\n\nReturn ONLY: {"flagged":[{"slugline":"<exact slugline>","note":"what fails and the fix"}],"summary":"one paragraph"}. Flag at most 4 scenes; empty list if it genuinely holds.`;
+    let raw: string;
+    try {
+      raw = await complete(seats.coverage, coverageSystem, coverageUser, { temperature: 0.4, maxTokens: 900, timeoutMs: STAGE_TIMEOUT_MS });
+    } catch (e) {
+      // A dead coverage key must not cost the table read — retry on the judge seat.
+      if (seats.coverage === seats.judge) throw e;
+      warnings.push(`Coverage seat (${textAiProviderLabel(seats.coverage)}) failed: ${e instanceof Error ? e.message.slice(0, 120) : "error"} — retrying with ${textAiProviderLabel(seats.judge)}.`);
+      raw = await complete(seats.judge, coverageSystem, coverageUser, { temperature: 0.4, maxTokens: 900, timeoutMs: STAGE_TIMEOUT_MS });
+    }
     const coverageResult = parseJson<{ flagged?: { slugline?: string; note?: string }[]; summary?: string }>(raw, "coverage");
     const flagged = (coverageResult.flagged ?? []).filter((f) => f.slugline && f.note).slice(0, 4);
     if (flagged.length) {
@@ -551,7 +598,11 @@ Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged 
           finalReport = remedialReport;
           finalScore = remedialScore;
           changeSummary.push(`Remedial pass: ${input.frameworkName} recovered to ${remedialScore}.`);
+        } else {
+          warnings.push(`Remedial pass scored ${remedialScore} (no better than ${finalScore}); kept the room draft.`);
         }
+      } else {
+        warnings.push("Remedial pass came back truncated; kept the room draft.");
       }
     } catch (e) {
       warnings.push(`Remedial pass failed (${e instanceof Error ? e.message : "error"}).`);

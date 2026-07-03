@@ -369,3 +369,49 @@ describe("field regressions: score drop + brevity", () => {
     expect(sawPlanner).toBe(true);
   });
 });
+
+describe("field regression: judge board with aliased fields (observed live)", () => {
+  it("accepts location/cast/pages-range aliases in the merged board", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    const aliasedCards = JSON.stringify({ cards: [
+      { beat: "Ordinary World", location: "INT. KITCHEN - DAY", pages: "1-2", intent: "a", conflict: "b", turn: "c", cast: "MARA, JONAS", source: "keep" },
+      { beat: "Call to Adventure", location: "EXT. STREET - NIGHT", pages: "2-3", intent: "a", conflict: "b", turn: "c", cast: "MARA" },
+    ] });
+    const result = await runWritersRoom(
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 10, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA", "JONAS"], engines: ["grok", "claude"] as TextAiProvider[] },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          if (sys.toLowerCase().includes("assembling the story board")) return aliasedCards;
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    );
+    expect(result.board).toHaveLength(2);
+    expect(result.board[0].slugline).toBe("INT. KITCHEN - DAY");
+    expect(result.board[0].characters).toEqual(["MARA", "JONAS"]);
+    expect(result.board[0].pages).toBe(2); // "1-2" range → 2 pages
+    expect(result.board[1].source).toBe("new"); // missing source defaults
+    expect(result.warnings.every((w) => !w.includes("merge"))).toBe(true); // merge SUCCEEDED
+  });
+
+  it("revises the board even when the outline scorer returns a low score with NO notes", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const scores = [40, 88];
+    let call = 0;
+    const result = await runWritersRoom(
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 10, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA", "JONAS"], engines: ["grok", "claude"] as TextAiProvider[] },
+      undefined,
+      {
+        complete: makeComplete(log),
+        scoreOutline: async () => ({ score: scores[call++], notes: [] }), // low score, empty notes
+        scoreScript: async () => report,
+      },
+    );
+    expect(log.filter((l) => l.kind === "revise")).toHaveLength(1); // revision fired anyway
+    expect(result.outlineScores).toEqual([40, 88]);
+  });
+});

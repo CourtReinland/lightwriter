@@ -19,8 +19,8 @@ const LEGACY_GROK_KEY = "lw-grok-api-key";
 const DEFAULT_MODELS: Record<TextAiProvider, string> = {
   grok: "grok-3-mini-fast",
   openai: "gpt-4o-mini",
-  claude: "claude-3-5-sonnet-latest",
-  openrouter: "anthropic/claude-3.5-sonnet",
+  claude: "claude-sonnet-5",
+  openrouter: "anthropic/claude-sonnet-5",
   kimi: "kimi-latest",
 };
 
@@ -208,11 +208,13 @@ const FALLBACK_MODELS: Record<TextAiProvider, TextModelOption[]> = {
     { id: "o3", label: "o3" },
   ],
   claude: [
-    { id: "claude-3-5-sonnet-latest", label: "claude-3-5-sonnet-latest" },
-    { id: "claude-3-5-haiku-latest", label: "claude-3-5-haiku-latest" },
-    { id: "claude-3-opus-latest", label: "claude-3-opus-latest" },
+    { id: "claude-sonnet-5", label: "claude-sonnet-5" },
+    { id: "claude-opus-4-8", label: "claude-opus-4-8" },
+    { id: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5" },
+    { id: "claude-3-5-sonnet-latest", label: "claude-3-5-sonnet-latest (legacy)" },
   ],
   openrouter: [
+    { id: "anthropic/claude-sonnet-5", label: "anthropic/claude-sonnet-5" },
     { id: "anthropic/claude-3.5-sonnet", label: "anthropic/claude-3.5-sonnet" },
     { id: "openai/gpt-4o", label: "openai/gpt-4o" },
     { id: "google/gemini-2.0-flash-001", label: "google/gemini-2.0-flash-001" },
@@ -297,8 +299,12 @@ export async function listOpenAiTextModels(apiKey: string): Promise<TextModelOpt
 export async function listClaudeTextModels(apiKey: string): Promise<TextModelOption[]> {
   const key = apiKey.trim();
   if (!key) return getCachedTextModelOptions("claude");
+  // OAuth tokens (sk-ant-oat…) use Bearer + the oauth beta header; keys use x-api-key.
+  const auth: Record<string, string> = key.startsWith("sk-ant-oat")
+    ? { Authorization: `Bearer ${key}`, "anthropic-beta": "oauth-2025-04-20" }
+    : { "x-api-key": key };
   const response = await fetch("https://api.anthropic.com/v1/models", {
-    headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+    headers: { ...auth, "anthropic-version": "2023-06-01" },
   });
   if (!response.ok) throw new Error(`Claude model list failed: ${response.status} ${response.statusText}`);
   const data = (await response.json()) as { data?: Array<{ id?: string; display_name?: string }> };
