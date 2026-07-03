@@ -58,3 +58,21 @@ describe("repairImportedScreenplay", () => {
     expect(repairImportedScreenplay(clean)).toBe(clean);
   });
 });
+
+describe("unescapeLiteralNewlines (field regression: all-left-justified blob)", () => {
+  it("repairs a script delivered as literal \\n sequences", async () => {
+    const { cleanupGeneratedScreenplay } = await import("./generatedScriptCleanup");
+    const raw = 'INT. HALL - NIGHT\\n\\nMara paces.\\n\\nMARA\\nNow or never.\\n';
+    const out = cleanupGeneratedScreenplay(raw, ["MARA"]);
+    expect(out.split("\n").length).toBeGreaterThan(5);
+    expect(out).toContain("INT. HALL - NIGHT");
+    const lines = out.split("\n");
+    expect(lines[lines.indexOf("MARA") + 1]).toBe("Now or never.");
+  });
+
+  it("leaves a normal script with real newlines alone", async () => {
+    const { unescapeLiteralNewlines } = await import("./generatedScriptCleanup");
+    const normal = "INT. A - DAY\n\nAction about C:\\new\\north paths.\n";
+    expect(unescapeLiteralNewlines(normal)).toBe(normal);
+  });
+});

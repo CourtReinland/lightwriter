@@ -204,3 +204,57 @@ describe("review regressions: constructs the corrector must NOT mangle", () => {
     expect(lines.filter((l) => l === "MARA")).toHaveLength(0);
   });
 });
+
+describe("field regressions: centered runs + left-justified blobs", () => {
+  it("does not absorb action lines about cast members into a dialogue block (no blank line)", () => {
+    const input = [
+      "INT. KITCHEN - DAY",
+      "",
+      "MARA",
+      "We should go. Tonight.",
+      "Mara crosses to the window and pulls the curtain shut.",
+      "Jonas watches her from the doorway, arms folded.",
+      "JONAS",
+      "You said that yesterday.",
+    ].join("\n");
+    const out = correctFountainFormatting(input, ["MARA", "JONAS"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA");
+    // dialogue block = exactly one spoken line, then the action breaks out
+    expect(lines[cueAt + 1]).toBe("We should go. Tonight.");
+    expect(lines[cueAt + 2]).toBe(""); // block terminated
+    expect(out).toContain("Mara crosses to the window and pulls the curtain shut.");
+  });
+
+  it("caps a runaway dialogue block at 4 unbroken LONG paragraphs", () => {
+    const long = (n: number) => `This is long unbroken paragraph number ${n} that keeps going well past the threshold.`;
+    const input = ["MARA", long(1), long(2), long(3), long(4), long(5)].join("\n");
+    const out = correctFountainFormatting(input, ["MARA"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA");
+    expect(lines[cueAt + 4]).toBe(long(4));
+    expect(lines[cueAt + 5]).toBe(""); // capped
+    expect(out).toContain(long(5)); // preserved as action, not dropped
+  });
+
+  it("keeps a short-line verse/monologue fully attached (no cap on short lines)", () => {
+    const input = ["MARA", "Line one.", "Line two.", "Line three.", "Line four.", "Line five.", "Line six."].join("\n");
+    const out = correctFountainFormatting(input, ["MARA"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("MARA");
+    expect(lines[cueAt + 6]).toBe("Line six."); // all attached
+  });
+
+  it("keeps dialogue that merely MENTIONS a cast member attached ('Mara told me everything')", () => {
+    const input = [
+      "JONAS",
+      "I know what you did.",
+      "Mara told me everything about the plan.",
+    ].join("\n");
+    const out = correctFountainFormatting(input, ["MARA", "JONAS"]);
+    const lines = out.split("\n");
+    const cueAt = lines.indexOf("JONAS");
+    expect(lines[cueAt + 1]).toBe("I know what you did.");
+    expect(lines[cueAt + 2]).toBe("Mara told me everything about the plan."); // still dialogue
+  });
+});

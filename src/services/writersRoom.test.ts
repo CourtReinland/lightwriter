@@ -120,7 +120,7 @@ describe("runWritersRoom", () => {
     expect(log.find((l) => l.kind === "memo")?.provider).toBe("claude");
     expect(log.filter((l) => l.kind === "pitch").map((l) => l.provider).sort()).toEqual(["claude", "grok"]);
     expect(log.filter((l) => l.kind === "draft").every((l) => l.provider === "grok")).toBe(true);
-    expect(log.filter((l) => l.kind === "punch")).toHaveLength(2);
+    expect(log.filter((l) => l.kind === "punch")).toHaveLength(1); // single combined pass
     expect(log.find((l) => l.kind === "coverage")?.provider).toBe("claude");
 
     // "keep" card copies the original scene text verbatim into the draft.
@@ -293,5 +293,79 @@ describe("review regressions: scene resolution", () => {
     );
     expect(result.warnings.some((w) => w.includes("did not match any scene"))).toBe(true);
     expect(log.some((l) => l.kind === "draft")).toBe(true);
+  });
+});
+
+describe("field regressions: score drop + brevity", () => {
+  const input = {
+    script: SCRIPT,
+    frameworkId: "dan-harmon",
+    frameworkName: "Dan Harmon Story Circle",
+    targetPages: 10,
+    reportCard: report,
+    knowledgeBase: null,
+    styleProfile: null,
+    allowedCast: ["MARA", "JONAS"],
+    engines: ["grok", "claude"] as TextAiProvider[],
+  };
+
+  it("runs a remedial pass when the final score lands below the start, and keeps the better draft", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    const startScore = metricScoreFromCard(report, "dan-harmon");
+    const lowReport = normalizeReportCard({ ...JSON.parse(JSON.stringify(report)), frameworkScores: [{ ...report.frameworkScores[0], score: Math.max(0, startScore - 10), beatScores: [] }] } as unknown as Partial<ScriptReportCard>);
+    const highReport = normalizeReportCard({ ...JSON.parse(JSON.stringify(report)), frameworkScores: [{ ...report.frameworkScores[0], score: startScore + 20, beatScores: [] }] } as unknown as Partial<ScriptReportCard>);
+    let scoreCalls = 0;
+    const result = await runWritersRoom(input, undefined, {
+      complete: async (p, sys, user) => {
+        if (sys.includes("controlled screenplay rewrite engine")) {
+          log.push({ provider: p, kind: "remedial" });
+          return JSON.stringify({ rewrittenScript: SCRIPT + "\nEXT. STREET - NIGHT\n\nThey walk into the dark, changed.\n", changeSummary: ["remedial"], warnings: [] });
+        }
+        return base(p, sys, user);
+      },
+      scoreOutline: async () => ({ score: 90, notes: [] }),
+      scoreScript: async () => (scoreCalls++ === 0 ? lowReport : highReport),
+    });
+    expect(log.filter((l) => l.kind === "remedial")).toHaveLength(1);
+    expect(result.finalScore).toBe(metricScoreFromCard(highReport, "dan-harmon"));
+    expect(result.changeSummary.some((c) => c.includes("Remedial"))).toBe(true);
+    expect(result.startScore).toBe(startScore);
+  });
+
+  it("warns loudly when even the remedial draft scores below the start", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    const startScore = metricScoreFromCard(report, "dan-harmon");
+    const lowReport = normalizeReportCard({ ...JSON.parse(JSON.stringify(report)), frameworkScores: [{ ...report.frameworkScores[0], score: Math.max(0, startScore - 10), beatScores: [] }] } as unknown as Partial<ScriptReportCard>);
+    const result = await runWritersRoom(input, undefined, {
+      complete: async (p, sys, user) => {
+        if (sys.includes("controlled screenplay rewrite engine")) {
+          return JSON.stringify({ rewrittenScript: SCRIPT + "\nEXT. STREET - NIGHT\n\nStill weak.\n", changeSummary: [], warnings: [] });
+        }
+        return base(p, sys, user);
+      },
+      scoreOutline: async () => ({ score: 90, notes: [] }),
+      scoreScript: async () => lowReport,
+    });
+    expect(result.warnings.some((w) => w.includes("review before accepting"))).toBe(true);
+  });
+
+  it("attempts page expansion when the drafted pages land far below the target", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    let sawPlanner = false;
+    await runWritersRoom({ ...input, targetPages: 40 }, undefined, {
+      complete: async (p, sys, user) => {
+        if (sys.includes("expansion planner")) {
+          sawPlanner = true;
+          return JSON.stringify({ newScenes: [] });
+        }
+        return base(p, sys, user);
+      },
+      scoreOutline: async () => ({ score: 90, notes: [] }),
+      scoreScript: async () => report,
+    });
+    expect(sawPlanner).toBe(true);
   });
 });

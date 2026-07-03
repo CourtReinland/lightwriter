@@ -26,6 +26,21 @@ const TITLE_KEY = /^(Title|Credit|Author|Authors|Source|Draft date|Date|Contact|
 const FORCED_OR_SPECIAL = /^[.@!~>=#]/; // forced scene/char/action/shot, lyrics, transition/center, synopsis, section
 const NAME_LIKE = /^[A-Z][A-Z0-9 .'\-]{0,30}(\s*\([^)]*\))?$/; // all-caps name + optional (V.O.)/(CONT'D)
 
+// Present-tense stage-direction verbs: "<Name> <verb> …" directly under dialogue
+// is a mis-spaced ACTION line, not more dialogue. Spoken sentences use different
+// verbs/tenses ("Mara told me", "Mara is wrong"), so the lexicon stays narrow.
+const ACTION_VERBS = new Set([
+  "crosses", "walks", "turns", "enters", "exits", "looks", "stares", "grabs", "moves",
+  "pulls", "pushes", "steps", "runs", "leans", "sits", "stands", "reaches", "watches",
+  "paces", "nods", "shakes", "opens", "closes", "picks", "sets", "slams", "storms",
+  "spins", "lowers", "raises", "lifts", "drops", "checks", "glances", "smiles", "frowns",
+  "follows", "stops", "freezes", "crouches", "kneels", "backs", "edges", "presses",
+  "throws", "snatches", "wipes", "pours", "lights", "hesitates", "pauses", "stumbles",
+  "staggers", "collapses", "rises", "climbs", "ducks", "charges", "bolts", "whirls",
+  "points", "gestures", "shrugs", "sighs", "exhales", "swallows", "blinks", "winces",
+  "flinches", "recoils", "stiffens", "crumples", "straightens", "hurries", "strides",
+]);
+
 // All-caps lines that look name-shaped but are really action/time/shot cues.
 const NON_NAME_CAPS = new Set([
   "SUDDENLY", "MEANWHILE", "LATER", "CONTINUOUS", "MOMENTS LATER", "INTERCUT", "BEAT",
@@ -163,6 +178,21 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
   let inTitlePage = true;
   let sawTitleKey = false;
 
+  // A line that reads as ACTION about a cast member ("Mara crosses to the
+  // window.") — a capitalized known name followed by a STAGE-DIRECTION VERB.
+  // Models often jam these directly under dialogue with no blank line; without
+  // this check the whole run absorbs into the dialogue block and renders
+  // centered. The verb lexicon keeps spoken lines that merely mention a name
+  // ("Mara told me everything.") inside the dialogue block.
+  const looksLikeActionAboutCast = (s: string): boolean => {
+    const words = s.split(/\s+/);
+    if (words.length < 3) return false;
+    const first = words[0].replace(/[^A-Za-z'-]/g, "");
+    if (!first || !names.has(first.toUpperCase())) return false;
+    if (first === first.toUpperCase()) return false; // ALL-CAPS name = could be a shout
+    return ACTION_VERBS.has(words[1].toLowerCase().replace(/[^a-z]/g, ""));
+  };
+
   // Attach a cue's dialogue block (parentheticals + lines) starting at lines[i].
   const attachDialogue = () => {
     // Drop a single stray blank between the cue and its first wryly/dialogue.
@@ -170,6 +200,8 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
     // Attach until a blank or a STRUCTURAL element (a new cue/scene/shot/transition).
     // ALL-CAPS lines that are not structural stay attached — shouted dialogue
     // ("GET OUT!") must not be detached from its cue and forced to action.
+    let attached = 0;
+    let longAttached = 0;
     while (i < lines.length) {
       const dt = lines[i].trim();
       if (dt === "") break;
@@ -180,8 +212,16 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
         continue;
       }
       if (isStructuralStart(stripDualCaret(dt), names)) break;
+      // After the first spoken paragraph, an action-looking line about a cast
+      // member ends the block; and no dialogue runs 4+ unbroken LONG paragraphs
+      // (short lines are verse/monologue phrasing and stay attached) — both are
+      // mis-spaced action, which must not render centered.
+      if (attached >= 1 && looksLikeActionAboutCast(dt)) break;
+      if (longAttached >= 4) break;
       out.push(dt);
       i++;
+      attached++;
+      if (dt.length > 45) longAttached++;
     }
     out.push("");
   };

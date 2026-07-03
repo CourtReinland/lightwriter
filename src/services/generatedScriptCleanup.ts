@@ -30,6 +30,23 @@ function repairParentheticals(script: string): string {
     .join("\n");
 }
 
+// A model that mis-escapes its output delivers the whole screenplay as a couple
+// of giant lines full of LITERAL "\n" sequences. Downstream, that renders as one
+// left-justified action blob (and can even be uppercased as a "scene heading").
+// When literal escapes clearly outnumber real newlines, unescape them.
+export function unescapeLiteralNewlines(script: string): string {
+  const literal = (script.match(/\\n/g) ?? []).length;
+  const real = script.split("\n").length;
+  if (literal >= 4 && literal > real * 2) {
+    return script
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "  ")
+      .replace(/\\"/g, '"');
+  }
+  return script;
+}
+
 /**
  * Final cleanup for freshly generated screenplay text: fix the parenthetical
  * artifacts above, then run the full deterministic formatting-correction pass
@@ -37,7 +54,7 @@ function repairParentheticals(script: string): string {
  * after generation" step so generated drafts land clean without a manual pass.
  */
 export function cleanupGeneratedScreenplay(script: string, extraNames: string[] = []): string {
-  return correctFountainFormatting(repairParentheticals(script), extraNames);
+  return correctFountainFormatting(repairParentheticals(unescapeLiteralNewlines(script)), extraNames);
 }
 
 /**

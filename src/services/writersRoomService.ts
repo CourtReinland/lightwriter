@@ -12,6 +12,8 @@ import {
   parseRewriteResponse,
   runScriptReportCard,
   metricScoreFromCard,
+  expandToTargetIfNeeded,
+  buildMetricRewritePrompt,
   type ScriptReportCard,
 } from "./scriptReportCardService";
 
@@ -62,8 +64,12 @@ export interface WritersRoomResult {
   board: SceneCard[];
   /** Outline score after each board iteration (structure converges here, cheaply). */
   outlineScores: number[];
+  /** The original draft's framework score, for before/after comparison. */
+  startScore: number;
   finalScore: number | null;
   finalReport: ScriptReportCard | null;
+  /** Estimated page count of the delivered draft (vs input.targetPages). */
+  finalPages: number;
   changeSummary: string[];
   warnings: string[];
   seats: { drafter: string; judge: string; punchUp: string; coverage: string };
@@ -97,6 +103,49 @@ export interface WritersRoomDeps {
 const OUTLINE_TARGET = 85;
 const OUTLINE_MAX_ITERATIONS = 3;
 const STAGE_TIMEOUT_MS = 240_000;
+
+// ── Room run log ─────────────────────────────────────────────────────────────
+// Every run (including failures and rejected results) leaves a reviewable trace
+// in localStorage — "what did the room actually do" must never be unanswerable.
+
+export interface RoomLogEntry {
+  at: string;
+  frameworkId: string;
+  engines: string[];
+  seats?: { drafter: string; judge: string; punchUp: string; coverage: string };
+  startScore?: number;
+  finalScore?: number | null;
+  outlineScores?: number[];
+  finalPages?: number;
+  targetPages?: number;
+  memoTheme?: string;
+  board?: { beat: string; slugline: string; source: string; pages: number }[];
+  changeSummary?: string[];
+  warnings?: string[];
+  error?: string;
+}
+
+const ROOM_LOG_KEY = (projectId: string) => `lw-room-log-${projectId}`;
+const ROOM_LOG_MAX = 5;
+
+export function saveRoomLog(projectId: string, entry: RoomLogEntry): void {
+  if (typeof localStorage === "undefined" || !projectId) return;
+  try {
+    const prior = loadRoomLog(projectId);
+    localStorage.setItem(ROOM_LOG_KEY(projectId), JSON.stringify([...prior, entry].slice(-ROOM_LOG_MAX)));
+  } catch { /* quota/serialization — logging must never break the run */ }
+}
+
+export function loadRoomLog(projectId: string): RoomLogEntry[] {
+  if (typeof localStorage === "undefined" || !projectId) return [];
+  try {
+    const raw = localStorage.getItem(ROOM_LOG_KEY(projectId));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
 
 function extractJsonBlock(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -326,9 +375,9 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
   changeSummary.push(`Board: ${board.length} scenes (${board.filter((c) => c.source === "keep").length} kept, ${board.filter((c) => c.source === "rework").length} reworked, ${board.filter((c) => c.source === "new").length} new); outline score ${outlineScores.join(" → ") || "unscored"}.`);
 
   // Board is known — replace the provisional total with the real remaining work
-  // (non-keep drafts + 2 punch-ups + 2 table-read steps + final score).
+  // (non-keep drafts + punch-up + expansion + 2 table-read steps + final score).
   const nonKeepCount = board.filter((c) => c.source !== "keep").length;
-  total = step + nonKeepCount + 2 + 2 + 1;
+  total = step + nonKeepCount + 1 + 1 + 2 + 1;
 
   // ── Stage 2: Draft scene by scene, one voice ──────────────────────────────
   const castNames = input.allowedCast ?? [];
@@ -377,34 +426,57 @@ Write ONLY this scene's Fountain text, starting with the slugline.`,
   let script = drafted.join("\n\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   changeSummary.push(`Drafted by ${textAiProviderLabel(seats.drafter)} (single voice), ~${estimatePages(script.split("\n").length)} pages.`);
 
-  // ── Stage 3: Punch-up passes on a second engine ───────────────────────────
-  const punchPasses: { label: string; instruction: string }[] = [
-    {
-      label: "dialogue punch-up",
-      instruction: `Sharpen ONLY the dialogue: distinct voices, subtext over statement, cut on-the-nose and expository lines, tighten exchanges. Do NOT restructure — keep every slugline, scene order, and action line except minimal trims. Keep total length within ±10%.`,
-    },
-    {
-      label: "continuity + cut pass",
-      instruction: `Fix continuity against the knowledge base and series arcs; remove repeated beats, restated information, and duplicate imagery; keep the total at roughly ${input.targetPages} pages. Do NOT add new scenes or characters.`,
-    },
-  ];
-  for (const pass of punchPasses) {
-    tick(`${pass.label} (${textAiProviderLabel(seats.punchUp)})`);
-    try {
-      const raw = await complete(seats.punchUp, `You are the room's punch-up specialist doing one scoped pass. ${pass.instruction} Return ONLY valid JSON. Preserve Fountain formatting.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
-        `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${seriesBlock}
+  // ── Stage 3: One combined punch-up pass on a second engine ────────────────
+  // (Dialogue + continuity + cut in a single 16k call — two whole-script passes
+  // doubled the runtime for marginal gain.)
+  tick(`punch-up (${textAiProviderLabel(seats.punchUp)})`);
+  try {
+    const raw = await complete(seats.punchUp, `You are the room's punch-up specialist doing one scoped pass. Sharpen the dialogue (distinct voices, subtext over statement, cut on-the-nose lines), fix continuity against the knowledge base and series arcs, and remove repeated beats and restated information. Do NOT restructure — keep every slugline and the scene order. Do NOT add new scenes or characters. Keep total length within ±10%. Return ONLY valid JSON. Preserve Fountain formatting.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
+      `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${seriesBlock}
 THE DRAFT:\n---\n${script}\n---\n
 Return ONLY: {"rewrittenScript":"<the complete revised screenplay>","changeSummary":["what you changed"],"warnings":[]}`,
-        { temperature: 0.5, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS });
-      const parsed = parseRewriteResponse(raw, castNames);
-      if (parsed.rewrittenScript.trim().length >= script.length * 0.5) {
-        script = parsed.rewrittenScript;
-        changeSummary.push(`${pass.label}: ${parsed.changeSummary.slice(0, 3).join("; ") || "done"}.`);
-      } else {
-        warnings.push(`${pass.label} came back truncated; kept the previous draft.`);
+      { temperature: 0.5, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS });
+    const parsed = parseRewriteResponse(raw, castNames);
+    if (parsed.rewrittenScript.trim().length >= script.length * 0.5) {
+      script = parsed.rewrittenScript;
+      changeSummary.push(`Punch-up: ${parsed.changeSummary.slice(0, 3).join("; ") || "done"}.`);
+    } else {
+      warnings.push(`Punch-up came back truncated; kept the previous draft.`);
+    }
+  } catch (e) {
+    warnings.push(`Punch-up failed (${e instanceof Error ? e.message : "error"}); kept the previous draft.`);
+  }
+
+  // ── Stage 3b: Grow to the page target ─────────────────────────────────────
+  // Compact drafters (SAO especially) underwrite their cards; a short draft
+  // lands every beat outside its expected page range and tanks the framework
+  // score no matter how good the structure is. Same expansion the Story Doctor
+  // runs: plan new scenes → write each with continuity → insert.
+  const pagesBeforeExpand = estimatePages(script.split("\n").length);
+  if (input.targetPages && pagesBeforeExpand < Math.floor(input.targetPages * 0.9)) {
+    tick(`expanding ${pagesBeforeExpand}pp toward the ${input.targetPages}pp target (${textAiProviderLabel(seats.drafter)})`);
+    try {
+      const expanded = await expandToTargetIfNeeded(
+        { rewrittenScript: script, changeSummary: [], warnings: [] },
+        {
+          targetPages: input.targetPages,
+          frameworkId: input.frameworkId,
+          reportCard: input.reportCard,
+          knowledgeBase: input.knowledgeBase,
+          styleProfile: input.styleProfile,
+          seriesContext: input.seriesContext,
+          allowedCast: input.allowedCast,
+        },
+        undefined,
+        (system, user, options) => complete(seats.drafter, system, user, options),
+      );
+      if (expanded.rewrittenScript.trim().length > script.length) {
+        script = expanded.rewrittenScript;
+        changeSummary.push(`Expanded ${pagesBeforeExpand}pp → ~${estimatePages(script.split("\n").length)}pp toward the ${input.targetPages}pp target.`);
       }
+      warnings.push(...expanded.warnings);
     } catch (e) {
-      warnings.push(`${pass.label} failed (${e instanceof Error ? e.message : "error"}); kept the previous draft.`);
+      warnings.push(`Page expansion failed (${e instanceof Error ? e.message : "error"}); the draft is ~${pagesBeforeExpand}pp vs a ${input.targetPages}pp target — expect a low structure score.`);
     }
   }
 
@@ -436,20 +508,57 @@ Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged 
     warnings.push(`Table read failed (${e instanceof Error ? e.message : "error"}); shipped the punch-up draft.`);
   }
 
-  // ── Final score ───────────────────────────────────────────────────────────
+  // ── Final score + remedial keep-best pass ─────────────────────────────────
+  const startScore = metricScoreFromCard(input.reportCard, input.frameworkId);
+  const scoreScript = deps.scoreScript ?? ((s: string) => runScriptReportCard(
+    { script: s, knowledgeBase: input.knowledgeBase, styleProfile: input.styleProfile, targetPages: input.targetPages, seriesContext: input.seriesContext, frameworks: framework ? [framework] : undefined },
+    { samples: 2 },
+  ));
   tick("final score");
   let finalReport: ScriptReportCard | null = null;
   let finalScore: number | null = null;
   try {
-    finalReport = deps.scoreScript
-      ? await deps.scoreScript(script)
-      : await runScriptReportCard(
-          { script, knowledgeBase: input.knowledgeBase, styleProfile: input.styleProfile, targetPages: input.targetPages, seriesContext: input.seriesContext, frameworks: framework ? [framework] : undefined },
-          { samples: 2 },
-        );
+    finalReport = await scoreScript(script);
     finalScore = metricScoreFromCard(finalReport, input.frameworkId);
   } catch {
     warnings.push("Final scoring failed; the draft is unscored.");
+  }
+
+  // The room must not quietly deliver a draft that scores BELOW the original.
+  // One remedial pass: the judge rewrites against the new report's gaps, and we
+  // keep whichever draft scores higher.
+  if (finalReport && finalScore !== null && finalScore < startScore) {
+    tick(`scored ${finalScore} < start ${startScore} — remedial pass (${textAiProviderLabel(seats.judge)})`);
+    try {
+      const prompt = buildMetricRewritePrompt({
+        script,
+        knowledgeBase: input.knowledgeBase,
+        styleProfile: input.styleProfile,
+        targetPages: input.targetPages,
+        seriesContext: input.seriesContext,
+        reportCard: finalReport,
+        metricId: input.frameworkId,
+        metricName: input.frameworkName,
+        allowedCast: input.allowedCast,
+      });
+      const raw = await complete(seats.judge, prompt.system, prompt.user, { temperature: 0.5, maxTokens: prompt.maxTokens, timeoutMs: STAGE_TIMEOUT_MS });
+      const remedial = parseRewriteResponse(raw, castNames).rewrittenScript;
+      if (remedial.trim().length >= script.length * 0.5) {
+        const remedialReport = await scoreScript(remedial);
+        const remedialScore = metricScoreFromCard(remedialReport, input.frameworkId);
+        if (remedialScore > finalScore) {
+          script = remedial;
+          finalReport = remedialReport;
+          finalScore = remedialScore;
+          changeSummary.push(`Remedial pass: ${input.frameworkName} recovered to ${remedialScore}.`);
+        }
+      }
+    } catch (e) {
+      warnings.push(`Remedial pass failed (${e instanceof Error ? e.message : "error"}).`);
+    }
+    if (finalScore !== null && finalScore < startScore) {
+      warnings.push(`The room's best draft scored ${finalScore} vs your draft's ${startScore} on ${input.frameworkName} — review before accepting.`);
+    }
   }
 
   const invented = findInventedCharacters(script, input.allowedCast ?? []);
@@ -462,8 +571,10 @@ Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged 
     memo,
     board,
     outlineScores,
+    startScore,
     finalScore,
     finalReport,
+    finalPages: estimatePages(script.split("\n").length),
     changeSummary,
     warnings,
     seats: {

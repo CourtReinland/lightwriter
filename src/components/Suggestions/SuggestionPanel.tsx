@@ -3,7 +3,7 @@ import { ALL_FRAMEWORKS } from "../../frameworks";
 import { loadStoredReportCard, clearStoredReportCard } from "../../services/reportCardStore";
 import { getSelectedTextAiProviderSettings, getTextAiProviderSettings, getTextAiSettings, textAiProviderLabel, textAiProviderOptions, type TextAiProvider, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { runMultiProviderRewrite } from "../../services/multiProviderRewriteService";
-import { runWritersRoom } from "../../services/writersRoomService";
+import { runWritersRoom, saveRoomLog } from "../../services/writersRoomService";
 import { TextAiService } from "../../services/textAiService";
 import type { RewriteDiffCandidate, RewriteReRollHandler, ReRollSelection } from "../../services/inlineDiffService";
 import { collectAllowedCast, findInventedCharacters } from "../../services/castLockService";
@@ -926,7 +926,17 @@ export default function SuggestionPanel({
   const handleWritersRoom = useCallback(async (metricId: string, metricName: string) => {
     if (!ensureRewriteReady() || !reportCard || !onShowRewriteDiff) return;
     const writer = getTextAiSettings().selectedProvider;
-    const keyed = Array.from(new Set([writer, ...rewriteProviders])).filter((p) => getTextAiProviderSettings(p).apiKey.trim());
+    const hasKey = (p: TextAiProvider) => Boolean(getTextAiProviderSettings(p).apiKey.trim());
+    let keyed = Array.from(new Set([writer, ...rewriteProviders])).filter(hasKey);
+    // A one-engine room defeats the point (the drafter judges and covers its own
+    // work). Top the table up to 3 seats from EVERY keyed provider, so e.g. an
+    // idle Grok/OpenAI key gets the judge or coverage chair automatically.
+    if (keyed.length < 3) {
+      for (const p of textAiProviderOptions()) {
+        if (keyed.length >= 3) break;
+        if (!keyed.includes(p) && hasKey(p)) keyed.push(p);
+      }
+    }
     if (!keyed.length) {
       setError("The Writers' Room needs at least one engine with an API key. Pick engines (Rewrite engines ▾) or add a key in Settings.");
       return;
@@ -951,7 +961,24 @@ export default function SuggestionPanel({
         engines: keyed,
       }, setShotPassProgress);
 
+      // Every completed run leaves a trace — including ones we reject below.
+      const roomLogBase = {
+        at: new Date().toISOString(),
+        frameworkId: metricId,
+        engines: keyed,
+        seats: result.seats,
+        startScore: result.startScore,
+        finalScore: result.finalScore,
+        outlineScores: result.outlineScores,
+        finalPages: result.finalPages,
+        targetPages,
+        memoTheme: result.memo.theme,
+        board: result.board.map((c) => ({ beat: c.beat, slugline: c.slugline, source: c.source, pages: c.pages })),
+        changeSummary: result.changeSummary,
+        warnings: result.warnings,
+      };
       if (!result.finalScript.trim() || result.finalScript.trim() === fullScript.trim()) {
+        saveRoomLog(project.id, { ...roomLogBase, error: "rejected: draft unchanged" });
         setError("The room returned the draft unchanged. Try again.");
         setScriptDoctorStage("treatment");
         return;
@@ -970,24 +997,28 @@ export default function SuggestionPanel({
         score: result.finalScore,
       }]);
       onShowRewriteDiff(candidates, `Writers' Room — ${metricName}`, reRoll);
-      const start = metricScoreFromCard(reportCard, metricId);
-      if (result.warnings.length) console.warn("Writers' Room warnings:", result.warnings);
+      saveRoomLog(project.id, roomLogBase);
+      const warnLine = result.warnings.length
+        ? ` ⚠ ${result.warnings.slice(0, 2).join(" · ")}${result.warnings.length > 2 ? ` (+${result.warnings.length - 2} more in the room log)` : ""}`
+        : "";
       setSuggestion(
         `Writers' Room wrapped — ${result.seats.drafter} drafted, ${result.seats.judge} ran the board, ${result.seats.coverage} gave coverage. ` +
-        `Board: ${result.board.length} scenes, outline ${result.outlineScores.join(" → ") || "unscored"}.` +
-        (result.finalScore !== null ? ` ${metricName}: ${start} → ${result.finalScore}.` : "") +
+        `Board: ${result.board.length} scenes, outline ${result.outlineScores.join(" → ") || "unscored"}, ~${result.finalPages}/${targetPages}pp.` +
+        (result.finalScore !== null ? ` ${metricName}: ${result.startScore} → ${result.finalScore}.` : "") +
         (result.memo.theme ? ` Theme: "${result.memo.theme}"` : "") +
-        (result.warnings.length ? ` (${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"} — see console.)` : ""),
+        warnLine,
       );
       setScriptDoctorStage("treatment");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Writers' Room failed");
+      const message = e instanceof Error ? e.message : "Writers' Room failed";
+      saveRoomLog(project.id, { at: new Date().toISOString(), frameworkId: metricId, engines: keyed, error: message });
+      setError(message);
       setScriptDoctorStage(reportCard ? "treatment" : "idle");
     } finally {
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast, makeReRollHandler]);
+  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast, makeReRollHandler, project.id]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;

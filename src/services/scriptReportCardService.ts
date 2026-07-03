@@ -5,7 +5,7 @@ import { StyleProfileService, type StyleProfile } from "./styleProfile";
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
 import { expandScriptToTargetPages, type ExpandProgress } from "./scriptExpansionService";
 import { normalizeShotLines } from "./fountainShotNormalizer";
-import { cleanupGeneratedScreenplay } from "./generatedScriptCleanup";
+import { cleanupGeneratedScreenplay, unescapeLiteralNewlines } from "./generatedScriptCleanup";
 import { castLockBlock } from "./castLockService";
 import { simpleScriptHash } from "./scriptStructure";
 import { getAnalystProviderSettings } from "./textAiSettingsService";
@@ -665,7 +665,11 @@ export function parseRewriteResponse(text: string, characterNames: string[] = []
     if (!candidate.script) {
       throw new Error(`The rewrite response did not include a rewrittenScript, revisedScript, script, draft, or screenplay field. Raw response preview: ${preview}`);
     }
-    const validation = validateRewriteScript(candidate.script);
+    // Repair literal "\n" blobs BEFORE the validation gate — a double-escaped
+    // screenplay is one giant line, which validation would otherwise reject even
+    // though the repair makes it apply-ready. No-op on healthy text.
+    const candidateScript = unescapeLiteralNewlines(candidate.script);
+    const validation = validateRewriteScript(candidateScript);
     if (!validation.canApply) {
       throw new Error(`The rewrite response field "${candidate.field}" did not include an apply-ready screenplay: ${validation.issues.join(" ")} Raw response preview: ${preview}`);
     }
@@ -674,7 +678,7 @@ export function parseRewriteResponse(text: string, characterNames: string[] = []
       // Full deterministic formatting pass (cues/dialogue/shots/transitions), not
       // just shot normalization — rewrite models emit sloppy Fountain (mis-spaced
       // cues, "NAME: dialogue") that otherwise renders left-justified as action.
-      rewrittenScript: cleanRewriteScript(candidate.script, characterNames),
+      rewrittenScript: cleanRewriteScript(candidateScript, characterNames),
       changeSummary: rewriteSummaryFromParsed(parsed),
       warnings: [...recoveredWarnings, ...asStringArray(parsed.warnings)],
       rawResponsePreview: preview,
@@ -682,7 +686,7 @@ export function parseRewriteResponse(text: string, characterNames: string[] = []
     };
   }
 
-  const plainText = text.trim();
+  const plainText = unescapeLiteralNewlines(text.trim());
   const validation = validateRewriteScript(plainText);
   if (validation.canApply) {
     return {

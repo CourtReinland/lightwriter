@@ -37,3 +37,13 @@ describe("expansion directive", () => {
     expect(p.user).toContain("23 page");
   });
 });
+
+describe("parseRewriteResponse literal-\\n repair (review regression)", () => {
+  it("repairs an escaped blob that does NOT start with a scene heading", async () => {
+    const { parseRewriteResponse } = await import("./scriptReportCardService");
+    const blob = 'FADE IN:\\n\\nINT. HALL - NIGHT\\n\\nMara paces.\\n\\nMARA\\nNow or never.\\n';
+    const r = parseRewriteResponse(JSON.stringify({ rewrittenScript: blob, changeSummary: [], warnings: [] }), ["MARA"]);
+    expect(r.rewrittenScript).toContain("INT. HALL - NIGHT");
+    expect(r.rewrittenScript.split("\n").length).toBeGreaterThan(5);
+  });
+});
