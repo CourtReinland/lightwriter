@@ -127,27 +127,49 @@ export class TextAiService {
     const auth: Record<string, string> = key.startsWith("sk-ant-oat")
       ? { Authorization: `Bearer ${key}`, "anthropic-beta": "oauth-2025-04-20" }
       : { "x-api-key": key };
-    const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...auth,
-        "anthropic-version": "2023-06-01",
-        // Anthropic blocks browser-origin requests unless this opt-in header is
-        // sent (the key lives locally by design — same trust model as the other
-        // providers, which allow browser calls by default).
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: this.settings.model,
+    const model = this.settings.model;
+    const attempt = (withTemperature: boolean) => {
+      const body: Record<string, unknown> = {
+        model,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
-        temperature: options?.temperature ?? 0.8,
         max_tokens: options?.maxTokens ?? 2048,
-      }),
-    }, options?.timeoutMs);
-    if (!response.ok) throw new Error(`Claude API error: ${response.status} — ${await response.text()}`);
+      };
+      if (withTemperature) body.temperature = options?.temperature ?? 0.8;
+      return fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...auth,
+          "anthropic-version": "2023-06-01",
+          // Anthropic blocks browser-origin requests unless this opt-in header is
+          // sent (the key lives locally by design — same trust model as the other
+          // providers, which allow browser calls by default).
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(body),
+      }, options?.timeoutMs);
+    };
+
+    let response = await attempt(!CLAUDE_TEMPERATURE_UNSUPPORTED.has(model));
+    if (!response.ok) {
+      const text = await response.text();
+      // Newer Anthropic models (Sonnet 5+) REJECT the temperature param outright:
+      // 400 "`temperature` is deprecated for this model." Learn it once per model
+      // and retry without — otherwise every rewrite dies on a healthy key.
+      if (response.status === 400 && /temperature/i.test(text) && /deprecat/i.test(text) && !CLAUDE_TEMPERATURE_UNSUPPORTED.has(model)) {
+        CLAUDE_TEMPERATURE_UNSUPPORTED.add(model);
+        response = await attempt(false);
+        if (!response.ok) throw new Error(`Claude API error: ${response.status} — ${await response.text()}`);
+      } else {
+        throw new Error(`Claude API error: ${response.status} — ${text}`);
+      }
+    }
     const data = await response.json();
     return stripLLMPreamble((data.content || []).map((part: { text?: string }) => part.text || "").join("\n"));
   }
 }
+
+// Models observed rejecting the temperature parameter (learned at runtime so
+// future model families self-heal without a code change).
+const CLAUDE_TEMPERATURE_UNSUPPORTED = new Set<string>();
