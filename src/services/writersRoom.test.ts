@@ -379,7 +379,8 @@ describe("field regression: judge board with aliased fields (observed live)", ()
       { beat: "Call to Adventure", location: "EXT. STREET - NIGHT", pages: "2-3", intent: "a", conflict: "b", turn: "c", cast: "MARA" },
     ] });
     const result = await runWritersRoom(
-      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 10, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA", "JONAS"], engines: ["grok", "claude"] as TextAiProvider[] },
+      // targetPages 5 keeps the page-budget scaling out of this test's way (4pp planned >= 80% of 5).
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 5, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA", "JONAS"], engines: ["grok", "claude"] as TextAiProvider[] },
       undefined,
       {
         complete: async (p, sys, user) => {
@@ -465,5 +466,55 @@ describe("field regressions: dead-key run + slugline pollution", () => {
     expect(result.board[0].slugline).toBe("INT. KITCHEN - DAY");
     // and the keep-card resolved the ORIGINAL scene text via the clean slugline
     expect(result.finalScript).toContain("Mara waits by the window, coat on.");
+  });
+});
+
+describe("field regressions: 6/20pp delivery", () => {
+  it("scales a 1pp-collapsed board toward the page target", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    // 12 cards with NO pages field -> coerce defaults them to 1pp each.
+    const flatCards = JSON.stringify({ cards: Array.from({ length: 12 }, (_, i) => ({
+      beat: `Beat ${i}`, slugline: `INT. PLACE ${i} - DAY`, source: "new", intent: "a", conflict: "b", turn: "c", characters: ["MARA"],
+    })) });
+    const result = await runWritersRoom(
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 20, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA"], engines: ["grok"] as TextAiProvider[] },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          if (sys.toLowerCase().includes("staff writer pitching")) return flatCards;
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    );
+    const planned = result.board.reduce((s, c) => s + c.pages, 0);
+    expect(planned).toBeGreaterThanOrEqual(16); // 12pp scaled toward 20pp
+    expect(result.changeSummary.some((c) => c.includes("budgets scaled"))).toBe(true);
+  });
+
+  it("retries an empty scene on the judge seat", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    let grokDrafts = 0;
+    const result = await runWritersRoom(
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 10, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA", "JONAS"], engines: ["grok", "claude"] as TextAiProvider[] },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          if (sys.toLowerCase().includes("drafting one scene")) {
+            if (p === "grok") { grokDrafts++; return ""; } // drafter returns empty
+            return "EXT. STREET - NIGHT\n\nThe judge saves the scene.\n\nMARA\nOnward.\n";
+          }
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    );
+    expect(grokDrafts).toBeGreaterThan(0);
+    expect(result.finalScript).toContain("The judge saves the scene.");
+    expect(result.warnings.some((w) => w.includes("retrying on"))).toBe(true);
   });
 });

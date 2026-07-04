@@ -853,6 +853,7 @@ export default function App() {
                   total={pendingRewrite.candidates.length}
                   score={cand.score}
                   pages={estimatePages(cand.afterScript.split("\n").length)}
+                  pagesDelta={estimatePages(cand.afterScript.split("\n").length) - estimatePages(pendingRewrite.beforeScript.split("\n").length)}
                   targetPages={project.targetPages}
                   scenesAdded={sceneCount(cand.afterScript) - sceneCount(pendingRewrite.beforeScript)}
                   castWarnings={cand.castWarnings}

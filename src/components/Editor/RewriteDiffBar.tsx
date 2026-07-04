@@ -7,7 +7,9 @@ interface RewriteDiffBarProps {
   score: number | null;
   /** Estimated page count of this take's full script. */
   pages?: number;
-  /** The project's target page count (shown as ~N/Tpp). */
+  /** Page delta vs the current draft (+grown / −shrunk). */
+  pagesDelta?: number;
+  /** The project's target page count. */
   targetPages?: number;
   /** Scene-heading delta vs the current draft (+added / -cut). */
   scenesAdded?: number;
@@ -31,7 +33,7 @@ interface RewriteDiffBarProps {
 // "Compare next" cycles to the next take, and "Re-roll" generates a fresh take
 // with the next installed engine — re-rolling just the highlighted text, or the
 // whole draft when nothing is selected.
-export default function RewriteDiffBar({ label, index, total, score, pages, targetPages, scenesAdded, castWarnings, onAccept, onReject, onCycle, onReRoll, reRolling, nextEngine, error }: RewriteDiffBarProps) {
+export default function RewriteDiffBar({ label, index, total, score, pages, pagesDelta, targetPages, scenesAdded, castWarnings, onAccept, onReject, onCycle, onReRoll, reRolling, nextEngine, error }: RewriteDiffBarProps) {
   return (
     <div className="rewrite-diff-bar">
       <div className="rdb-info">
@@ -39,8 +41,8 @@ export default function RewriteDiffBar({ label, index, total, score, pages, targ
         <span className="rdb-label">{label}</span>
         {score !== null && <span className="rdb-score">{score}/100</span>}
         {pages !== undefined && (
-          <span className="rdb-pages" title="Estimated pages of this take (vs your target)">
-            ~{pages}{targetPages ? `/${targetPages}` : ""}pp
+          <span className="rdb-pages" title={`This take is ~${pages} pages total${pagesDelta !== undefined ? `, ${pagesDelta >= 0 ? "adding" : "cutting"} ${Math.abs(pagesDelta)} vs your current draft` : ""}${targetPages ? `; your target is ${targetPages} pages` : ""}`}>
+            {pages}pp total{pagesDelta !== undefined && pagesDelta !== 0 ? ` (${pagesDelta > 0 ? "+" : "−"}${Math.abs(pagesDelta)}pp)` : ""}{targetPages ? ` · target ${targetPages}` : ""}
           </span>
         )}
         {scenesAdded !== undefined && scenesAdded !== 0 && (

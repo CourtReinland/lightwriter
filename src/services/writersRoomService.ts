@@ -426,6 +426,17 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
       break;
     }
   }
+  // Normalize page budgets: models often omit them (cards then default to 1pp),
+  // so the room PLANS less material than the target and every later stage
+  // inherits the shortfall (observed live: 12 × 1pp cards against a 20pp target
+  // delivered a 6pp draft). Scale budgets proportionally toward the target.
+  const plannedPages = board.reduce((sum, c) => sum + c.pages, 0);
+  if (input.targetPages && plannedPages > 0 && plannedPages < input.targetPages * 0.8) {
+    const scale = input.targetPages / plannedPages;
+    board = board.map((c) => ({ ...c, pages: Math.max(0.5, Math.min(6, Math.round(c.pages * scale * 2) / 2)) }));
+    changeSummary.push(`Board page budgets scaled ${Math.round(plannedPages)}pp → ~${input.targetPages}pp target.`);
+  }
+
   changeSummary.push(`Board: ${board.length} scenes (${board.filter((c) => c.source === "keep").length} kept, ${board.filter((c) => c.source === "rework").length} reworked, ${board.filter((c) => c.source === "new").length} new); outline score ${outlineScores.join(" → ") || "unscored"}.`);
 
   // Board is known — replace the provisional total with the real remaining work
@@ -458,9 +469,8 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
     tick(`drafting scene ${i + 1}/${board.length} — ${card.slugline.slice(0, 40)}`);
     const soFar = drafted.join("\n\n").slice(-1400);
     draftAttempts++;
-    try {
-      const raw = await complete(seats.drafter, `You are the episode's writer, drafting ONE scene from the approved board. Write in proper Fountain. Dramatize — real choices, real conflict, subtext over statement. Never re-introduce established characters, never recap.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
-        `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
+    const sceneSystem = `You are the episode's writer, drafting ONE scene from the approved board. Write in proper Fountain. Dramatize — real choices, real conflict, subtext over statement. Never re-introduce established characters, never recap. Write the FULL ~${card.pages}-page scene — a thin sketch fails the board.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`;
+    const sceneUser = `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
 THE CARD (scene ${i + 1} of ${board.length}, beat: ${card.beat}, ~${card.pages} page${card.pages === 1 ? "" : "s"}):
 Slugline: ${card.slugline}
 Intent: ${card.intent}
@@ -468,12 +478,26 @@ Conflict: ${card.conflict}
 Turn: ${card.turn}
 In the scene: ${card.characters.join(", ") || "per the story"}
 ${original ? `\nTHE EXISTING SCENE TO REWORK (keep what lands, rewrite what doesn't):\n---\n${original.slice(0, 2200)}\n---\n` : card.source !== "new" ? "\n(The board marked this as an existing scene, but it could not be found — write it fresh, consistent with continuity.)\n" : ""}${soFar ? `\nSTORY SO FAR (continue smoothly from this):\n---\n${soFar}\n---\n` : ""}
-Write ONLY this scene's Fountain text, starting with the slugline.`,
-        { temperature: 0.75, maxTokens: Math.max(700, Math.min(3000, Math.round(card.pages * 800))), timeoutMs: STAGE_TIMEOUT_MS });
-      const scene = cleanupGeneratedScreenplay(raw, castNames).trim();
+Write ONLY this scene's Fountain text, starting with the slugline.`;
+    const sceneOpts = { temperature: 0.75, maxTokens: Math.max(1400, Math.min(4000, Math.round(card.pages * 1300))), timeoutMs: STAGE_TIMEOUT_MS };
+    const draftOn = async (seat: TextAiProvider) => cleanupGeneratedScreenplay(await complete(seat, sceneSystem, sceneUser, sceneOpts), castNames).trim();
+    try {
+      let scene = "";
+      try {
+        scene = await draftOn(seats.drafter);
+      } catch (e) {
+        if (seats.judge === seats.drafter) throw e;
+        warnings.push(`Scene ${i + 1} (${card.slugline}) failed on ${textAiProviderLabel(seats.drafter)} (${e instanceof Error ? e.message.slice(0, 90) : "error"}); retrying on ${textAiProviderLabel(seats.judge)}.`);
+        scene = await draftOn(seats.judge);
+      }
+      // An empty page is a failure too — give the judge one shot at it.
+      if (!scene && seats.judge !== seats.drafter) {
+        warnings.push(`Scene ${i + 1} (${card.slugline}) came back empty; retrying on ${textAiProviderLabel(seats.judge)}.`);
+        scene = await draftOn(seats.judge);
+      }
       drafted.push(scene || (original || `${card.slugline}\n`));
       if (scene) draftSuccesses++;
-      else warnings.push(`Scene ${i + 1} (${card.slugline}) came back empty; kept the original.`);
+      else warnings.push(`Scene ${i + 1} (${card.slugline}) came back empty on every seat; ${original ? "kept the original" : "left as a placeholder"}.`);
     } catch (e) {
       const message = e instanceof Error ? e.message : "error";
       if (!firstDraftError) firstDraftError = message;
@@ -516,36 +540,50 @@ Return ONLY: {"rewrittenScript":"<the complete revised screenplay>","changeSumma
     warnings.push(`Punch-up failed (${e instanceof Error ? e.message : "error"}); kept the previous draft.`);
   }
 
-  // ── Stage 3b: Grow to the page target ─────────────────────────────────────
-  // Compact drafters (SAO especially) underwrite their cards; a short draft
-  // lands every beat outside its expected page range and tanks the framework
-  // score no matter how good the structure is. Same expansion the Story Doctor
-  // runs: plan new scenes → write each with continuity → insert.
-  const pagesBeforeExpand = estimatePages(script.split("\n").length);
-  if (input.targetPages && pagesBeforeExpand < Math.floor(input.targetPages * 0.9)) {
-    tick(`expanding ${pagesBeforeExpand}pp toward the ${input.targetPages}pp target (${textAiProviderLabel(seats.drafter)})`);
-    try {
-      const expanded = await expandToTargetIfNeeded(
-        { rewrittenScript: script, changeSummary: [], warnings: [] },
-        {
-          targetPages: input.targetPages,
-          frameworkId: input.frameworkId,
-          reportCard: input.reportCard,
-          knowledgeBase: input.knowledgeBase,
-          styleProfile: input.styleProfile,
-          seriesContext: input.seriesContext,
-          allowedCast: input.allowedCast,
-        },
-        undefined,
-        (system, user, options) => complete(seats.drafter, system, user, options),
-      );
-      if (expanded.rewrittenScript.trim().length > script.length) {
-        script = expanded.rewrittenScript;
-        changeSummary.push(`Expanded ${pagesBeforeExpand}pp → ~${estimatePages(script.split("\n").length)}pp toward the ${input.targetPages}pp target.`);
+  // ── Stage 3b: Grow to the page target — and KEEP growing ──────────────────
+  // Compact drafters underwrite their cards; a short draft lands every beat
+  // outside its expected page range and tanks the framework score no matter how
+  // good the structure is. One expansion pass is not a guarantee (planners fail,
+  // writers under-deliver), so loop: plan new scenes → write → re-measure, up to
+  // 3 rounds, alternating seats when a round stalls. Stop only at ~target or a
+  // genuine stall.
+  if (input.targetPages) {
+    const expandTarget = Math.floor(input.targetPages * 0.9);
+    let pagesNow = estimatePages(script.split("\n").length);
+    const expansionSeats: TextAiProvider[] = [seats.drafter, seats.judge, seats.drafter];
+    for (let round = 0; round < expansionSeats.length && pagesNow < expandTarget; round++) {
+      const seat = expansionSeats[round];
+      tick(`expanding ${pagesNow}pp toward the ${input.targetPages}pp target (round ${round + 1}, ${textAiProviderLabel(seat)})`);
+      try {
+        const expanded = await expandToTargetIfNeeded(
+          { rewrittenScript: script, changeSummary: [], warnings: [] },
+          {
+            targetPages: input.targetPages,
+            frameworkId: input.frameworkId,
+            reportCard: input.reportCard,
+            knowledgeBase: input.knowledgeBase,
+            styleProfile: input.styleProfile,
+            seriesContext: input.seriesContext,
+            allowedCast: input.allowedCast,
+          },
+          undefined,
+          (system, user, options) => complete(seat, system, user, options),
+        );
+        const newPages = estimatePages(expanded.rewrittenScript.split("\n").length);
+        if (expanded.rewrittenScript.trim().length > script.length && newPages > pagesNow) {
+          script = expanded.rewrittenScript;
+          changeSummary.push(`Expansion round ${round + 1} (${textAiProviderLabel(seat)}): ${pagesNow}pp → ~${newPages}pp.`);
+          pagesNow = newPages;
+        } else {
+          warnings.push(...expanded.warnings);
+          // No growth on this seat — the next round tries a different one.
+        }
+      } catch (e) {
+        warnings.push(`Expansion round ${round + 1} failed (${e instanceof Error ? e.message : "error"}).`);
       }
-      warnings.push(...expanded.warnings);
-    } catch (e) {
-      warnings.push(`Page expansion failed (${e instanceof Error ? e.message : "error"}); the draft is ~${pagesBeforeExpand}pp vs a ${input.targetPages}pp target — expect a low structure score.`);
+    }
+    if (pagesNow < expandTarget) {
+      warnings.push(`The draft is ~${pagesNow}pp against the ${input.targetPages}pp target after ${expansionSeats.length} expansion rounds — expect page-placement penalties in the score.`);
     }
   }
 
