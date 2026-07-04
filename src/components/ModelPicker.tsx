@@ -38,7 +38,10 @@ export default function ModelPicker({ provider, apiKey, value, onChange }: Model
     try {
       const options = await listTextModelsForProvider(provider, key);
       setModels(options);
-      if (showStatus) setStatus(`${options.length} ${textAiProviderLabel(provider)} models available.`);
+      if (showStatus) {
+        setStatus(`${options.length} ${textAiProviderLabel(provider)} models available.`);
+        setOpen(true); // the user just asked for the list — show it
+      }
     } catch (error) {
       setModels(getCachedTextModelOptions(provider));
       if (showStatus) setStatus(error instanceof Error ? error.message : "Couldn't load models — type a model id.");
@@ -65,12 +68,15 @@ export default function ModelPicker({ provider, apiKey, value, onChange }: Model
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase();
     // When the value exactly matches a known model, show the whole list (let the
-    // user browse); otherwise treat the text as a search query.
+    // user browse); otherwise treat the text as a search query. When the query
+    // matches NOTHING (e.g. a stale id like "claude-3-5-sonnet-latest" against a
+    // live catalogue of dated ids), fall back to the full list — an empty
+    // dropdown reads as "the list is broken", not "your filter has no hits".
     const exact = models.some((m) => m.id.toLowerCase() === q);
     const list = !q || exact
       ? models
       : models.filter((m) => m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q));
-    return list.slice(0, 100);
+    return (list.length ? list : models).slice(0, 100);
   }, [models, value]);
 
   return (
@@ -82,6 +88,7 @@ export default function ModelPicker({ provider, apiKey, value, onChange }: Model
           placeholder="Search or paste a model id…"
           onChange={(event) => { onChange(event.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)} // an already-focused input fires no focus event
           onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}
         />
         <button
