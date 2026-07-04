@@ -133,6 +133,10 @@ export class TextAiService {
         "Content-Type": "application/json",
         ...auth,
         "anthropic-version": "2023-06-01",
+        // Anthropic blocks browser-origin requests unless this opt-in header is
+        // sent (the key lives locally by design — same trust model as the other
+        // providers, which allow browser calls by default).
+        "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
         model: this.settings.model,

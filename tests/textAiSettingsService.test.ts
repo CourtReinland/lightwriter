@@ -126,7 +126,7 @@ describe("live text-model listing", () => {
     const models = await listClaudeTextModels("sk-ant-key");
 
     expect(fetchMock).toHaveBeenCalledWith("https://api.anthropic.com/v1/models", {
-      headers: { "x-api-key": "sk-ant-key", "anthropic-version": "2023-06-01" },
+      headers: { "x-api-key": "sk-ant-key", "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
     });
     expect(models[0]).toEqual({ id: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" });
   });

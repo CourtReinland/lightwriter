@@ -304,7 +304,10 @@ export async function listClaudeTextModels(apiKey: string): Promise<TextModelOpt
     ? { Authorization: `Bearer ${key}`, "anthropic-beta": "oauth-2025-04-20" }
     : { "x-api-key": key };
   const response = await fetch("https://api.anthropic.com/v1/models", {
-    headers: { ...auth, "anthropic-version": "2023-06-01" },
+    // The dangerous-direct-browser-access header is Anthropic's required opt-in
+    // for browser-origin requests — without it the fetch is CORS-blocked and the
+    // model list can never load.
+    headers: { ...auth, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
   });
   if (!response.ok) throw new Error(`Claude model list failed: ${response.status} ${response.statusText}`);
   const data = (await response.json()) as { data?: Array<{ id?: string; display_name?: string }> };
