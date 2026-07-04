@@ -161,7 +161,7 @@ describe("runWritersRoom", () => {
       scoreScript: async () => report,
     });
     expect(result.finalScript).toContain("Mara waits by the window, coat on.");
-    expect(result.warnings.some((w) => w.includes("truncated"))).toBe(true);
+    expect(result.warnings.some((w) => w.includes("limit 15%"))).toBe(true);
   });
 
   it("flags invented characters that slip through", async () => {

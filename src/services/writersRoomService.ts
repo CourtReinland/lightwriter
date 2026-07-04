@@ -530,11 +530,16 @@ THE DRAFT:\n---\n${script}\n---\n
 Return ONLY: {"rewrittenScript":"<the complete revised screenplay>","changeSummary":["what you changed"],"warnings":[]}`,
       { temperature: 0.5, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS });
     const parsed = parseRewriteResponse(raw, castNames);
-    if (parsed.rewrittenScript.trim().length >= script.length * 0.5) {
+    // The pass is instructed to hold length within ±10%; models over-cut anyway
+    // (observed live: a 22pp draft came back 15pp and cost 5+ framework points in
+    // page placement). Enforce ±15% — outside that, the punch-up is a rewrite in
+    // disguise and the drafted pages win.
+    const ratio = parsed.rewrittenScript.trim().length / script.length;
+    if (ratio >= 0.85 && ratio <= 1.15) {
       script = parsed.rewrittenScript;
       changeSummary.push(`Punch-up: ${parsed.changeSummary.slice(0, 3).join("; ") || "done"}.`);
     } else {
-      warnings.push(`Punch-up came back truncated; kept the previous draft.`);
+      warnings.push(`Punch-up changed the length by ${Math.round(Math.abs(1 - ratio) * 100)}% (limit 15%); kept the drafted pages.`);
     }
   } catch (e) {
     warnings.push(`Punch-up failed (${e instanceof Error ? e.message : "error"}); kept the previous draft.`);
