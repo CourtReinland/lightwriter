@@ -425,3 +425,45 @@ describe("seat assignment: judge preference", () => {
     expect(seats.coverage).toBe("openrouter");
   });
 });
+
+describe("field regressions: dead-key run + slugline pollution", () => {
+  it("aborts loudly when the drafter fails on EVERY scene (dead API key)", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    await expect(runWritersRoom(
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 10, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA", "JONAS"], engines: ["grok", "claude"] as TextAiProvider[] },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          if (sys.toLowerCase().includes("drafting one scene")) throw new Error("401 invalid x-api-key");
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    )).rejects.toThrow(/failed on every scene.*invalid x-api-key.*API key/s);
+  });
+
+  it("strips boardText annotations that models copy back into sluglines", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    const polluted = JSON.stringify({ cards: [
+      { beat: "You", slugline: "INT. KITCHEN - DAY (keep, ~2pp) (new, ~0pp)", source: "keep", intent: "a", conflict: "b", turn: "c", characters: ["MARA"], pages: 1 },
+    ] });
+    const result = await runWritersRoom(
+      { script: SCRIPT, frameworkId: "dan-harmon", frameworkName: "Dan Harmon Story Circle", targetPages: 10, reportCard: report, knowledgeBase: null, styleProfile: null, allowedCast: ["MARA"], engines: ["grok"] as TextAiProvider[] },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          if (sys.toLowerCase().includes("staff writer pitching")) return polluted;
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    );
+    expect(result.board[0].slugline).toBe("INT. KITCHEN - DAY");
+    // and the keep-card resolved the ORIGINAL scene text via the clean slugline
+    expect(result.finalScript).toContain("Mara waits by the window, coat on.");
+  });
+});

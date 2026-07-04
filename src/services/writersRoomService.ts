@@ -178,7 +178,11 @@ function coerceCards(raw: unknown): SceneCard[] {
       // accept the common aliases rather than discarding a good board.
       const card = c as Record<string, unknown>;
       if (!card || typeof card !== "object") return null;
-      const slugline = String(card.slugline ?? card.location ?? card.scene ?? card.heading ?? "").trim();
+      // Strip boardText() annotations that models copy back verbatim in revisions
+      // ("INT. KITCHEN (keep, ~2pp)" — observed live compounding every round).
+      const slugline = String(card.slugline ?? card.location ?? card.scene ?? card.heading ?? "")
+        .replace(/\s*\((?:keep|rework|new)[^)]*\)/gi, "")
+        .trim();
       if (!slugline) return null;
       const rawChars = card.characters ?? card.cast ?? [];
       const characters = Array.isArray(rawChars)
@@ -433,6 +437,9 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
   const castNames = input.allowedCast ?? [];
   const drafted: string[] = [];
   const slugUse = new Map<string, number>(); // k-th card for a slug -> k-th occurrence
+  let draftAttempts = 0;
+  let draftSuccesses = 0;
+  let firstDraftError = "";
   for (let i = 0; i < board.length; i++) {
     const card = board[i];
     const key = slugKey(card.slugline);
@@ -450,6 +457,7 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
     }
     tick(`drafting scene ${i + 1}/${board.length} — ${card.slugline.slice(0, 40)}`);
     const soFar = drafted.join("\n\n").slice(-1400);
+    draftAttempts++;
     try {
       const raw = await complete(seats.drafter, `You are the episode's writer, drafting ONE scene from the approved board. Write in proper Fountain. Dramatize — real choices, real conflict, subtext over statement. Never re-introduce established characters, never recap.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
         `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
@@ -464,11 +472,22 @@ Write ONLY this scene's Fountain text, starting with the slugline.`,
         { temperature: 0.75, maxTokens: Math.max(700, Math.min(3000, Math.round(card.pages * 800))), timeoutMs: STAGE_TIMEOUT_MS });
       const scene = cleanupGeneratedScreenplay(raw, castNames).trim();
       drafted.push(scene || (original || `${card.slugline}\n`));
-      if (!scene) warnings.push(`Scene ${i + 1} (${card.slugline}) came back empty; kept the original.`);
+      if (scene) draftSuccesses++;
+      else warnings.push(`Scene ${i + 1} (${card.slugline}) came back empty; kept the original.`);
     } catch (e) {
-      warnings.push(`Scene ${i + 1} (${card.slugline}) failed to draft (${e instanceof Error ? e.message : "error"}); ${original ? "kept the original" : "skipped"}.`);
+      const message = e instanceof Error ? e.message : "error";
+      if (!firstDraftError) firstDraftError = message;
+      warnings.push(`Scene ${i + 1} (${card.slugline}) failed to draft (${message}); ${original ? "kept the original" : "skipped"}.`);
       if (original) drafted.push(original);
     }
+  }
+  // If the drafter failed on EVERY scene it attempted (a dead API key, most
+  // likely), abort loudly — scoring the leftover stub as "the room's draft"
+  // produces a garbage number that reads as a writing failure (observed live:
+  // an invalid Claude key turned a 12-scene board into a 2-page fragment that
+  // honestly scored 15).
+  if (draftAttempts > 0 && draftSuccesses === 0) {
+    throw new Error(`The drafter (${textAiProviderLabel(seats.drafter)}) failed on every scene — first error: ${firstDraftError.slice(0, 200)}. Check that engine's API key in Settings and run the room again.`);
   }
   // Join with blank lines only — drafted scenes were cleaned individually, and
   // KEPT scenes must stay byte-exact (a full reclassification here could mutate

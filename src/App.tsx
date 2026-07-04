@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { type EditorView } from "@codemirror/view";
 import { setPendingDiff } from "./codemirror/inline-diff";
 import { computeInlineDiff, type RewriteDiffCandidate, type RewriteReRollHandler } from "./services/inlineDiffService";
+import { estimatePages } from "./frameworks";
 import RewriteDiffBar from "./components/Editor/RewriteDiffBar";
 import ArtisticBorder from "./components/Layout/ArtisticBorder";
 import EditorToolbar from "./components/Editor/EditorToolbar";
@@ -842,22 +843,29 @@ export default function App() {
                 onAdded={() => setWorldVersion((v) => v + 1)}
               />
             )}
-            {activeView === "editor" && pendingRewrite && (
-              <RewriteDiffBar
-                label={pendingRewrite.candidates[pendingRewrite.index].label || pendingRewrite.label}
-                index={pendingRewrite.index}
-                total={pendingRewrite.candidates.length}
-                score={pendingRewrite.candidates[pendingRewrite.index].score}
-                castWarnings={pendingRewrite.candidates[pendingRewrite.index].castWarnings}
-                onAccept={handleAcceptRewrite}
-                onReject={handleRejectRewrite}
-                onCycle={handleCycleRewrite}
-                onReRoll={pendingRewrite.reRoll ? handleBarReRoll : undefined}
-                reRolling={barReRolling}
-                nextEngine={pendingRewrite.reRollLabel}
-                error={pendingRewrite.reRollError}
-              />
-            )}
+            {activeView === "editor" && pendingRewrite && (() => {
+              const cand = pendingRewrite.candidates[pendingRewrite.index];
+              const sceneCount = (s: string) => s.split("\n").filter((l) => /^(INT\.|EXT\.|INT\/EXT\.|I\/E\.|EST\.)/i.test(l.trim())).length;
+              return (
+                <RewriteDiffBar
+                  label={cand.label || pendingRewrite.label}
+                  index={pendingRewrite.index}
+                  total={pendingRewrite.candidates.length}
+                  score={cand.score}
+                  pages={estimatePages(cand.afterScript.split("\n").length)}
+                  targetPages={project.targetPages}
+                  scenesAdded={sceneCount(cand.afterScript) - sceneCount(pendingRewrite.beforeScript)}
+                  castWarnings={cand.castWarnings}
+                  onAccept={handleAcceptRewrite}
+                  onReject={handleRejectRewrite}
+                  onCycle={handleCycleRewrite}
+                  onReRoll={pendingRewrite.reRoll ? handleBarReRoll : undefined}
+                  reRolling={barReRolling}
+                  nextEngine={pendingRewrite.reRollLabel}
+                  error={pendingRewrite.reRollError}
+                />
+              );
+            })()}
             {activeView === "preview" && parsed && (
               <ScreenplayPreview
                 html={parsed.html.script}

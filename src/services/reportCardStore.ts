@@ -13,6 +13,10 @@ export interface StoredReportCard {
   hash: string;
   card: ScriptReportCard;
   updatedAt: number;
+  /** "user" = the writer ran the scoring themselves; "room" = a Writers' Room
+   *  run persisted its final card (only displayed when its hash matches the
+   *  current draft — a REJECTED room draft must not pollute the panel). */
+  origin?: "user" | "room";
 }
 
 export function loadStoredReportCard(projectId: string): StoredReportCard | null {
@@ -27,10 +31,10 @@ export function loadStoredReportCard(projectId: string): StoredReportCard | null
   }
 }
 
-export function saveStoredReportCard(projectId: string, hash: string, card: ScriptReportCard): void {
+export function saveStoredReportCard(projectId: string, hash: string, card: ScriptReportCard, origin: "user" | "room" = "user"): void {
   if (typeof localStorage === "undefined" || !projectId) return;
   try {
-    localStorage.setItem(KEY(projectId), JSON.stringify({ hash, card, updatedAt: Date.now() } satisfies StoredReportCard));
+    localStorage.setItem(KEY(projectId), JSON.stringify({ hash, card, updatedAt: Date.now(), origin } satisfies StoredReportCard));
   } catch {
     /* quota — best effort */
   }

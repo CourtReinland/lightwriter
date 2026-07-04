@@ -5,6 +5,12 @@ interface RewriteDiffBarProps {
   index: number;
   total: number;
   score: number | null;
+  /** Estimated page count of this take's full script. */
+  pages?: number;
+  /** The project's target page count (shown as ~N/Tpp). */
+  targetPages?: number;
+  /** Scene-heading delta vs the current draft (+added / -cut). */
+  scenesAdded?: number;
   /** Invented-character names when this take violates the cast lock. */
   castWarnings?: string[];
   onAccept: () => void;
@@ -25,13 +31,23 @@ interface RewriteDiffBarProps {
 // "Compare next" cycles to the next take, and "Re-roll" generates a fresh take
 // with the next installed engine — re-rolling just the highlighted text, or the
 // whole draft when nothing is selected.
-export default function RewriteDiffBar({ label, index, total, score, castWarnings, onAccept, onReject, onCycle, onReRoll, reRolling, nextEngine, error }: RewriteDiffBarProps) {
+export default function RewriteDiffBar({ label, index, total, score, pages, targetPages, scenesAdded, castWarnings, onAccept, onReject, onCycle, onReRoll, reRolling, nextEngine, error }: RewriteDiffBarProps) {
   return (
     <div className="rewrite-diff-bar">
       <div className="rdb-info">
         <span className="rdb-legend"><span className="rdb-del">deletion</span> <span className="rdb-add">addition</span></span>
         <span className="rdb-label">{label}</span>
         {score !== null && <span className="rdb-score">{score}/100</span>}
+        {pages !== undefined && (
+          <span className="rdb-pages" title="Estimated pages of this take (vs your target)">
+            ~{pages}{targetPages ? `/${targetPages}` : ""}pp
+          </span>
+        )}
+        {scenesAdded !== undefined && scenesAdded !== 0 && (
+          <span className="rdb-scenes" title="Scene headings added (+) or cut (−) vs your current draft">
+            {scenesAdded > 0 ? `+${scenesAdded}` : scenesAdded} scene{Math.abs(scenesAdded) === 1 ? "" : "s"}
+          </span>
+        )}
         {total > 1 && <span className="rdb-variant">take {index + 1} of {total}</span>}
         {castWarnings && castWarnings.length > 0 && (
           <span className="rdb-cast-warning" title={`This take invented characters outside your script/KB/series cast: ${castWarnings.join(", ")}`}>

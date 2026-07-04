@@ -16,7 +16,7 @@ import { fillSceneDescriptions } from "../../services/expandDescriptionsService"
 import { rewriteScriptWithCleanup } from "../../services/cleanupService";
 import { normalizeShotLines } from "../../services/fountainShotNormalizer";
 import { correctFountainFormatting } from "../../services/fountainFormatCorrector";
-import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, summarizeRewriteDiff, compareReportCards, validateRewriteScript, buildMetricRewritePrompt, parseRewriteResponse, metricScoreFromCard, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
+import { runScriptReportCard, generateMetricImprovementPlan, rewriteScriptForMetric, summarizeRewriteDiff, compareReportCards, validateRewriteScript, buildMetricRewritePrompt, parseRewriteResponse, metricScoreFromCard, reportCardCacheHash, type ScriptReportCard, type ScriptRewriteResult, type RewriteDiffSummary, type ReportCardComparison, type RewriteValidationResult } from "../../services/scriptReportCardService";
 import { runStoryDoctor, isFrameworkMetric } from "../../services/storyDoctorService";
 import {
   generate,
@@ -152,10 +152,18 @@ export default function SuggestionPanel({
     return subset.length ? subset : undefined;
   }, [activeFrameworks]);
   // Persistence: restore the last report card for this project so it survives
-  // leaving the AI tab (this panel unmounts) and app restarts.
+  // leaving the AI tab (this panel unmounts) and app restarts. A card persisted
+  // by a Writers' Room run only counts when it matches the CURRENT draft — a
+  // rejected room draft's card must not display as if it scored the editor text.
   useEffect(() => {
     const stored = loadStoredReportCard(project.id);
+    if (stored?.origin === "room") {
+      const currentHash = reportCardCacheHash({ script: fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, frameworks: scoringFrameworks });
+      setReportCard(stored.hash === currentHash ? stored.card : null);
+      return;
+    }
     setReportCard(stored?.card ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
   // Which providers the parallel rewrite / re-roll fan out to (up to 4). Defaults
   // to Claude + the current writer; persisted. Only keyed providers actually run.

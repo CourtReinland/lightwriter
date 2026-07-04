@@ -37,6 +37,8 @@
 .rdb-variant { color: #999; font-size: 11px; }
 .rdb-cast-warning { color: #e8b04b; font-size: 11px; white-space: nowrap; }
 .rdb-error { color: #e08080; font-size: 11px; white-space: nowrap; }
+.rdb-pages { color: #9fd0a8; font-size: 11px; white-space: nowrap; }
+.rdb-scenes { color: #9ab8e8; font-size: 11px; white-space: nowrap; }
 
 .rdb-actions { display: flex; gap: 6px; }
 

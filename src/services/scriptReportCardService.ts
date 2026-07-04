@@ -790,7 +790,7 @@ export function reportCardCacheHash(input: ScriptReportPromptInput, samples = SC
  */
 export function persistReportCard(projectId: string, input: ScriptReportPromptInput, card: ScriptReportCard): void {
   if (!projectId) return;
-  saveStoredReportCard(projectId, reportCardCacheHash(input), card);
+  saveStoredReportCard(projectId, reportCardCacheHash(input), card, "room");
 }
 
 export async function runScriptReportCard(
