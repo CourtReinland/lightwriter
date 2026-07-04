@@ -13,7 +13,10 @@
     "target": [
       {
         "target": "dmg",
-        "arch": ["arm64", "x64"]
+        "arch": [
+          "arm64",
+          "x64"
+        ]
       }
     ],
     "icon": "build/icon.icns",
@@ -40,5 +43,6 @@
       "width": 540,
       "height": 380
     }
-  }
+  },
+  "afterPack": "scripts/afterPack.cjs"
 }
