@@ -415,3 +415,13 @@ describe("field regression: judge board with aliased fields (observed live)", ()
     expect(result.outlineScores).toEqual([40, 88]);
   });
 });
+
+describe("seat assignment: judge preference", () => {
+  it("gives the ANALYST provider the judge seat when Claude drafts", () => {
+    // analyst defaults to grok in tests (no stored override)
+    const seats = assignSeats(["claude", "openrouter", "grok"] as TextAiProvider[]);
+    expect(seats.drafter).toBe("claude");
+    expect(seats.judge).toBe("grok"); // analyst, not the next-listed openrouter
+    expect(seats.coverage).toBe("openrouter");
+  });
+});

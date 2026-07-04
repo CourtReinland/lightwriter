@@ -773,6 +773,26 @@ export interface ReportCardCacheOptions {
   force?: boolean;
 }
 
+/** The content-addressed cache key runScriptReportCard uses for a scoring input. */
+export function reportCardCacheHash(input: ScriptReportPromptInput, samples = SCORING_SAMPLES): string {
+  const frameworks = input.frameworks?.length ? input.frameworks : ALL_FRAMEWORKS;
+  const prompt = buildScriptReportCardPrompt(input);
+  const analyst = getAnalystProviderSettings();
+  return simpleScriptHash(
+    `v${SCORER_VERSION}|n${samples}|${analyst.provider}:${analyst.model}|${frameworks.map((f) => f.id).sort().join(",")}|tp${input.targetPages}|len${input.script.length}|${input.script}|${prompt.system}\n${prompt.user}`,
+  );
+}
+
+/**
+ * Persist an already-computed card as the project's stored report card, keyed
+ * so the DEFAULT scoring path cache-hits on it (e.g. after accepting a Writers'
+ * Room draft, its final scoring stands in — Re-score always recomputes fresh).
+ */
+export function persistReportCard(projectId: string, input: ScriptReportPromptInput, card: ScriptReportCard): void {
+  if (!projectId) return;
+  saveStoredReportCard(projectId, reportCardCacheHash(input), card);
+}
+
 export async function runScriptReportCard(
   input: ScriptReportPromptInput,
   options?: { samples?: number; completeOverride?: Completion; cache?: ReportCardCacheOptions },
@@ -787,12 +807,7 @@ export async function runScriptReportCard(
   const cache = options?.cache;
   let hash = "";
   if (cache) {
-    const analyst = getAnalystProviderSettings();
-    // Include the FULL script (prompt.user truncates it at 120k, so edits past
-    // that window would otherwise not bust the cache) and targetPages explicitly.
-    hash = simpleScriptHash(
-      `v${SCORER_VERSION}|n${n}|${analyst.provider}:${analyst.model}|${frameworks.map((f) => f.id).sort().join(",")}|tp${input.targetPages}|len${input.script.length}|${input.script}|${prompt.system}\n${prompt.user}`,
-    );
+    hash = reportCardCacheHash(input, n);
     if (!cache.force) {
       const stored = loadStoredReportCard(cache.projectId);
       if (stored && stored.hash === hash) return stored.card;

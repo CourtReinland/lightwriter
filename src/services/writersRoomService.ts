@@ -1,5 +1,5 @@
 import { TextAiService, type TextCompleteOptions } from "./textAiService";
-import { type TextAiProvider, textAiProviderLabel } from "./textAiSettingsService";
+import { type TextAiProvider, textAiProviderLabel, getAnalystProviderSettings } from "./textAiSettingsService";
 import { ALL_FRAMEWORKS, computeBeatRanges, estimatePages } from "../frameworks";
 import { KnowledgeBaseService, type KnowledgeBase } from "./knowledgeBase";
 import { StyleProfileService, type StyleProfile } from "./styleProfile";
@@ -14,6 +14,7 @@ import {
   metricScoreFromCard,
   expandToTargetIfNeeded,
   buildMetricRewritePrompt,
+  persistReportCard,
   type ScriptReportCard,
 } from "./scriptReportCardService";
 
@@ -85,8 +86,12 @@ export interface WritersRoomInput {
   styleProfile: StyleProfile | null;
   seriesContext?: string;
   allowedCast?: string[];
-  /** Keyed engines to seat around the table (writer first is conventional). */
+  /** Keyed engines to seat around the table (drafter first). */
   engines: TextAiProvider[];
+  /** When set, the room's final report card is persisted for this project so an
+   *  accepted draft's next "Run Script Report Card" cache-hits instead of paying
+   *  for a redundant scoring. */
+  projectId?: string;
 }
 
 type SeatCompletion = (provider: TextAiProvider, system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
@@ -255,10 +260,16 @@ function sceneTextBySlugline(script: string, slugline: string, occurrence = 0): 
   return { text: "" };
 }
 
-/** Seat the room: one drafter voice, a judge/punch-up seat, a rival for coverage. */
+/** Seat the room: one drafter voice, a judge/punch-up seat, a rival for coverage.
+ *  Judge preference: Claude, else the ANALYST provider (the structural model),
+ *  else the next distinct engine — never the drafter grading its own pages. */
 export function assignSeats(engines: TextAiProvider[]): { drafter: TextAiProvider; judge: TextAiProvider; punchUp: TextAiProvider; coverage: TextAiProvider } {
   const drafter = engines[0];
-  const judge = engines.includes("claude") && drafter !== "claude" ? "claude" : engines.find((p) => p !== drafter) ?? drafter;
+  const analyst = getAnalystProviderSettings().provider as TextAiProvider;
+  const judge =
+    engines.includes("claude") && drafter !== "claude" ? "claude"
+    : engines.includes(analyst) && analyst !== drafter ? analyst
+    : engines.find((p) => p !== drafter) ?? drafter;
   const coverage = engines.find((p) => p !== drafter && p !== judge) ?? judge;
   return { drafter, judge, punchUp: judge, coverage };
 }
@@ -537,12 +548,20 @@ Return ONLY: {"rewrittenScript":"<the complete revised screenplay>","changeSumma
     const flagged = (coverageResult.flagged ?? []).filter((f) => f.slugline && f.note).slice(0, 4);
     if (flagged.length) {
       tick(`revising ${flagged.length} flagged scene${flagged.length === 1 ? "" : "s"}`);
-      const rawFix = await complete(seats.drafter, `You are the episode's writer addressing table-read notes. Revise ONLY the flagged scenes — every other scene stays EXACTLY as written. Return ONLY valid JSON.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
-        `${memoBlock}\n\nNOTES FROM THE TABLE READ:\n${flagged.map((f, i) => `${i + 1}. ${f.slugline}: ${f.note}`).join("\n")}\n\nTHE DRAFT:\n---\n${script}\n---\n
-Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged scenes revised>","changeSummary":["scene: what changed"],"warnings":[]}`,
-        { temperature: 0.6, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS });
-      const parsed = parseRewriteResponse(rawFix, castNames);
-      if (parsed.rewrittenScript.trim().length >= script.length * 0.5) {
+      const fixSystem = `You are the episode's writer addressing table-read notes. Revise ONLY the flagged scenes — every other scene stays EXACTLY as written. Return ONLY valid JSON.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`;
+      const fixUser = `${memoBlock}\n\nNOTES FROM THE TABLE READ:\n${flagged.map((f, i) => `${i + 1}. ${f.slugline}: ${f.note}`).join("\n")}\n\nTHE DRAFT:\n---\n${script}\n---\n
+Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged scenes revised>","changeSummary":["scene: what changed"],"warnings":[]}`;
+      // The drafter can fumble the strict-JSON revision (observed live with SAO) —
+      // retry once on the judge seat before giving up on the notes.
+      let parsed: { rewrittenScript: string } | null = null;
+      try {
+        parsed = parseRewriteResponse(await complete(seats.drafter, fixSystem, fixUser, { temperature: 0.6, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS }), castNames);
+      } catch (e) {
+        if (seats.judge === seats.drafter) throw e;
+        warnings.push(`Table-read revision by ${textAiProviderLabel(seats.drafter)} failed (${e instanceof Error ? e.message.slice(0, 90) : "error"}); retrying with ${textAiProviderLabel(seats.judge)}.`);
+        parsed = parseRewriteResponse(await complete(seats.judge, fixSystem, fixUser, { temperature: 0.6, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS }), castNames);
+      }
+      if (parsed && parsed.rewrittenScript.trim().length >= script.length * 0.5) {
         script = parsed.rewrittenScript;
         changeSummary.push(`Table read: revised ${flagged.map((f) => f.slugline).join("; ")}.`);
       } else {
@@ -610,6 +629,24 @@ Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged 
     if (finalScore !== null && finalScore < startScore) {
       warnings.push(`The room's best draft scored ${finalScore} vs your draft's ${startScore} on ${input.frameworkName} — review before accepting.`);
     }
+  }
+
+  // Persist the room's final scoring as the project's stored card, keyed to the
+  // FINAL script — if the user Accepts, the next "Run Script Report Card" click
+  // cache-hits on it instead of paying for a redundant scoring. (Re-score still
+  // recomputes fresh; a rejected draft never matches the editor content, so the
+  // cache simply never fires for it.)
+  if (finalReport && input.projectId && !deps.scoreScript) {
+    try {
+      persistReportCard(input.projectId, {
+        script,
+        knowledgeBase: input.knowledgeBase,
+        styleProfile: input.styleProfile,
+        targetPages: input.targetPages,
+        seriesContext: input.seriesContext,
+        frameworks: framework ? [framework] : undefined,
+      }, finalReport);
+    } catch { /* persistence is best-effort */ }
   }
 
   const invented = findInventedCharacters(script, input.allowedCast ?? []);

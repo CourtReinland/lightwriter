@@ -927,7 +927,11 @@ export default function SuggestionPanel({
     if (!ensureRewriteReady() || !reportCard || !onShowRewriteDiff) return;
     const writer = getTextAiSettings().selectedProvider;
     const hasKey = (p: TextAiProvider) => Boolean(getTextAiProviderSettings(p).apiKey.trim());
-    let keyed = Array.from(new Set([writer, ...rewriteProviders])).filter(hasKey);
+    // Seat order sets the drafter: engines[0] drafts. Claude leads when keyed
+    // (the writer's standing directive: Sonnet drafts the first pass); otherwise
+    // the session writer drafts. Judge/coverage chairs are assigned inside the room.
+    const lead: TextAiProvider[] = hasKey("claude" as TextAiProvider) ? ["claude" as TextAiProvider] : [];
+    let keyed = Array.from(new Set([...lead, writer, ...rewriteProviders])).filter(hasKey);
     // A one-engine room defeats the point (the drafter judges and covers its own
     // work). Top the table up to 3 seats from EVERY keyed provider, so e.g. an
     // idle Grok/OpenAI key gets the judge or coverage chair automatically.
@@ -959,6 +963,7 @@ export default function SuggestionPanel({
         seriesContext,
         allowedCast,
         engines: keyed,
+        projectId: project.id,
       }, setShotPassProgress);
 
       // Every completed run leaves a trace — including ones we reject below.
