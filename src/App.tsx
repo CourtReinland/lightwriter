@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { type EditorView } from "@codemirror/view";
 import { setPendingDiff } from "./codemirror/inline-diff";
-import { computeInlineDiff, type RewriteDiffCandidate, type RewriteReRollHandler } from "./services/inlineDiffService";
+import { computeInlineDiff, type RewriteDiffCandidate, type RewriteReRollHandler, type RewriteKeepGoingHandler } from "./services/inlineDiffService";
 import { estimatePages } from "./frameworks";
 import RewriteDiffBar from "./components/Editor/RewriteDiffBar";
 import ArtisticBorder from "./components/Layout/ArtisticBorder";
@@ -386,12 +386,17 @@ export default function App() {
   // (deletions struck through, additions highlighted) with Accept/Reject/Cycle,
   // instead of a side pane. The doc stays UNMUTATED until Accept.
   const [pendingRewrite, setPendingRewrite] = useState<
-    { id: number; candidates: RewriteDiffCandidate[]; index: number; label: string; beforeScript: string; reRoll?: RewriteReRollHandler; reRollLabel?: string; reRollError?: string } | null
+    { id: number; candidates: RewriteDiffCandidate[]; index: number; label: string; beforeScript: string; reRoll?: RewriteReRollHandler; reRollLabel?: string; reRollError?: string; keepGoing?: RewriteKeepGoingHandler } | null
   >(null);
   const [barReRolling, setBarReRolling] = useState(false);
+  // Non-null while a "Keep going" loop runs — holds the live round/score status.
+  const [keepGoingStatus, setKeepGoingStatus] = useState<string | null>(null);
   const rewriteIdRef = useRef(0);
+  // Cancels the running keep-going loop (at its next step boundary) when the
+  // user clicks Stop, the preview is replaced, or the project/tab changes.
+  const keepGoingAbortRef = useRef<AbortController | null>(null);
 
-  const handleShowRewriteDiff = useCallback((candidates: RewriteDiffCandidate[], label: string, reRoll?: RewriteReRollHandler) => {
+  const handleShowRewriteDiff = useCallback((candidates: RewriteDiffCandidate[], label: string, reRoll?: RewriteReRollHandler, keepGoing?: RewriteKeepGoingHandler) => {
     const view = editorViewRef.current;
     const beforeScript = view ? view.state.doc.toString() : project.content;
     // Drop empty AND no-op candidates (afterScript identical to the current doc):
@@ -400,7 +405,9 @@ export default function App() {
     const usable = candidates.filter((c) => c.afterScript.trim() && c.afterScript.trim() !== beforeScript.trim());
     if (!usable.length) return;
     setBarReRolling(false);
-    setPendingRewrite({ id: ++rewriteIdRef.current, candidates: usable, index: 0, label, beforeScript, reRoll, reRollLabel: reRoll?.nextLabel });
+    keepGoingAbortRef.current?.abort(); // a replaced preview must not keep paying for its loop
+    setKeepGoingStatus(null);
+    setPendingRewrite({ id: ++rewriteIdRef.current, candidates: usable, index: 0, label, beforeScript, reRoll, reRollLabel: reRoll?.nextLabel, keepGoing });
   }, [project.content]);
 
   // Bar Re-roll: generate a fresh take with the NEXT installed engine — scoped to
@@ -431,12 +438,59 @@ export default function App() {
     }
   }, [pendingRewrite, barReRolling]);
 
+  // Bar Keep going: iterate the CURRENT take against its own fresh report card
+  // (rewrite → re-score → keep best) until the target score or a stall. The
+  // improved take is appended as a new candidate; the loop's live status shows
+  // on the bar. Never-worse: the handler returns nothing when no round won.
+  const handleBarKeepGoing = useCallback(async () => {
+    const pr = pendingRewrite;
+    if (!pr?.keepGoing || barReRolling || keepGoingStatus !== null) return;
+    const generationId = pr.id;
+    const take = pr.candidates[pr.index];
+    if (!take) return;
+    // EVERY state write below is gated on the generation id: the loop runs for
+    // minutes, and a preview replaced mid-flight must not have its bar hijacked
+    // (stale status locking the new bar) or unlocked (finally clearing status
+    // while a newer loop still runs).
+    const controller = new AbortController();
+    keepGoingAbortRef.current = controller;
+    setKeepGoingStatus("starting…");
+    try {
+      const { candidates, error } = await pr.keepGoing.run(take.afterScript, (status) => {
+        if (rewriteIdRef.current === generationId) setKeepGoingStatus(status);
+      }, controller.signal);
+      const usable = candidates.filter((c) => c.afterScript.trim() && c.afterScript.trim() !== pr.beforeScript.trim());
+      setPendingRewrite((prev) => {
+        if (!prev || prev.id !== generationId) return prev; // preview replaced/cleared while iterating
+        return usable.length
+          ? { ...prev, candidates: [...prev.candidates, ...usable], index: prev.candidates.length, reRollError: undefined }
+          : { ...prev, reRollError: error ?? "Keep going produced no better take." };
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Keep going failed.";
+      setPendingRewrite((prev) => (!prev || prev.id !== generationId ? prev : { ...prev, reRollError: message }));
+    } finally {
+      if (keepGoingAbortRef.current === controller) keepGoingAbortRef.current = null;
+      if (rewriteIdRef.current === generationId) setKeepGoingStatus(null);
+    }
+  }, [pendingRewrite, barReRolling, keepGoingStatus]);
+
+  // Stop button: the loop finishes its current step, then returns the best
+  // draft found so far (never worse than the take it started from).
+  const handleBarKeepGoingStop = useCallback(() => {
+    keepGoingAbortRef.current?.abort();
+    setKeepGoingStatus((s) => (s ? `${s} · stopping…` : s));
+  }, []);
+
   // A project switch or leaving the editor tab invalidates any live rewrite preview:
   // its candidates were built against the previous doc, so applying them later would
   // clobber the newly-loaded content (and pollute its version history). Drop it.
   useEffect(() => {
     if (!pendingRewrite) return;
     setPendingRewrite(null);
+    // A running keep-going loop belongs to the dropped preview: stop paying for it.
+    keepGoingAbortRef.current?.abort();
+    setKeepGoingStatus(null);
     try { editorViewRef.current?.dispatch({ effects: setPendingDiff.of(null) }); } catch { /* view may be gone */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, activeView]);
@@ -865,6 +919,10 @@ export default function App() {
                   reRolling={barReRolling}
                   nextEngine={pendingRewrite.reRollLabel}
                   error={pendingRewrite.reRollError}
+                  onKeepGoing={pendingRewrite.keepGoing ? handleBarKeepGoing : undefined}
+                  keepGoingTarget={pendingRewrite.keepGoing?.targetScore}
+                  keepGoingStatus={keepGoingStatus ?? undefined}
+                  onKeepGoingStop={handleBarKeepGoingStop}
                 />
               );
             })()}

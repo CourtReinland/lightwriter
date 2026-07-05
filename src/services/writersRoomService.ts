@@ -130,6 +130,8 @@ const VOICE_GATE_MAX_REVISIONS = 6;
 // in localStorage — "what did the room actually do" must never be unanswerable.
 
 export interface RoomLogEntry {
+  /** What produced this entry (absent on older entries = a room run). */
+  kind?: "room" | "keep-going";
   at: string;
   frameworkId: string;
   engines: string[];
@@ -148,7 +150,9 @@ export interface RoomLogEntry {
 }
 
 const ROOM_LOG_KEY = (projectId: string) => `lw-room-log-${projectId}`;
-const ROOM_LOG_MAX = 5;
+// Room runs AND keep-going runs share this log; sized so a few bar "Keep going"
+// clicks can't evict the room forensics the log exists to preserve.
+const ROOM_LOG_MAX = 10;
 
 export function saveRoomLog(projectId: string, entry: RoomLogEntry): void {
   if (typeof localStorage === "undefined" || !projectId) return;

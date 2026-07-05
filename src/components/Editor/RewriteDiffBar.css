@@ -60,3 +60,34 @@
 .rdb-btn.reroll { background: #2c3a52; border-color: #40557a; color: #dbe7ff; }
 .rdb-btn.reroll:hover { background: #354764; }
 .rdb-btn:disabled { opacity: 0.55; cursor: default; }
+
+.rdb-btn.keepgoing {
+  border-color: #4a5a3f;
+  color: #b5d99c;
+}
+
+.rdb-btn.keepgoing:hover:not(:disabled) {
+  background: #26301f;
+}
+
+.rdb-keepgoing-status {
+  color: #b5d99c;
+  font-size: 11px;
+  animation: rdb-keepgoing-pulse 1.4s infinite;
+}
+
+@keyframes rdb-keepgoing-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.rdb-btn.keepgoing-stop {
+  border-color: #6a4a3f;
+  color: #e0a893;
+}
+
+.rdb-keepgoing-status {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -61,6 +61,23 @@ export interface RewriteReRollHandler {
   run(selection: ReRollSelection | null): Promise<{ candidates: RewriteDiffCandidate[]; nextLabel: string; error?: string }>;
 }
 
+/**
+ * "Keep going" hook carried by a pending rewrite: iterates the CURRENT take
+ * against its own fresh report card (rewrite → re-score → keep best) until the
+ * target score, a stall, or the round cap. Returns the improved take as a new
+ * candidate to append — or no candidates with `error` when nothing beat it.
+ */
+export interface RewriteKeepGoingHandler {
+  /** The score the loop drives toward (shown on the bar button). */
+  targetScore: number;
+  run(
+    script: string,
+    onProgress: (status: string) => void,
+    /** Aborting stops after the current step; the best draft so far is still returned. */
+    signal?: AbortSignal,
+  ): Promise<{ candidates: RewriteDiffCandidate[]; summary?: string; error?: string }>;
+}
+
 export function computeInlineDiff(before: string, after: string): InlineDiff {
   if (before === after) return { deletions: [], insertions: [], empty: true };
 

@@ -26,6 +26,14 @@ interface RewriteDiffBarProps {
   nextEngine?: string;
   /** Last re-roll failure — shown on the bar (the side panel may be closed). */
   error?: string;
+  /** Iterate this take against its own report card until the target score (absent when no metric context). */
+  onKeepGoing?: () => void;
+  /** The score the keep-going loop drives toward (default 80). */
+  keepGoingTarget?: number;
+  /** Live loop status while keep-going runs (all actions disabled). */
+  keepGoingStatus?: string;
+  /** Stop the running loop after its current step (best draft so far is kept). */
+  onKeepGoingStop?: () => void;
 }
 
 // Floating bar shown while a pending rewrite is previewed as an inline diff in the
@@ -33,7 +41,8 @@ interface RewriteDiffBarProps {
 // "Compare next" cycles to the next take, and "Re-roll" generates a fresh take
 // with the next installed engine — re-rolling just the highlighted text, or the
 // whole draft when nothing is selected.
-export default function RewriteDiffBar({ label, index, total, score, pages, pagesDelta, targetPages, scenesAdded, castWarnings, onAccept, onReject, onCycle, onReRoll, reRolling, nextEngine, error }: RewriteDiffBarProps) {
+export default function RewriteDiffBar({ label, index, total, score, pages, pagesDelta, targetPages, scenesAdded, castWarnings, onAccept, onReject, onCycle, onReRoll, reRolling, nextEngine, error, onKeepGoing, keepGoingTarget, keepGoingStatus, onKeepGoingStop }: RewriteDiffBarProps) {
+  const busy = Boolean(reRolling) || Boolean(keepGoingStatus);
   return (
     <div className="rewrite-diff-bar">
       <div className="rdb-info">
@@ -56,26 +65,50 @@ export default function RewriteDiffBar({ label, index, total, score, pages, page
             ⚠ adds {castWarnings.slice(0, 2).join(", ")}{castWarnings.length > 2 ? "…" : ""}
           </span>
         )}
-        {error && !reRolling && (
+        {keepGoingStatus && (
+          <span className="rdb-keepgoing-status" title="Keep going is iterating this take — rewrite, re-score, keep the better draft">
+            ⟳ {keepGoingStatus}
+          </span>
+        )}
+        {error && !busy && (
           <span className="rdb-error" title={error}>✕ {error.length > 60 ? error.slice(0, 60) + "…" : error}</span>
         )}
       </div>
       <div className="rdb-actions">
+        {onKeepGoing && !keepGoingStatus && (
+          <button
+            className="rdb-btn keepgoing"
+            onClick={onKeepGoing}
+            disabled={busy}
+            title={`Iterate THIS take against its own fresh report card — rewrite, re-score, keep the better draft — until it scores ≥${keepGoingTarget ?? 80} or stalls. Engines rotate between rounds; you never get a worse take.`}
+          >
+            {`» Keep going${keepGoingTarget ? ` · ${keepGoingTarget}+` : ""}`}
+          </button>
+        )}
+        {keepGoingStatus && onKeepGoingStop && (
+          <button
+            className="rdb-btn keepgoing-stop"
+            onClick={onKeepGoingStop}
+            title="Stop after the current step — you keep the best draft found so far"
+          >
+            ■ Stop
+          </button>
+        )}
         {onReRoll && (
           <button
             className="rdb-btn reroll"
             onClick={onReRoll}
-            disabled={reRolling}
+            disabled={busy}
             title={`Re-roll the highlighted text (or the whole draft if nothing is selected) with ${nextEngine || "the next engine"}`}
           >
             {reRolling ? "Re-rolling…" : `↻ Re-roll${nextEngine ? ` · ${nextEngine}` : ""}`}
           </button>
         )}
         {total > 1 && (
-          <button className="rdb-btn" onClick={onCycle} disabled={reRolling} title="Show the next take">Compare next ›</button>
+          <button className="rdb-btn" onClick={onCycle} disabled={busy} title="Show the next take">Compare next ›</button>
         )}
-        <button className="rdb-btn reject" onClick={onReject} disabled={reRolling} title="Discard — nothing is changed">Reject</button>
-        <button className="rdb-btn accept" onClick={onAccept} disabled={reRolling} title="Apply this rewrite to the editor">Accept</button>
+        <button className="rdb-btn reject" onClick={onReject} disabled={busy} title="Discard — nothing is changed">Reject</button>
+        <button className="rdb-btn accept" onClick={onAccept} disabled={busy} title="Apply this rewrite to the editor">Accept</button>
       </div>
     </div>
   );

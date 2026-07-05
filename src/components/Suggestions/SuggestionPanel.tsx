@@ -8,8 +8,9 @@ import { compiledVoicePackFor } from "../../services/voicePackService";
 import { VoiceCorpusStore } from "../../services/voiceCorpusStore";
 import { journalsPromptBlock } from "../../services/characterJournalStore";
 import { dossiersPromptBlock } from "../../services/greenRoomService";
+import { runKeepGoing, KEEP_GOING_TARGET } from "../../services/keepGoingService";
 import { TextAiService } from "../../services/textAiService";
-import type { RewriteDiffCandidate, RewriteReRollHandler, ReRollSelection } from "../../services/inlineDiffService";
+import type { RewriteDiffCandidate, RewriteReRollHandler, RewriteKeepGoingHandler, ReRollSelection } from "../../services/inlineDiffService";
 import { collectAllowedCast, findInventedCharacters } from "../../services/castLockService";
 import { cleanupGeneratedScreenplay } from "../../services/generatedScriptCleanup";
 import type { EditorView } from "@codemirror/view";
@@ -70,7 +71,7 @@ interface SuggestionPanelProps {
   seriesContext?: string;
   onOpenToolReview: (review: { label: string; beforeScript: string; afterScript: string }) => void;
   /** Show a pending rewrite as an inline diff overlay in the editor (best-first candidates). */
-  onShowRewriteDiff?: (candidates: RewriteDiffCandidate[], label: string, reRoll?: RewriteReRollHandler) => void;
+  onShowRewriteDiff?: (candidates: RewriteDiffCandidate[], label: string, reRoll?: RewriteReRollHandler, keepGoing?: RewriteKeepGoingHandler) => void;
   /** The shared editor view, for reading the live selection (scoped re-roll). */
   editorViewRef?: React.MutableRefObject<EditorView | undefined>;
 }
@@ -286,6 +287,80 @@ export default function SuggestionPanel({
       },
     };
   }, [editorViewRef, fullScript, cursorLine, cursorBeats, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast]);
+
+  // "Keep going" hook for the bar: iterate the CURRENT take against its own
+  // fresh report card until the target score or a stall (rewrite → re-score →
+  // keep the better draft; engines rotate; never delivers worse than the best).
+  const makeKeepGoingHandler = useCallback((cfg: {
+    metricId: string;
+    metricName: string;
+    /** Providers that produced the take — they iterate first, then the rest rotate in. */
+    usedProviders: TextAiProvider[];
+  }): RewriteKeepGoingHandler | undefined => {
+    const keyed = textAiProviderOptions().filter((p) => getTextAiProviderSettings(p).apiKey.trim());
+    if (!keyed.length) return undefined;
+    const engines = [
+      ...cfg.usedProviders.filter((p) => keyed.includes(p)),
+      ...keyed.filter((p) => !cfg.usedProviders.includes(p)),
+    ];
+    return {
+      targetScore: KEEP_GOING_TARGET,
+      run: async (script, onProgress, signal) => {
+        setError(null);
+        try {
+          const result = await runKeepGoing({
+            script,
+            metricId: cfg.metricId,
+            metricName: cfg.metricName,
+            targetPages,
+            knowledgeBase,
+            styleProfile,
+            seriesContext,
+            allowedCast,
+            engines,
+            projectId: project.id,
+            voicePack: compiledVoicePackFor(project.seriesId),
+            voicePrint: project.seriesId ? VoiceCorpusStore.getPrint(project.seriesId) : null,
+            // Craft metrics (style/character/pacing) still score within the
+            // project's active frameworks, never the unscoped 5-framework prompt.
+            craftScopeFrameworks: scoringFrameworks,
+            signal,
+          }, (p) => onProgress(`${p.label}${p.bestScore !== null ? ` · best ${p.bestScore}` : ""}`));
+
+          // The trajectory includes discarded rounds — always state what was kept.
+          const summary =
+            `Keep going: ${cfg.metricName} ${result.startScore} → ${result.finalScore} in ${result.rounds} round${result.rounds === 1 ? "" : "s"} (target ${KEEP_GOING_TARGET}${result.trajectory.length > 2 ? `; scores ${result.trajectory.join(" → ")}` : ""})` +
+            `${result.reachedTarget ? " — target hit." : result.stopped ? " — stopped by you." : result.improved ? "." : " — no round beat the take; kept it."}` +
+            (result.voiceScore !== null ? ` Voice: ${result.voiceScore}/100.` : "") +
+            (result.warnings.length ? ` ⚠ ${result.warnings[0]}` : "");
+          setLastMode(null); // status text must render as a banner, never an applyable suggestion
+          setSuggestion(summary); // panel banner (when open); the bar shows the new take
+          if (!result.improved) {
+            return {
+              candidates: [],
+              error: result.reachedTarget
+                ? `Already at target: this take scores ${result.startScore}/100 (target ${KEEP_GOING_TARGET}).`
+                : result.stopped
+                  ? `Stopped — no round had beaten ${result.startScore}/100 yet; kept this take.`
+                  : `No round beat ${result.startScore}/100 (${result.rounds} tried) — kept this take.`,
+            };
+          }
+          return {
+            candidates: annotateCast([{
+              afterScript: result.finalScript,
+              label: `Keep going · ${cfg.metricName}`,
+              score: result.finalScore,
+            }]),
+            summary,
+          };
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Keep going failed";
+          setError(message); // panel banner (when open)
+          return { candidates: [], error: message }; // bar display (always visible)
+        }
+      },
+    };
+  }, [targetPages, knowledgeBase, styleProfile, seriesContext, allowedCast, annotateCast, project.id, project.seriesId, scoringFrameworks]);
   // Story Generator (direct single-call generation from the WRITER model)
   const [genPrompt, setGenPrompt] = useState("");
   const [genAmount, setGenAmount] = useState(23);
@@ -917,7 +992,7 @@ export default function SuggestionPanel({
       const annotated = annotateCast(candidates);
       const shown = annotated[0];
       const flaggedCount = annotated.filter((c) => c.castWarnings?.length).length;
-      onShowRewriteDiff(annotated, `${metricName} rewrite`, reRoll);
+      onShowRewriteDiff(annotated, `${metricName} rewrite`, reRoll, makeKeepGoingHandler({ metricId, metricName, usedProviders: providers }));
       setSuggestion(
         `Rewrote with ${okCount} engine${okCount === 1 ? "" : "s"}. Showing: ${shown.label}${shown.score !== null ? ` (${metricName} ${start} → ${shown.score})` : ""}.${flaggedCount ? ` ${flaggedCount} take${flaggedCount === 1 ? " was" : "s were"} flagged for invented characters and demoted.` : ""} Review the inline diff, then Accept, Reject, Compare next, or Re-roll.`,
       );
@@ -929,7 +1004,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, scoringFrameworks, allowedCast, annotateCast, makeReRollHandler]);
+  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, scoringFrameworks, allowedCast, annotateCast, makeReRollHandler, makeKeepGoingHandler]);
 
   // The Writers' Room: the full multi-stage development pass (showrunner memo →
   // engine pitches → judged board iterated at OUTLINE level → one-voice scene-by-
@@ -1021,7 +1096,7 @@ export default function SuggestionPanel({
         label: `Writers' Room · ${metricName}`, // the bar shows the score chip separately
         score: result.finalScore,
       }]);
-      onShowRewriteDiff(candidates, `Writers' Room — ${metricName}`, reRoll);
+      onShowRewriteDiff(candidates, `Writers' Room — ${metricName}`, reRoll, makeKeepGoingHandler({ metricId, metricName, usedProviders: keyed }));
       saveRoomLog(project.id, roomLogBase);
       const warnLine = result.warnings.length
         ? ` ⚠ ${result.warnings.slice(0, 2).join(" · ")}${result.warnings.length > 2 ? ` (+${result.warnings.length - 2} more in the room log)` : ""}`
@@ -1044,7 +1119,7 @@ export default function SuggestionPanel({
       setLoading(false);
       setShotPassProgress(null);
     }
-  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast, makeReRollHandler, project.id]);
+  }, [ensureRewriteReady, reportCard, onShowRewriteDiff, rewriteProviders, fullScript, knowledgeBase, styleProfile, targetPages, seriesContext, allowedCast, annotateCast, makeReRollHandler, makeKeepGoingHandler, project.id, project.seriesId]);
 
   const handleReScoreRewrite = useCallback(async () => {
     if (!rewriteReview) return;
