@@ -207,3 +207,74 @@
   resize: vertical;
   margin: 4px 0 8px;
 }
+
+/* Voice pack */
+
+.voice-pack-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px dashed #333;
+  padding-top: 10px;
+}
+
+.voice-policy {
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.5;
+  margin: 0;
+  border-left: 2px solid #3a3a3a;
+  padding-left: 8px;
+}
+
+.voice-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.voice-rules li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10.5px;
+  color: #bbb;
+  line-height: 1.4;
+}
+
+.voice-rules li.off {
+  opacity: 0.45;
+}
+
+.voice-rules label {
+  flex: 1;
+  cursor: pointer;
+}
+
+.voice-rules input[type="checkbox"] {
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.voice-rule-kind {
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.voice-rule-kind.never {
+  color: #e08585;
+  border: 1px solid #5a3535;
+}
+
+.voice-rule-kind.always {
+  color: #9fd089;
+  border: 1px solid #3a4a35;
+}

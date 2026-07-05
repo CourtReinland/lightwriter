@@ -7,6 +7,7 @@ import { extractScriptScenes } from "./scriptStructure";
 import { cleanupGeneratedScreenplay } from "./generatedScriptCleanup";
 import { castLockBlock, findInventedCharacters } from "./castLockService";
 import { fixBriefFor } from "./storyDoctorService";
+import { compareToVoicePrint, deviationsToNotes, type VoicePrint } from "./voiceMetricsService";
 import {
   FOUNTAIN_FORMAT_RULES,
   parseRewriteResponse,
@@ -71,6 +72,8 @@ export interface WritersRoomResult {
   finalReport: ScriptReportCard | null;
   /** Estimated page count of the delivered draft (vs input.targetPages). */
   finalPages: number;
+  /** Final draft's voice-match score against the author's print (when a print was provided). */
+  voiceScore: number | null;
   changeSummary: string[];
   warnings: string[];
   seats: { drafter: string; judge: string; punchUp: string; coverage: string };
@@ -92,6 +95,12 @@ export interface WritersRoomInput {
    *  accepted draft's next "Run Script Report Card" cache-hits instead of paying
    *  for a redundant scoring. */
   projectId?: string;
+  /** Compiled AUTHOR VOICE PACK block (policy + rules + rhythm targets + contrast). */
+  voicePack?: string;
+  /** Measured voice print — enables the per-scene voice gate. */
+  voicePrint?: VoicePrint | null;
+  /** Compiled CHARACTER THOUGHT JOURNALS block for this episode. */
+  journalsBlock?: string;
 }
 
 type SeatCompletion = (provider: TextAiProvider, system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
@@ -108,6 +117,11 @@ export interface WritersRoomDeps {
 const OUTLINE_TARGET = 85;
 const OUTLINE_MAX_ITERATIONS = 3;
 const STAGE_TIMEOUT_MS = 240_000;
+// Voice gate: calibration on the author's real corpus put held-out author
+// scripts at 86-99 and a competent-generic scene at 30. Scenes measure noisier
+// than full scripts, so the gate only fires on clear misses.
+const VOICE_GATE_MIN = 62;
+const VOICE_GATE_MAX_REVISIONS = 6;
 
 // ── Room run log ─────────────────────────────────────────────────────────────
 // Every run (including failures and rejected results) leaves a reviewable trace
@@ -125,6 +139,7 @@ export interface RoomLogEntry {
   targetPages?: number;
   memoTheme?: string;
   board?: { beat: string; slugline: string; source: string; pages: number }[];
+  voiceScore?: number | null;
   changeSummary?: string[];
   warnings?: string[];
   error?: string;
@@ -299,6 +314,8 @@ export async function runWritersRoom(
   const kbText = input.knowledgeBase ? KnowledgeBaseService.serializeForPrompt(input.knowledgeBase, 3000) : "";
   const castBlock = castLockBlock(input.allowedCast);
   const seriesBlock = input.seriesContext?.trim() ? `\n${input.seriesContext.trim()}\n` : "";
+  const voiceBlock = input.voicePack?.trim() ? `\n${input.voicePack.trim()}\n` : "";
+  const journalsText = input.journalsBlock?.trim() ? `\n${input.journalsBlock.trim()}\n` : "";
   const warnings: string[] = [];
   const changeSummary: string[] = [];
 
@@ -451,6 +468,7 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
   let draftAttempts = 0;
   let draftSuccesses = 0;
   let firstDraftError = "";
+  let voiceRevisions = 0;
   for (let i = 0; i < board.length; i++) {
     const card = board[i];
     const key = slugKey(card.slugline);
@@ -470,7 +488,7 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
     const soFar = drafted.join("\n\n").slice(-1400);
     draftAttempts++;
     const sceneSystem = `You are the episode's writer, drafting ONE scene from the approved board. Write in proper Fountain. Dramatize — real choices, real conflict, subtext over statement. Never re-introduce established characters, never recap. Write the FULL ~${card.pages}-page scene — a thin sketch fails the board.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`;
-    const sceneUser = `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
+    const sceneUser = `${memoBlock}\n${voiceBlock}${journalsText}${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
 THE CARD (scene ${i + 1} of ${board.length}, beat: ${card.beat}, ~${card.pages} page${card.pages === 1 ? "" : "s"}):
 Slugline: ${card.slugline}
 Intent: ${card.intent}
@@ -494,6 +512,30 @@ Write ONLY this scene's Fountain text, starting with the slugline.`;
       if (!scene && seats.judge !== seats.drafter) {
         warnings.push(`Scene ${i + 1} (${card.slugline}) came back empty; retrying on ${textAiProviderLabel(seats.judge)}.`);
         scene = await draftOn(seats.judge);
+      }
+      // Voice gate: a scene that measures far from the author's print gets ONE
+      // targeted revision — same beats, same length, fix only the measured
+      // deviations. Capped per run; the revision must actually score better.
+      if (scene && input.voicePrint && voiceRevisions < VOICE_GATE_MAX_REVISIONS) {
+        const gate = compareToVoicePrint(scene, input.voicePrint);
+        if (!gate.lowConfidence && gate.score < VOICE_GATE_MIN) {
+          voiceRevisions++;
+          tick(`voice gate: scene ${i + 1} measures ${gate.score}/100 — revising for voice`);
+          try {
+            const revised = cleanupGeneratedScreenplay(
+              await complete(
+                seats.drafter,
+                `You are the same writer revising your own scene ONLY for authorial voice. Keep every story beat, every character, and the scene's length; change rhythm, word choice, and texture to hit the author's measured targets.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
+                `${voiceBlock}VOICE NOTES — measured deviations to fix:\n${deviationsToNotes(gate).map((n, k) => `${k + 1}. ${n}`).join("\n")}\n\nTHE SCENE:\n---\n${scene}\n---\nReturn ONLY the revised scene's Fountain text, starting with the slugline.`,
+                sceneOpts,
+              ),
+              castNames,
+            ).trim();
+            if (revised && compareToVoicePrint(revised, input.voicePrint).score > gate.score) scene = revised;
+          } catch {
+            // Gate revision is best-effort; the drafted scene stands.
+          }
+        }
       }
       drafted.push(scene || (original || `${card.slugline}\n`));
       if (scene) draftSuccesses++;
@@ -524,8 +566,8 @@ Write ONLY this scene's Fountain text, starting with the slugline.`;
   // doubled the runtime for marginal gain.)
   tick(`punch-up (${textAiProviderLabel(seats.punchUp)})`);
   try {
-    const raw = await complete(seats.punchUp, `You are the room's punch-up specialist doing one scoped pass. Sharpen the dialogue (distinct voices, subtext over statement, cut on-the-nose lines), fix continuity against the knowledge base and series arcs, and remove repeated beats and restated information. Do NOT restructure — keep every slugline and the scene order. Do NOT add new scenes or characters. Keep total length within ±10%. Return ONLY valid JSON. Preserve Fountain formatting.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
-      `${memoBlock}\n${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${seriesBlock}
+    const raw = await complete(seats.punchUp, `You are the room's punch-up specialist doing one scoped pass. Sharpen the dialogue (distinct voices, subtext over statement, cut on-the-nose lines), fix continuity against the knowledge base and series arcs, and remove repeated beats and restated information. ${voiceBlock ? "The draft is written in a specific AUTHOR VOICE (pack below) — your sharpening must deepen that voice, never smooth it toward neutral professional style. " : ""}Do NOT restructure — keep every slugline and the scene order. Do NOT add new scenes or characters. Keep total length within ±10%. Return ONLY valid JSON. Preserve Fountain formatting.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`,
+      `${memoBlock}\n${voiceBlock}${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${kbText ? `\nSTORY KNOWLEDGE BASE:\n${kbText}\n` : ""}${seriesBlock}
 THE DRAFT:\n---\n${script}\n---\n
 Return ONLY: {"rewrittenScript":"<the complete revised screenplay>","changeSummary":["what you changed"],"warnings":[]}`,
       { temperature: 0.5, maxTokens: 16000, timeoutMs: STAGE_TIMEOUT_MS });
@@ -714,6 +756,20 @@ Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged 
   const invented = findInventedCharacters(script, input.allowedCast ?? []);
   if (invented.length) warnings.push(`Cast lock: the room still introduced ${invented.join(", ")}.`);
 
+  // Final voice measurement (deterministic, free) — how far the delivered draft
+  // sits from the author's measured print.
+  let voiceScore: number | null = null;
+  if (input.voicePrint) {
+    const finalVoice = compareToVoicePrint(script, input.voicePrint);
+    voiceScore = finalVoice.score;
+    changeSummary.push(
+      `Voice: ${finalVoice.score}/100 against the author's print${voiceRevisions ? ` (${voiceRevisions} scene${voiceRevisions === 1 ? "" : "s"} revised at the voice gate)` : ""}.`,
+    );
+    if (!finalVoice.lowConfidence && finalVoice.score < VOICE_GATE_MIN) {
+      warnings.push(`The delivered draft measures ${finalVoice.score}/100 on voice — top gap: ${finalVoice.deviations[0]?.note || "see the Voice card"}.`);
+    }
+  }
+
   onProgress?.({ completed: Math.max(step, total), total: Math.max(step, total), label: "Room: wrapped" });
 
   return {
@@ -725,6 +781,7 @@ Return ONLY: {"rewrittenScript":"<the complete screenplay with ONLY the flagged 
     finalScore,
     finalReport,
     finalPages: estimatePages(script.split("\n").length),
+    voiceScore,
     changeSummary,
     warnings,
     seats: {

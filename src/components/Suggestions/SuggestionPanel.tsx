@@ -4,6 +4,9 @@ import { loadStoredReportCard, clearStoredReportCard } from "../../services/repo
 import { getSelectedTextAiProviderSettings, getTextAiProviderSettings, getTextAiSettings, textAiProviderLabel, textAiProviderOptions, type TextAiProvider, type TextAiProviderSettings } from "../../services/textAiSettingsService";
 import { runMultiProviderRewrite } from "../../services/multiProviderRewriteService";
 import { runWritersRoom, saveRoomLog } from "../../services/writersRoomService";
+import { compiledVoicePackFor } from "../../services/voicePackService";
+import { VoiceCorpusStore } from "../../services/voiceCorpusStore";
+import { journalsPromptBlock } from "../../services/characterJournalStore";
 import { TextAiService } from "../../services/textAiService";
 import type { RewriteDiffCandidate, RewriteReRollHandler, ReRollSelection } from "../../services/inlineDiffService";
 import { collectAllowedCast, findInventedCharacters } from "../../services/castLockService";
@@ -972,6 +975,12 @@ export default function SuggestionPanel({
         allowedCast,
         engines: keyed,
         projectId: project.id,
+        // Series-scoped author-voice layer: compiled pack (policy + rules +
+        // rhythm targets + contrast) for the writing seats, the measured print
+        // for the per-scene voice gate, and this episode's thought journals.
+        voicePack: compiledVoicePackFor(project.seriesId),
+        voicePrint: project.seriesId ? VoiceCorpusStore.getPrint(project.seriesId) : null,
+        journalsBlock: project.seriesId ? journalsPromptBlock(project.seriesId, project.id) : "",
       }, setShotPassProgress);
 
       // Every completed run leaves a trace — including ones we reject below.
@@ -985,6 +994,7 @@ export default function SuggestionPanel({
         outlineScores: result.outlineScores,
         finalPages: result.finalPages,
         targetPages,
+        voiceScore: result.voiceScore,
         memoTheme: result.memo.theme,
         board: result.board.map((c) => ({ beat: c.beat, slugline: c.slugline, source: c.source, pages: c.pages })),
         changeSummary: result.changeSummary,
@@ -1018,6 +1028,7 @@ export default function SuggestionPanel({
         `Writers' Room wrapped — ${result.seats.drafter} drafted, ${result.seats.judge} ran the board, ${result.seats.coverage} gave coverage. ` +
         `Board: ${result.board.length} scenes, outline ${result.outlineScores.join(" → ") || "unscored"}, ~${result.finalPages}/${targetPages}pp.` +
         (result.finalScore !== null ? ` ${metricName}: ${result.startScore} → ${result.finalScore}.` : "") +
+        (result.voiceScore !== null ? ` Voice: ${result.voiceScore}/100.` : "") +
         (result.memo.theme ? ` Theme: "${result.memo.theme}"` : "") +
         warnLine,
       );

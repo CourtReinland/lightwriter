@@ -5,6 +5,12 @@ import {
   voicePrintToPromptBlock,
   type VoiceMatchReport,
 } from "../../services/voiceMetricsService";
+import {
+  buildVoicePack,
+  compileVoicePack,
+  loadVoicePack,
+  saveVoicePack,
+} from "../../services/voicePackService";
 import "./Voice.css";
 
 interface VoicePanelProps {
@@ -24,11 +30,35 @@ export default function VoicePanel({ seriesId, onChange }: VoicePanelProps) {
 
   const scripts = useMemo(() => VoiceCorpusStore.listScripts(seriesId), [seriesId, version]);
   const print = useMemo(() => VoiceCorpusStore.getPrint(seriesId), [seriesId, version]);
+  const pack = useMemo(() => loadVoicePack(seriesId), [seriesId, version]);
   const [error, setError] = useState("");
   const [testerText, setTesterText] = useState("");
   const [report, setReport] = useState<VoiceMatchReport | null>(null);
   const [showPrint, setShowPrint] = useState(false);
+  const [showPack, setShowPack] = useState(false);
+  const [building, setBuilding] = useState("");
+  const [newRule, setNewRule] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const handleBuildPack = async () => {
+    setError("");
+    setBuilding("starting…");
+    try {
+      await buildVoicePack(seriesId, { onProgress: setBuilding });
+      bump();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBuilding("");
+    }
+  };
+
+  const mutatePack = (fn: (p: NonNullable<typeof pack>) => void) => {
+    if (!pack) return;
+    fn(pack);
+    saveVoicePack(pack);
+    bump();
+  };
 
   const handleImport = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -131,6 +161,73 @@ export default function VoicePanel({ seriesId, onChange }: VoicePanelProps) {
                 {showPrint ? "Hide full print" : "Show full print (as the AI sees it)"}
               </button>
               {showPrint && <pre className="voice-print-block">{voicePrintToPromptBlock(print)}</pre>}
+
+              <div className="voice-pack-section">
+                <div className="series-inline">
+                  <button className="series-btn" onClick={handleBuildPack} disabled={!!building}>
+                    {building ? `Building… ${building}` : pack ? "Rebuild voice pack" : "Build voice pack (uses your AI engine)"}
+                  </button>
+                  {pack && (
+                    <span className="voice-print-stamp">
+                      {pack.pairs.length} pair{pack.pairs.length === 1 ? "" : "s"} · {pack.rules.filter((r) => r.enabled).length} rules
+                    </span>
+                  )}
+                </div>
+                {pack && (
+                  <>
+                    {pack.policy && <p className="voice-policy">{pack.policy}</p>}
+                    <ul className="voice-rules">
+                      {pack.rules.map((rule) => (
+                        <li key={rule.id} className={rule.enabled ? "" : "off"}>
+                          <label title={rule.source === "user" ? "Your rule (survives rebuilds)" : "Harvested from the contrast pairs"}>
+                            <input
+                              type="checkbox"
+                              checked={rule.enabled}
+                              onChange={() => mutatePack((p) => {
+                                const r = p.rules.find((x) => x.id === rule.id);
+                                if (r) r.enabled = !r.enabled;
+                              })}
+                            />
+                            <span className={`voice-rule-kind ${rule.kind}`}>{rule.kind}</span> {rule.text}
+                          </label>
+                          <button
+                            className="voice-x"
+                            title="Delete rule"
+                            onClick={() => mutatePack((p) => {
+                              p.rules = p.rules.filter((x) => x.id !== rule.id);
+                            })}
+                          >
+                            ✕
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="series-inline">
+                      <input
+                        placeholder='Add your own rule, e.g. "never use the word suddenly"…'
+                        value={newRule}
+                        onChange={(e) => setNewRule(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newRule.trim()) {
+                            mutatePack((p) => p.rules.unshift({
+                              id: `vr_user_${Date.now().toString(36)}`,
+                              kind: /^always/i.test(newRule.trim()) ? "always" : "never",
+                              text: newRule.trim(),
+                              enabled: true,
+                              source: "user",
+                            }));
+                            setNewRule("");
+                          }
+                        }}
+                      />
+                    </div>
+                    <button className="voice-link" onClick={() => setShowPack((s) => !s)}>
+                      {showPack ? "Hide compiled pack" : "Show compiled pack (as the AI sees it)"}
+                    </button>
+                    {showPack && <pre className="voice-print-block">{compileVoicePack(pack, print)}</pre>}
+                  </>
+                )}
+              </div>
 
               <div className="voice-tester">
                 <textarea

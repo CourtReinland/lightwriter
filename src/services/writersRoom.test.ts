@@ -518,3 +518,132 @@ describe("field regressions: 6/20pp delivery", () => {
     expect(result.warnings.some((w) => w.includes("retrying on"))).toBe(true);
   });
 });
+
+describe("voice layer: pack injection + per-scene gate", () => {
+  // A chatty, short-line corpus — the print this room writes against.
+  const chatty = (slug: string) => `${slug}
+
+Mara paces. Short steps.
+
+MARA
+Can't you do something?!
+
+JONAS
+Something's... blocking it.
+
+MARA
+Ugh!? Again?!
+
+JONAS
+Yeah. Again.
+
+MARA
+Don't say that. Don't even say that.
+
+JONAS
+Okay. Not saying it.
+`;
+  const voiceCorpus = [
+    { title: "Ep A", text: chatty("INT. KITCHEN - DAY") },
+    { title: "Ep B", text: chatty("EXT. ROAD - DAY") },
+  ];
+
+  const PACK = "=== AUTHOR VOICE PACK (write as THIS author — not as a generic professional) ===\nPOLICY: Enter late.";
+  const JOURNALS = "=== CHARACTER THOUGHT JOURNALS (private interiority for THIS episode) ===\n--- MARA ---\nToday everything itched.";
+
+  const baseInput = {
+    script: SCRIPT,
+    frameworkId: "dan-harmon",
+    frameworkName: "Dan Harmon Story Circle",
+    targetPages: 10,
+    reportCard: report,
+    knowledgeBase: null,
+    styleProfile: null,
+    allowedCast: ["MARA", "JONAS"],
+    engines: ["grok", "claude"] as TextAiProvider[],
+  };
+
+  it("injects the pack + journals into scene drafts and punch-up, and reports a final voiceScore", async () => {
+    const { computeVoicePrint } = await import("./voiceMetricsService");
+    const print = computeVoicePrint(voiceCorpus);
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    const draftUsers: string[] = [];
+    let punchUser = "";
+    const result = await runWritersRoom(
+      { ...baseInput, voicePack: PACK, voicePrint: print, journalsBlock: JOURNALS },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          if (sys.toLowerCase().includes("drafting one scene")) draftUsers.push(user);
+          if (sys.toLowerCase().includes("punch-up specialist")) punchUser = user;
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    );
+    expect(draftUsers.length).toBeGreaterThan(0);
+    expect(draftUsers.every((u) => u.includes("AUTHOR VOICE PACK"))).toBe(true);
+    expect(draftUsers.every((u) => u.includes("CHARACTER THOUGHT JOURNALS"))).toBe(true);
+    expect(punchUser).toContain("AUTHOR VOICE PACK");
+    expect(result.voiceScore).not.toBeNull();
+    expect(result.changeSummary.some((c) => c.startsWith("Voice:"))).toBe(true);
+  });
+
+  it("gate: a scene measuring far from the print gets ONE voice revision and keeps the better version", async () => {
+    const { computeVoicePrint, compareToVoicePrint } = await import("./voiceMetricsService");
+    const print = computeVoicePrint(voiceCorpus);
+
+    // A verbose, formal scene: >=6 cues (confidence) with long sentences.
+    const longLine = "I have been giving this matter a great deal of careful consideration and I believe that we must proceed with the utmost caution before committing ourselves to anything at all.";
+    const verboseScene = (slug: string) =>
+      `${slug}\n\n${Array.from({ length: 6 }, (_, k) => `${k % 2 ? "JONAS" : "MARA"}\n${longLine}`).join("\n\n")}\n`;
+    // Sanity: the verbose scene must actually trip the gate.
+    expect(compareToVoicePrint(verboseScene("INT. HALL - NIGHT"), print).score).toBeLessThan(62);
+
+    const log: { provider: string; kind: string }[] = [];
+    const base = makeComplete(log);
+    let voiceReviseCalls = 0;
+    const result = await runWritersRoom(
+      { ...baseInput, voicePack: PACK, voicePrint: print },
+      undefined,
+      {
+        complete: async (p, sys, user) => {
+          const s = sys.toLowerCase();
+          if (s.includes("only for authorial voice")) {
+            voiceReviseCalls++;
+            const slug = user.match(/\n(INT\.|EXT\.)[^\n]*/)?.[0]?.trim() ?? "INT. HALL - NIGHT";
+            return chatty(slug) + "\nMARA\nRevised for voice, yeah?!\n";
+          }
+          if (s.includes("drafting one scene")) {
+            const slug = user.match(/Slugline: (.+)/)?.[1] ?? "INT. SOMEWHERE - DAY";
+            return verboseScene(slug);
+          }
+          if (s.includes("punch-up specialist")) {
+            // Pass the draft through unchanged so the gate's work stays visible.
+            const draft = user.match(/THE DRAFT:\n---\n([\s\S]*?)\n---/)?.[1] ?? "";
+            return JSON.stringify({ rewrittenScript: draft, changeSummary: [], warnings: [] });
+          }
+          return base(p, sys, user);
+        },
+        scoreOutline: async () => ({ score: 90, notes: [] }),
+        scoreScript: async () => report,
+      },
+    );
+    expect(voiceReviseCalls).toBeGreaterThan(0);
+    expect(result.finalScript).toContain("Revised for voice");
+    expect(result.changeSummary.some((c) => c.includes("revised at the voice gate"))).toBe(true);
+  });
+
+  it("no print → no gate calls, voiceScore stays null", async () => {
+    const log: { provider: string; kind: string }[] = [];
+    const result = await runWritersRoom(baseInput, undefined, {
+      complete: makeComplete(log),
+      scoreOutline: async () => ({ score: 90, notes: [] }),
+      scoreScript: async () => report,
+    });
+    expect(result.voiceScore).toBeNull();
+    expect(result.changeSummary.some((c) => c.startsWith("Voice:"))).toBe(false);
+  });
+});
