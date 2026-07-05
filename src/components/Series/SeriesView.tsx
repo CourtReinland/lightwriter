@@ -6,6 +6,8 @@ import {
 } from "../../services/worldStateService";
 import { StorageService, type Project } from "../../services/storageService";
 import SeriesGraph from "./SeriesGraph";
+import VoicePanel from "../Voice/VoicePanel";
+import JournalsCard from "../Voice/JournalsCard";
 import "./SeriesView.css";
 
 interface SeriesViewProps {
@@ -322,6 +324,12 @@ export default function SeriesView({ project, onAssignSeries, onChange }: Series
             </div>
           )}
         </section>
+
+        {/* Author voice (measured print + corpus) */}
+        <VoicePanel seriesId={seriesId} onChange={onChange} />
+
+        {/* Per-episode character thought journals */}
+        <JournalsCard seriesId={seriesId} currentProjectId={project.id} />
 
         {/* Cliffhangers */}
         <section className="series-card">
