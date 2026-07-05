@@ -5,8 +5,8 @@ interface EditorToolbarProps {
   pageCount: number;
   targetPages: number;
   onTargetPagesChange: (pages: number) => void;
-  activeView: "editor" | "preview" | "cards" | "analysis" | "series";
-  onViewChange: (view: "editor" | "preview" | "cards" | "analysis" | "series") => void;
+  activeView: "editor" | "preview" | "cards" | "analysis" | "series" | "greenroom";
+  onViewChange: (view: "editor" | "preview" | "cards" | "analysis" | "series" | "greenroom") => void;
   showSuggestions?: boolean;
   onToggleSuggestions?: () => void;
   showKB?: boolean;
@@ -85,6 +85,13 @@ export default function EditorToolbar({
             onClick={() => onViewChange("series")}
           >
             Series
+          </button>
+          <button
+            className={`view-tab ${activeView === "greenroom" ? "active" : ""}`}
+            onClick={() => onViewChange("greenroom")}
+            title="Talk to your characters — persistent agents grounded in their real lines"
+          >
+            Green Room
           </button>
         </div>
       </div>

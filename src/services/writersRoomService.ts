@@ -101,6 +101,8 @@ export interface WritersRoomInput {
   voicePrint?: VoicePrint | null;
   /** Compiled CHARACTER THOUGHT JOURNALS block for this episode. */
   journalsBlock?: string;
+  /** Compiled CHARACTER DOSSIERS block (want/secret/self-lie — played as subtext). */
+  dossiersBlock?: string;
 }
 
 type SeatCompletion = (provider: TextAiProvider, system: string, user: string, options?: TextCompleteOptions) => Promise<string>;
@@ -316,6 +318,7 @@ export async function runWritersRoom(
   const seriesBlock = input.seriesContext?.trim() ? `\n${input.seriesContext.trim()}\n` : "";
   const voiceBlock = input.voicePack?.trim() ? `\n${input.voicePack.trim()}\n` : "";
   const journalsText = input.journalsBlock?.trim() ? `\n${input.journalsBlock.trim()}\n` : "";
+  const dossiersText = input.dossiersBlock?.trim() ? `\n${input.dossiersBlock.trim()}\n` : "";
   const warnings: string[] = [];
   const changeSummary: string[] = [];
 
@@ -488,7 +491,7 @@ Return ONLY: {"cards":[{"beat":"<beat name>","slugline":"INT./EXT. ...","source"
     const soFar = drafted.join("\n\n").slice(-1400);
     draftAttempts++;
     const sceneSystem = `You are the episode's writer, drafting ONE scene from the approved board. Write in proper Fountain. Dramatize — real choices, real conflict, subtext over statement. Never re-introduce established characters, never recap. Write the FULL ~${card.pages}-page scene — a thin sketch fails the board.\n\n${FOUNTAIN_FORMAT_RULES}${castBlock}`;
-    const sceneUser = `${memoBlock}\n${voiceBlock}${journalsText}${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
+    const sceneUser = `${memoBlock}\n${voiceBlock}${dossiersText}${journalsText}${styleText ? `\nSTYLE CONTRACT:\n${styleText}\n` : ""}${seriesBlock}
 THE CARD (scene ${i + 1} of ${board.length}, beat: ${card.beat}, ~${card.pages} page${card.pages === 1 ? "" : "s"}):
 Slugline: ${card.slugline}
 Intent: ${card.intent}

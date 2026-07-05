@@ -7,6 +7,7 @@ import { runWritersRoom, saveRoomLog } from "../../services/writersRoomService";
 import { compiledVoicePackFor } from "../../services/voicePackService";
 import { VoiceCorpusStore } from "../../services/voiceCorpusStore";
 import { journalsPromptBlock } from "../../services/characterJournalStore";
+import { dossiersPromptBlock } from "../../services/greenRoomService";
 import { TextAiService } from "../../services/textAiService";
 import type { RewriteDiffCandidate, RewriteReRollHandler, ReRollSelection } from "../../services/inlineDiffService";
 import { collectAllowedCast, findInventedCharacters } from "../../services/castLockService";
@@ -981,6 +982,7 @@ export default function SuggestionPanel({
         voicePack: compiledVoicePackFor(project.seriesId),
         voicePrint: project.seriesId ? VoiceCorpusStore.getPrint(project.seriesId) : null,
         journalsBlock: project.seriesId ? journalsPromptBlock(project.seriesId, project.id) : "",
+        dossiersBlock: dossiersPromptBlock(project.seriesId),
       }, setShotPassProgress);
 
       // Every completed run leaves a trace — including ones we reject below.
