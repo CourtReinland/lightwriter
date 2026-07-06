@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   WorldStateService,
   parseAliases,
@@ -63,6 +63,13 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
   const records: (WorldLocation | WorldCharacter)[] = isScene ? scenes : characters;
 
   const [draft, setDraft] = useState<RecordDraft | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  // The editor renders inline under the record being edited (or at the bottom
+  // for a new one). With a full cast that spot can still be below the fold, so
+  // pull it into view whenever it opens for a different record.
+  useEffect(() => {
+    if (draft) editorRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [draft?.id, draft ? !draft.id : false]);
 
   const aliasLabel = isScene
     ? "Aliases — scene-heading words, comma-separated (KITCHEN, FAMILY KITCHEN)"
@@ -155,6 +162,75 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
     refresh();
   };
 
+  // The add/edit form. Rendered INLINE directly under the record being edited
+  // (so clicking a record near the top of a long cast doesn't open the editor
+  // far below the fold), or at the bottom for a brand-new record.
+  const renderEditor = () =>
+    draft ? (
+      <div ref={editorRef} className="series-rec-editor">
+        <div className="kb-field-label">{draft.id ? `EDIT ${NounCap.toUpperCase()}` : `NEW ${NounCap.toUpperCase()}`}</div>
+        <input
+          className="kb-input-sm"
+          placeholder={isScene ? "Name (e.g. Maddox Family Kitchen)" : "Name (e.g. Aiden)"}
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+        />
+        <input
+          className="kb-input-sm"
+          placeholder={aliasLabel}
+          value={draft.aliases}
+          onChange={(e) => setDraft({ ...draft, aliases: e.target.value })}
+        />
+        {isScene && (
+          <select
+            className="kb-input-sm"
+            value={draft.category}
+            onChange={(e) => setDraft({ ...draft, category: e.target.value as WorldLocationCategory })}
+          >
+            <option value="interior">Interior</option>
+            <option value="exterior">Exterior</option>
+            <option value="other">Other</option>
+          </select>
+        )}
+        <textarea
+          className="kb-textarea-sm"
+          rows={3}
+          placeholder={isScene ? "Visual description (used for image generation & continuity)" : "Appearance / who they are (used for portrait generation & continuity)"}
+          value={draft.description}
+          onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+        />
+        {!isScene && (
+          <>
+            <input
+              className="kb-input-sm"
+              placeholder="Traits — comma-separated (brave, impulsive)"
+              value={draft.traits}
+              onChange={(e) => setDraft({ ...draft, traits: e.target.value })}
+            />
+            <textarea
+              className="kb-textarea-sm"
+              rows={2}
+              placeholder="Voice notes (speech patterns, vocabulary)"
+              value={draft.voiceNotes}
+              onChange={(e) => setDraft({ ...draft, voiceNotes: e.target.value })}
+            />
+          </>
+        )}
+        <SeriesImageField
+          scopeId={seriesId}
+          kind={isScene ? "scene_set" : "character"}
+          name={draft.name}
+          description={draft.description}
+          imageDataUrl={draft.referenceImageDataUrl}
+          onChange={handleImageChange}
+        />
+        <div className="series-rec-btn-row">
+          <button className="kb-action-btn primary" onClick={handleSave} disabled={!draft.name.trim()}>Save</button>
+          <button className="kb-action-btn" onClick={() => setDraft(null)}>Cancel</button>
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="series-records">
       <div className="series-records-head">
@@ -172,93 +248,35 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
         const portrait = !isScene;
         const editTitle = `Edit ${rec.name} — add or change image`;
         return (
-          <div key={rec.id} className="kb-asset-entry">
-            {rec.referenceImageDataUrl ? (
-              <img className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"}`} src={rec.referenceImageDataUrl} alt={rec.name} title={editTitle} onClick={() => startEdit(rec)} />
-            ) : (
-              <div className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => startEdit(rec)}>
-                + add image
-              </div>
-            )}
-            <div className="kb-asset-body">
-              <div className="kb-entry-name series-rec-clickable" title={editTitle} onClick={() => startEdit(rec)}>{rec.name} <span className="series-rec-badge">series</span></div>
-              <div className="kb-entry-preview">{rec.aliases.join(", ") || "—"}</div>
-              {rec.description && (
-                <div className="kb-entry-preview">{rec.description.slice(0, 120)}{rec.description.length > 120 ? "…" : ""}</div>
+          <Fragment key={rec.id}>
+            <div className="kb-asset-entry">
+              {rec.referenceImageDataUrl ? (
+                <img className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"}`} src={rec.referenceImageDataUrl} alt={rec.name} title={editTitle} onClick={() => startEdit(rec)} />
+              ) : (
+                <div className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => startEdit(rec)}>
+                  + add image
+                </div>
               )}
-              <div className="kb-entry-actions">
-                <button onClick={() => startEdit(rec)}>Edit</button>
-                <button onClick={() => handleDelete(rec)}>Del</button>
+              <div className="kb-asset-body">
+                <div className="kb-entry-name series-rec-clickable" title={editTitle} onClick={() => startEdit(rec)}>{rec.name} <span className="series-rec-badge">series</span></div>
+                <div className="kb-entry-preview">{rec.aliases.join(", ") || "—"}</div>
+                {rec.description && (
+                  <div className="kb-entry-preview">{rec.description.slice(0, 120)}{rec.description.length > 120 ? "…" : ""}</div>
+                )}
+                <div className="kb-entry-actions">
+                  <button onClick={() => startEdit(rec)}>Edit</button>
+                  <button onClick={() => handleDelete(rec)}>Del</button>
+                </div>
               </div>
             </div>
-          </div>
+            {/* Editor opens right here, under the record being edited. */}
+            {draft?.id === rec.id && renderEditor()}
+          </Fragment>
         );
       })}
 
-      {draft && (
-        <div className="series-rec-editor">
-          <div className="kb-field-label">{draft.id ? `EDIT ${NounCap.toUpperCase()}` : `NEW ${NounCap.toUpperCase()}`}</div>
-          <input
-            className="kb-input-sm"
-            placeholder={isScene ? "Name (e.g. Maddox Family Kitchen)" : "Name (e.g. Aiden)"}
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-          <input
-            className="kb-input-sm"
-            placeholder={aliasLabel}
-            value={draft.aliases}
-            onChange={(e) => setDraft({ ...draft, aliases: e.target.value })}
-          />
-          {isScene && (
-            <select
-              className="kb-input-sm"
-              value={draft.category}
-              onChange={(e) => setDraft({ ...draft, category: e.target.value as WorldLocationCategory })}
-            >
-              <option value="interior">Interior</option>
-              <option value="exterior">Exterior</option>
-              <option value="other">Other</option>
-            </select>
-          )}
-          <textarea
-            className="kb-textarea-sm"
-            rows={3}
-            placeholder={isScene ? "Visual description (used for image generation & continuity)" : "Appearance / who they are (used for portrait generation & continuity)"}
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-          />
-          {!isScene && (
-            <>
-              <input
-                className="kb-input-sm"
-                placeholder="Traits — comma-separated (brave, impulsive)"
-                value={draft.traits}
-                onChange={(e) => setDraft({ ...draft, traits: e.target.value })}
-              />
-              <textarea
-                className="kb-textarea-sm"
-                rows={2}
-                placeholder="Voice notes (speech patterns, vocabulary)"
-                value={draft.voiceNotes}
-                onChange={(e) => setDraft({ ...draft, voiceNotes: e.target.value })}
-              />
-            </>
-          )}
-          <SeriesImageField
-            scopeId={seriesId}
-            kind={isScene ? "scene_set" : "character"}
-            name={draft.name}
-            description={draft.description}
-            imageDataUrl={draft.referenceImageDataUrl}
-            onChange={handleImageChange}
-          />
-          <div className="series-rec-btn-row">
-            <button className="kb-action-btn primary" onClick={handleSave} disabled={!draft.name.trim()}>Save</button>
-            <button className="kb-action-btn" onClick={() => setDraft(null)}>Cancel</button>
-          </div>
-        </div>
-      )}
+      {/* A brand-new record's editor renders at the bottom of the list. */}
+      {draft && !draft.id && renderEditor()}
     </div>
   );
 }
