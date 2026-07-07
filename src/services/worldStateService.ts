@@ -3,6 +3,8 @@
 // is the same kitchen, with the same reference image and ScriptToScreen id, in
 // script 2. A Project opts into a Series via Project.seriesId.
 
+import { persistGeneratedImageFile } from "./imageAssetStorageService";
+
 export interface Series {
   id: string;
   name: string;
@@ -92,6 +94,7 @@ const CHARACTERS_KEY = "lw-world-characters";
 const BINDINGS_PREFIX = "lw-scene-locations-";
 const ARCS_KEY = "lw-series-arcs";
 const CLIFFHANGERS_KEY = "lw-series-cliffhangers";
+const MIGRATION_KEY = "lw-world-images-migrated-v1";
 
 /** Per-script map: scene index (as string) -> world location id. */
 export type SceneLocationBindings = Record<string, string>;
@@ -297,12 +300,34 @@ function read<T>(key: string): T[] {
   }
 }
 
-function write<T>(key: string, value: T[]): void {
-  if (typeof localStorage === "undefined") return;
+// Set when a write() hits a storage quota error, so the UI can surface it
+// instead of silently losing the write. Cleared via clearStorageQuotaError().
+let storageQuotaError = false;
+
+function isQuotaError(err: unknown): boolean {
+  const e = err as { name?: string; code?: number } | null;
+  return (
+    !!e &&
+    (e.name === "QuotaExceededError" || e.code === 22 || /quota/i.test(String(err)))
+  );
+}
+
+/**
+ * Best-effort persist. Returns true on success, false on any failure (data is
+ * NOT thrown away silently — the boolean lets callers react). A quota failure
+ * additionally raises the module quota flag so the app can warn the user.
+ */
+function write<T>(key: string, value: T[]): boolean {
+  if (typeof localStorage === "undefined") return false;
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* quota — best effort */
+    return true;
+  } catch (err) {
+    if (isQuotaError(err)) {
+      storageQuotaError = true;
+      console.warn(`WorldState: localStorage quota exceeded writing "${key}"; write dropped.`, err);
+    }
+    return false;
   }
 }
 
@@ -612,5 +637,104 @@ export const WorldStateService = {
       CLIFFHANGERS_KEY,
       read<SeriesCliffhanger>(CLIFFHANGERS_KEY).filter((c) => !(c.seriesId === seriesId && c.fromEpisode === fromEpisode)),
     );
+  },
+
+  // Storage quota ----------------------------------------------------------
+  /** True if a write() has hit the localStorage quota since the last clear. */
+  hasStorageQuotaError(): boolean {
+    return storageQuotaError;
+  },
+
+  clearStorageQuotaError(): void {
+    storageQuotaError = false;
+  },
+
+  // Reference images (disk-backed) -----------------------------------------
+  // Images are NOT stored inline in localStorage (that blows the ~5MB quota once
+  // a few base64 blobs accumulate). Instead the packaged (Electron) build writes
+  // the full-resolution image to disk and we keep only the referenceFilePath;
+  // the browser (no bridge) keeps the inline data url as a fallback.
+
+  /**
+   * Persist a record's reference image to disk (Electron) and strip the inline
+   * data url from storage, or — in the browser with no bridge — keep the inline
+   * data url so browser mode still renders.
+   */
+  async attachRecordImage(kind: "scene" | "character", id: string, dataUrl: string, mimeType: string): Promise<void> {
+    const record = kind === "scene" ? this.getLocation(id) : this.getCharacter(id);
+    if (!record) return;
+    const filePath = await persistGeneratedImageFile({
+      projectId: record.seriesId,
+      assetId: id,
+      name: record.name,
+      mimeType,
+      dataUrl,
+    });
+    if (filePath) {
+      // Disk-backed: store the path, drop the inline blob (undefined keys are
+      // omitted from JSON.stringify, so it leaves localStorage entirely).
+      const updates = { referenceFilePath: filePath, referenceMimeType: mimeType, referenceImageDataUrl: undefined };
+      if (kind === "scene") this.updateLocation(id, updates);
+      else this.updateCharacter(id, updates);
+    } else {
+      // Browser, no bridge: keep the inline data url as the only image source.
+      const updates = { referenceImageDataUrl: dataUrl, referenceMimeType: mimeType };
+      if (kind === "scene") this.updateLocation(id, updates);
+      else this.updateCharacter(id, updates);
+    }
+  },
+
+  /** Clear a record's reference image (inline + disk path + mime). */
+  detachRecordImage(kind: "scene" | "character", id: string): void {
+    const updates = { referenceImageDataUrl: undefined, referenceFilePath: undefined, referenceMimeType: undefined };
+    if (kind === "scene") this.updateLocation(id, updates);
+    else this.updateCharacter(id, updates);
+  },
+
+  /**
+   * One-time migration: move every inline reference image out of localStorage
+   * onto disk (Electron), stripping the base64 blob so the payload shrinks and
+   * quota is reclaimed. Idempotent via a guard key. Records that already have a
+   * disk path just get the redundant inline blob stripped; browser-only records
+   * (no bridge, so no filePath) are left untouched. On any unexpected error the
+   * guard is NOT set, so it retries on the next launch.
+   */
+  async migrateWorldImagesToDisk(): Promise<void> {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(MIGRATION_KEY)) return;
+    try {
+      const migrateOne = async (kind: "scene" | "character", rec: WorldLocation | WorldCharacter): Promise<void> => {
+        if (!rec.referenceImageDataUrl) return;
+        if (rec.referenceFilePath) {
+          // Already on disk — just drop the redundant inline blob.
+          if (kind === "scene") this.updateLocation(rec.id, { referenceImageDataUrl: undefined });
+          else this.updateCharacter(rec.id, { referenceImageDataUrl: undefined });
+          return;
+        }
+        const filePath = await persistGeneratedImageFile({
+          projectId: rec.seriesId,
+          assetId: rec.id,
+          name: rec.name,
+          mimeType: rec.referenceMimeType || "image/png",
+          dataUrl: rec.referenceImageDataUrl,
+        });
+        if (filePath) {
+          if (kind === "scene") this.updateLocation(rec.id, { referenceFilePath: filePath, referenceImageDataUrl: undefined });
+          else this.updateCharacter(rec.id, { referenceFilePath: filePath, referenceImageDataUrl: undefined });
+        }
+        // No filePath (browser): leave the record untouched.
+      };
+
+      for (const loc of read<WorldLocation>(LOCATIONS_KEY)) {
+        if (loc.referenceImageDataUrl) await migrateOne("scene", loc);
+      }
+      for (const c of read<WorldCharacter>(CHARACTERS_KEY)) {
+        if (c.referenceImageDataUrl) await migrateOne("character", c);
+      }
+      localStorage.setItem(MIGRATION_KEY, "1");
+    } catch (err) {
+      // Don't set the guard — retry next launch.
+      console.warn("WorldState: image migration failed; will retry next launch.", err);
+    }
   },
 };

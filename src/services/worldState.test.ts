@@ -22,7 +22,7 @@ function arc(name: string, kind: "plot" | "character", start: number, end: numbe
   return { id: name, seriesId: "s", kind, name, description: "", startEpisode: start, endEpisode: end, createdAt: 0, updatedAt: 0 };
 }
 
-function installLocalStorage() {
+function installLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
   (globalThis as { localStorage?: unknown }).localStorage = {
     getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
@@ -30,6 +30,16 @@ function installLocalStorage() {
     removeItem: (k: string) => void store.delete(k),
     clear: () => store.clear(),
   };
+  return store;
+}
+
+interface AssetBridge {
+  saveImageAsset?: (req: { projectId: string; assetId?: string; name: string; mimeType: string; dataUrl: string }) => Promise<{ filePath: string }>;
+  loadImageAsset?: (req: { filePath: string }) => Promise<{ dataUrl: string }>;
+}
+
+function installAssetBridge(bridge: AssetBridge | undefined) {
+  (globalThis as { window?: unknown }).window = bridge ? { lightwriterAssets: bridge } : {};
 }
 
 function loc(name: string, aliases: string[]): WorldLocation {
@@ -117,6 +127,100 @@ describe("series characters CRUD + cascade", () => {
     WorldStateService.deleteSeries(s.id);
     expect(WorldStateService.listLocations(s.id)).toEqual([]);
     expect(WorldStateService.listCharacters(s.id)).toEqual([]);
+  });
+});
+
+describe("disk-backed reference images", () => {
+  const DATA_URL = "data:image/png;base64,AAAA";
+
+  beforeEach(() => {
+    installLocalStorage();
+    installAssetBridge(undefined);
+    WorldStateService.clearStorageQuotaError();
+  });
+
+  it("attachRecordImage (Electron bridge) stores a file path and strips the inline data url", async () => {
+    installAssetBridge({ saveImageAsset: async () => ({ filePath: "/disk/aiden.png" }) });
+    const s = WorldStateService.createSeries("S");
+    const aiden = WorldStateService.addCharacter(s.id, { name: "Aiden" });
+
+    await WorldStateService.attachRecordImage("character", aiden.id, DATA_URL, "image/png");
+
+    const stored = WorldStateService.getCharacter(aiden.id)!;
+    expect(stored.referenceFilePath).toBe("/disk/aiden.png");
+    expect(stored.referenceImageDataUrl).toBeUndefined();
+    expect(stored.referenceMimeType).toBe("image/png");
+    // And the persisted JSON carries no base64 blob.
+    expect(localStorage.getItem("lw-world-characters")).not.toContain("base64");
+  });
+
+  it("attachRecordImage (no bridge / browser) keeps the inline data url", async () => {
+    const s = WorldStateService.createSeries("S");
+    const kitchen = WorldStateService.addLocation(s.id, { name: "Kitchen" });
+
+    await WorldStateService.attachRecordImage("scene", kitchen.id, DATA_URL, "image/png");
+
+    const stored = WorldStateService.getLocation(kitchen.id)!;
+    expect(stored.referenceImageDataUrl).toBe(DATA_URL);
+    expect(stored.referenceFilePath).toBeUndefined();
+  });
+
+  it("migrateWorldImagesToDisk strips already-on-disk blobs, persists inline-only ones, and shrinks the payload", async () => {
+    installAssetBridge({ saveImageAsset: async () => ({ filePath: "/disk/moved.png" }) });
+    const s = WorldStateService.createSeries("S");
+    // Already on disk but still carrying a redundant inline blob.
+    const onDisk = WorldStateService.addCharacter(s.id, { name: "OnDisk", referenceImageDataUrl: DATA_URL, referenceFilePath: "/disk/existing.png" });
+    // Inline-only — should be moved to disk.
+    const inlineOnly = WorldStateService.addLocation(s.id, { name: "InlineOnly", referenceImageDataUrl: DATA_URL });
+
+    const before = localStorage.getItem("lw-world-characters")!.length + localStorage.getItem("lw-world-locations")!.length;
+
+    await WorldStateService.migrateWorldImagesToDisk();
+
+    const c = WorldStateService.getCharacter(onDisk.id)!;
+    expect(c.referenceFilePath).toBe("/disk/existing.png");
+    expect(c.referenceImageDataUrl).toBeUndefined();
+
+    const l = WorldStateService.getLocation(inlineOnly.id)!;
+    expect(l.referenceFilePath).toBe("/disk/moved.png");
+    expect(l.referenceImageDataUrl).toBeUndefined();
+
+    const after = localStorage.getItem("lw-world-characters")!.length + localStorage.getItem("lw-world-locations")!.length;
+    expect(after).toBeLessThan(before);
+    expect(localStorage.getItem("lw-world-images-migrated-v1")).toBe("1");
+  });
+
+  it("migrateWorldImagesToDisk is guarded — a second run is a no-op", async () => {
+    installAssetBridge({ saveImageAsset: async () => ({ filePath: "/disk/x.png" }) });
+    const s = WorldStateService.createSeries("S");
+    await WorldStateService.migrateWorldImagesToDisk(); // sets the guard
+    // A record added AFTER the guard is set must be left untouched by a 2nd run.
+    const later = WorldStateService.addLocation(s.id, { name: "Later", referenceImageDataUrl: DATA_URL });
+    await WorldStateService.migrateWorldImagesToDisk();
+    expect(WorldStateService.getLocation(later.id)!.referenceImageDataUrl).toBe(DATA_URL);
+  });
+});
+
+describe("write() quota handling", () => {
+  it("flags a quota error and reports it via hasStorageQuotaError()", () => {
+    const store = installLocalStorage();
+    installAssetBridge(undefined);
+    WorldStateService.clearStorageQuotaError();
+    const s = WorldStateService.createSeries("S");
+    expect(WorldStateService.hasStorageQuotaError()).toBe(false);
+
+    // Make the next setItem throw a QuotaExceededError (by name).
+    (globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage.setItem = () => {
+      const err = new Error("quota");
+      err.name = "QuotaExceededError";
+      throw err;
+    };
+    WorldStateService.addCharacter(s.id, { name: "TooBig" });
+
+    expect(WorldStateService.hasStorageQuotaError()).toBe(true);
+    WorldStateService.clearStorageQuotaError();
+    expect(WorldStateService.hasStorageQuotaError()).toBe(false);
+    void store; // (kept for parity with installLocalStorage's return)
   });
 });
 

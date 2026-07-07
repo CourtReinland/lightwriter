@@ -9,6 +9,7 @@ import {
 } from "../../services/greenRoomService";
 import { VoiceCorpusStore } from "../../services/voiceCorpusStore";
 import { buildCharacterLineIndex, buildSeriesAliasMap } from "../../services/characterLineIndex";
+import useRecordImageUrl from "../Series/useRecordImageUrl";
 import "./GreenRoom.css";
 
 interface GreenRoomViewProps {
@@ -44,8 +45,10 @@ export default function GreenRoomView({ project }: GreenRoomViewProps) {
   }, [seriesId, version]);
 
   const cast = useMemo(() => {
-    const seen = new Map<string, { name: string; imageUrl?: string }>();
-    for (const c of characters) seen.set(c.name.toLowerCase(), { name: c.name, imageUrl: c.referenceImageDataUrl });
+    const seen = new Map<string, CastMember>();
+    // Carry the record's image source (inline data url OR on-disk file path) so
+    // disk-backed portraits resolve too — the inline blob no longer lives here.
+    for (const c of characters) seen.set(c.name.toLowerCase(), { name: c.name, referenceImageDataUrl: c.referenceImageDataUrl, referenceFilePath: c.referenceFilePath });
     for (const n of corpusNames) {
       const key = n.toLowerCase();
       if (!seen.has(key)) seen.set(key, { name: n });
@@ -55,7 +58,7 @@ export default function GreenRoomView({ project }: GreenRoomViewProps) {
 
   const [selected, setSelected] = useState<string>("");
   const active = selected || cast[0]?.name || "";
-  const activeImage = cast.find((c) => c.name === active)?.imageUrl;
+  const activeMember = cast.find((c) => c.name === active) || null;
 
   const dossier = useMemo(
     () => (seriesId && active ? GreenRoomStore.getDossier(seriesId, active) : null),
@@ -150,11 +153,7 @@ export default function GreenRoomView({ project }: GreenRoomViewProps) {
               setError("");
             }}
           >
-            {c.imageUrl ? (
-              <img className="greenroom-avatar" src={c.imageUrl} alt={c.name} />
-            ) : (
-              <span className="greenroom-avatar fallback">{initials(c.name)}</span>
-            )}
+            <CastAvatar member={c} className="greenroom-avatar" fallback={initials(c.name)} />
             <span className="greenroom-castname">{c.name}</span>
           </button>
         ))}
@@ -163,11 +162,8 @@ export default function GreenRoomView({ project }: GreenRoomViewProps) {
       {/* Character room */}
       <section className="greenroom-main">
         <header className="greenroom-header">
-          {activeImage ? (
-            <img className="greenroom-avatar lg" src={activeImage} alt={active} />
-          ) : (
-            <span className="greenroom-avatar lg fallback">{initials(active)}</span>
-          )}
+          <CastAvatar member={activeMember} className="greenroom-avatar lg" fallback={initials(active)} alt={active} />
+
           <div className="greenroom-title">
             <h2>{active}</h2>
             <span className="greenroom-sub">
@@ -285,4 +281,18 @@ export default function GreenRoomView({ project }: GreenRoomViewProps) {
       </section>
     </div>
   );
+}
+
+interface CastMember {
+  name: string;
+  referenceImageDataUrl?: string;
+  referenceFilePath?: string;
+}
+
+// Renders a character avatar, resolving disk-backed portraits (referenceFilePath)
+// as well as inline data urls. Falls back to initials when there is no image.
+function CastAvatar({ member, className, fallback, alt }: { member: CastMember | null; className: string; fallback: string; alt?: string }) {
+  const imageUrl = useRecordImageUrl(member);
+  if (imageUrl) return <img className={className} src={imageUrl} alt={alt ?? member?.name ?? ""} />;
+  return <span className={`${className} fallback`}>{fallback}</span>;
 }

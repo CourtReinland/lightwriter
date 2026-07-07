@@ -259,7 +259,6 @@ export default function KBPanel({
   const saveSeriesRecord = useCallback(async (type: "character" | "scene", fields: Record<string, unknown>, image?: { dataUrl: string; mimeType: string }) => {
     const sid = project.seriesId;
     if (!sid) return;
-    const imgFields = image ? { referenceImageDataUrl: image.dataUrl, referenceMimeType: image.mimeType } : {};
     try {
       if (type === "character") {
         const name = ((fields.name as string) || "").trim();
@@ -271,18 +270,16 @@ export default function KBPanel({
               description: (fields.description as string) || "",
               traits: (fields.traits as string[]) || [],
               voiceNotes: (fields.voiceNotes as string) || undefined,
-              ...imgFields,
             })
           : WorldStateService.addCharacter(sid, {
               name,
               description: (fields.description as string) || "",
               traits: (fields.traits as string[]) || [],
               voiceNotes: (fields.voiceNotes as string) || undefined,
-              ...imgFields,
             });
+        // attachRecordImage owns disk persistence + inline-blob stripping.
         if (rec && image) {
-          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType: image.mimeType, dataUrl: image.dataUrl });
-          if (fp) WorldStateService.updateCharacter(rec.id, { referenceFilePath: fp });
+          await WorldStateService.attachRecordImage("character", rec.id, image.dataUrl, image.mimeType);
         }
       } else {
         const heading = ((fields.heading as string) || "").trim();
@@ -290,21 +287,18 @@ export default function KBPanel({
         const token = (extractLocationToken(heading) || heading).toUpperCase();
         const existing = WorldStateService.listLocations(sid).find((l) => norm(l.name) === norm(token) || l.aliases.some((a) => norm(a) === norm(token)));
         const rec = existing
-          ? // Merge: keep the curated name + aliases, just fold in the token + description/image.
+          ? // Merge: keep the curated name + aliases, just fold in the token + description.
             WorldStateService.updateLocation(existing.id, {
               aliases: Array.from(new Set([...existing.aliases, token])),
               description: (fields.description as string) || existing.description,
-              ...imgFields,
             })
           : WorldStateService.addLocation(sid, {
               name: titleCaseToken(token),
               aliases: [token],
               description: (fields.description as string) || "",
-              ...imgFields,
             });
         if (rec && image) {
-          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType: image.mimeType, dataUrl: image.dataUrl });
-          if (fp) WorldStateService.updateLocation(rec.id, { referenceFilePath: fp });
+          await WorldStateService.attachRecordImage("scene", rec.id, image.dataUrl, image.mimeType);
         }
       }
       onWorldChange?.();

@@ -165,6 +165,13 @@ export default function App() {
 
   const { parsed, pageCount, scenes } = useFountainParser(project.content);
 
+  // One-time migration: move any inline world reference images out of
+  // localStorage onto disk (Electron), reclaiming quota. Must run in the
+  // renderer so the Electron asset bridge is available. Fire-and-forget.
+  useEffect(() => {
+    void WorldStateService.migrateWorldImagesToDisk().catch(() => {});
+  }, []);
+
   // Auto-save project on content/settings changes (debounced 500ms).
   // The same tick records a version-history "edit" snapshot (collapsing typing
   // into one entry, deduped against the tail). AI-tool applies are recorded

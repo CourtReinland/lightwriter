@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { WorldStateService } from "../../services/worldStateService";
-import { persistGeneratedImageFile } from "../../services/imageAssetStorageService";
 import SeriesImageField, { type SeriesImageValue } from "./SeriesImageField";
 import "./AddToSeriesPopup.css";
 
@@ -60,33 +59,19 @@ export default function AddToSeriesPopup({ target, onClose, onAdded }: AddToSeri
     setSaving(true);
     setError(null);
     try {
+      // Create the record WITHOUT the inline blob; attachRecordImage owns disk
+      // persistence (and the browser-mode inline fallback).
       const common = {
         name: trimmed,
         aliases: [alias.toUpperCase()],
         description: description.trim(),
-        referenceImageDataUrl: image?.dataUrl,
-        referenceMimeType: image?.mimeType,
       };
       const saved = isScene
         ? WorldStateService.addLocation(seriesId, common)
         : WorldStateService.addCharacter(seriesId, common);
 
-      if (common.referenceImageDataUrl) {
-        try {
-          const filePath = await persistGeneratedImageFile({
-            projectId: seriesId,
-            assetId: saved.id,
-            name: saved.name,
-            mimeType: common.referenceMimeType || "image/png",
-            dataUrl: common.referenceImageDataUrl,
-          });
-          if (filePath) {
-            if (isScene) WorldStateService.updateLocation(saved.id, { referenceFilePath: filePath });
-            else WorldStateService.updateCharacter(saved.id, { referenceFilePath: filePath });
-          }
-        } catch {
-          /* keep dataUrl-only fallback */
-        }
+      if (image?.dataUrl) {
+        await WorldStateService.attachRecordImage(kind, saved.id, image.dataUrl, image.mimeType || "image/png");
       }
 
       if (isScene && typeof sceneIndex === "number") {

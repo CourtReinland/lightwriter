@@ -6,7 +6,8 @@ import {
   type WorldLocationCategory,
   type WorldCharacter,
 } from "../../services/worldStateService";
-import { persistGeneratedImageFile } from "../../services/imageAssetStorageService";
+import { loadPersistedImageDataUrl } from "../../services/imageAssetStorageService";
+import useRecordImageUrl from "./useRecordImageUrl";
 import SeriesImageField, { type SeriesImageValue } from "./SeriesImageField";
 import "./SeriesRecordsPanel.css";
 
@@ -92,6 +93,13 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
       referenceMimeType: rec.referenceMimeType,
       referenceFilePath: rec.referenceFilePath,
     });
+    // Disk-backed records carry only a file path — hydrate the preview from disk
+    // WITHOUT flagging imageChanged, so a plain Save won't re-persist it.
+    if (!rec.referenceImageDataUrl && rec.referenceFilePath) {
+      void loadPersistedImageDataUrl(rec.referenceFilePath).then((loaded) => {
+        if (loaded) setDraft((prev) => (prev && prev.id === rec.id ? { ...prev, referenceImageDataUrl: loaded } : prev));
+      });
+    }
   };
 
   const handleImageChange = (value: SeriesImageValue | null) => {
@@ -109,12 +117,13 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
 
   const handleSave = async () => {
     if (!draft || !draft.name.trim()) return;
+    // Records no longer store the inline image blob directly — the image is
+    // handled separately below (attach → disk / detach) so localStorage stays
+    // free of base64.
     const common = {
       name: draft.name.trim(),
       aliases: parseAliases(draft.aliases),
       description: draft.description.trim(),
-      referenceImageDataUrl: draft.referenceImageDataUrl,
-      referenceMimeType: draft.referenceMimeType,
     };
 
     let saved: WorldLocation | WorldCharacter | null;
@@ -130,23 +139,14 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
       saved = draft.id ? WorldStateService.updateCharacter(draft.id, fields) : WorldStateService.addCharacter(seriesId, fields);
     }
 
-    // Persist the reference image to disk (Electron) for the ScriptToScreen
-    // handoff. Best-effort; no-op in browser. Series-scoped, keyed by record id.
-    if (saved && common.referenceImageDataUrl && (draft.imageChanged || !draft.referenceFilePath)) {
-      try {
-        const filePath = await persistGeneratedImageFile({
-          projectId: seriesId,
-          assetId: saved.id,
-          name: saved.name,
-          mimeType: common.referenceMimeType || "image/png",
-          dataUrl: common.referenceImageDataUrl,
-        });
-        if (filePath) {
-          if (isScene) WorldStateService.updateLocation(saved.id, { referenceFilePath: filePath });
-          else WorldStateService.updateCharacter(saved.id, { referenceFilePath: filePath });
-        }
-      } catch {
-        /* keep the dataUrl-only fallback */
+    // Image side-channel. attachRecordImage owns disk persistence + stripping the
+    // inline blob (or keeping it in browser mode). Only touch the image when it
+    // actually changed in this edit.
+    if (saved && draft.imageChanged) {
+      if (draft.referenceImageDataUrl) {
+        await WorldStateService.attachRecordImage(kind, saved.id, draft.referenceImageDataUrl, draft.referenceMimeType || "image/png");
+      } else {
+        WorldStateService.detachRecordImage(kind, saved.id);
       }
     }
 
@@ -244,36 +244,13 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
         </div>
       )}
 
-      {records.map((rec) => {
-        const portrait = !isScene;
-        const editTitle = `Edit ${rec.name} — add or change image`;
-        return (
-          <Fragment key={rec.id}>
-            <div className="kb-asset-entry">
-              {rec.referenceImageDataUrl ? (
-                <img className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"}`} src={rec.referenceImageDataUrl} alt={rec.name} title={editTitle} onClick={() => startEdit(rec)} />
-              ) : (
-                <div className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => startEdit(rec)}>
-                  + add image
-                </div>
-              )}
-              <div className="kb-asset-body">
-                <div className="kb-entry-name series-rec-clickable" title={editTitle} onClick={() => startEdit(rec)}>{rec.name} <span className="series-rec-badge">series</span></div>
-                <div className="kb-entry-preview">{rec.aliases.join(", ") || "—"}</div>
-                {rec.description && (
-                  <div className="kb-entry-preview">{rec.description.slice(0, 120)}{rec.description.length > 120 ? "…" : ""}</div>
-                )}
-                <div className="kb-entry-actions">
-                  <button onClick={() => startEdit(rec)}>Edit</button>
-                  <button onClick={() => handleDelete(rec)}>Del</button>
-                </div>
-              </div>
-            </div>
-            {/* Editor opens right here, under the record being edited. */}
-            {draft?.id === rec.id && renderEditor()}
-          </Fragment>
-        );
-      })}
+      {records.map((rec) => (
+        <Fragment key={rec.id}>
+          <SeriesRecordRow rec={rec} portrait={!isScene} onEdit={startEdit} onDelete={handleDelete} />
+          {/* Editor opens right here, under the record being edited. */}
+          {draft?.id === rec.id && renderEditor()}
+        </Fragment>
+      ))}
 
       {/* A brand-new record's editor renders at the bottom of the list. */}
       {draft && !draft.id && renderEditor()}
@@ -283,4 +260,44 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
 
 function parseTraits(input: string): string[] {
   return Array.from(new Set(input.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean)));
+}
+
+// One record row. Extracted into its own component so the image hook (which
+// hydrates a disk-backed thumbnail) can run per-record — hooks can't be called
+// conditionally inside a .map callback.
+function SeriesRecordRow({
+  rec,
+  portrait,
+  onEdit,
+  onDelete,
+}: {
+  rec: WorldLocation | WorldCharacter;
+  portrait: boolean;
+  onEdit: (rec: WorldLocation | WorldCharacter) => void;
+  onDelete: (rec: WorldLocation | WorldCharacter) => void;
+}) {
+  const thumbUrl = useRecordImageUrl(rec);
+  const editTitle = `Edit ${rec.name} — add or change image`;
+  return (
+    <div className="kb-asset-entry">
+      {thumbUrl ? (
+        <img className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"}`} src={thumbUrl} alt={rec.name} title={editTitle} onClick={() => onEdit(rec)} />
+      ) : (
+        <div className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => onEdit(rec)}>
+          + add image
+        </div>
+      )}
+      <div className="kb-asset-body">
+        <div className="kb-entry-name series-rec-clickable" title={editTitle} onClick={() => onEdit(rec)}>{rec.name} <span className="series-rec-badge">series</span></div>
+        <div className="kb-entry-preview">{rec.aliases.join(", ") || "—"}</div>
+        {rec.description && (
+          <div className="kb-entry-preview">{rec.description.slice(0, 120)}{rec.description.length > 120 ? "…" : ""}</div>
+        )}
+        <div className="kb-entry-actions">
+          <button onClick={() => onEdit(rec)}>Edit</button>
+          <button onClick={() => onDelete(rec)}>Del</button>
+        </div>
+      </div>
+    </div>
+  );
 }

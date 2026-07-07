@@ -422,12 +422,10 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
         const cname = (selected as ScriptCharacterRef).name;
         const existing = WorldStateService.matchForCue(sid, cname)[0];
         const rec = existing
-          ? WorldStateService.updateCharacter(existing.id, { referenceImageDataUrl: dataUrl, referenceMimeType: mimeType })
-          : WorldStateService.addCharacter(sid, { name: cname, referenceImageDataUrl: dataUrl, referenceMimeType: mimeType });
-        if (rec) {
-          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType, dataUrl });
-          if (fp) WorldStateService.updateCharacter(rec.id, { referenceFilePath: fp });
-        }
+          ? existing
+          : WorldStateService.addCharacter(sid, { name: cname });
+        // attachRecordImage owns disk persistence + inline-blob stripping.
+        if (rec) await WorldStateService.attachRecordImage("character", rec.id, dataUrl, mimeType);
         setSettingsMessage(`Assigned image to series character "${cname}".`);
       } else if (sourceKind === "scene_set") {
         const heading = (selected as ScriptSceneRef).heading;
@@ -435,12 +433,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
         const niceName = token.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
         const existing = WorldStateService.matchForHeading(sid, heading)[0];
         const rec = existing
-          ? WorldStateService.updateLocation(existing.id, { referenceImageDataUrl: dataUrl, referenceMimeType: mimeType })
-          : WorldStateService.addLocation(sid, { name: niceName, aliases: [token.toUpperCase()], referenceImageDataUrl: dataUrl, referenceMimeType: mimeType });
-        if (rec) {
-          const fp = await persistGeneratedImageFile({ projectId: sid, assetId: rec.id, name: rec.name, mimeType, dataUrl });
-          if (fp) WorldStateService.updateLocation(rec.id, { referenceFilePath: fp });
-        }
+          ? existing
+          : WorldStateService.addLocation(sid, { name: niceName, aliases: [token.toUpperCase()] });
+        if (rec) await WorldStateService.attachRecordImage("scene", rec.id, dataUrl, mimeType);
         setSettingsMessage(`Assigned image to series scene "${niceName}".`);
       }
       onWorldChange?.();
