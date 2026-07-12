@@ -120,6 +120,35 @@ The **Script Report Card** scores the draft against your active framework(s) plu
 - Create, rename, delete, and switch between projects
 - Import files directly into new projects
 
+### Series Bible (live two-way sync with ScriptToScreen)
+When a script belongs to a series, LightWriter keeps the series' shared characters and
+locations in sync with a **Series Bible** on disk (Mac app only — the browser build has
+no file access):
+
+```
+~/Library/Application Support/SeriesBible/
+├── index.json                 # {"version":1,"series":[{id,name,created_at,updated_at}]}
+└── <series_id>/
+    ├── bible.json             # characters{} / locations{} keyed by stable key
+    └── assets/                # bible-owned copies of reference images (<stable_key><ext>)
+```
+
+- **Two-way & near-live** — assets tagged in ScriptToScreen appear in LightWriter's
+  Knowledge Base within moments (an `fs.watch` on the series dir triggers a re-import),
+  and world records edited here export back within ~2s of the change.
+- **Merging** — per-record last-writer-wins by `updated_at` (ISO, second precision; ties
+  keep the incumbent). `"deleted": true` tombstones win over older live data and are never
+  resurrected by older records. Files are written atomically (tmp + rename) with an
+  optimistic mtime check; on conflict the writer re-reads, re-merges, and retries once.
+- **Stable keys** — LightWriter's `stsCharacterKey`/`stsLocationKey` ARE the bible keys
+  for LW-originated records; ScriptToScreen keys look like `char_<slug>_<8hex>` /
+  `loc_<slug>_<8hex>`. The bible series id is authoritative: LW-created series keep their
+  id, and series created elsewhere are adopted into LightWriter's series list on import.
+- **Toggle** — Settings → *Series Bible* → "Sync series bible (shared with ScriptToScreen)"
+  (default ON).
+
+See `docs/SCRIPT2SCREEN-HANDOFF.md` for the full contract.
+
 ## Tech Stack
 
 | Technology | Purpose |

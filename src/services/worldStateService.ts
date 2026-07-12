@@ -300,6 +300,35 @@ function read<T>(key: string): T[] {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Change signal (additive): listeners are invoked after every successful
+// write() with the localStorage key that changed. Used by bibleSyncService to
+// know when world records changed without polling. Listener errors are
+// swallowed so a bad subscriber can never break persistence.
+// ---------------------------------------------------------------------------
+
+export type WorldStateChangeListener = (storageKey: string) => void;
+const worldStateChangeListeners: WorldStateChangeListener[] = [];
+
+/** Subscribe to successful world-state writes. Returns an unsubscribe fn. */
+export function onWorldStateChange(listener: WorldStateChangeListener): () => void {
+  worldStateChangeListeners.push(listener);
+  return () => {
+    const i = worldStateChangeListeners.indexOf(listener);
+    if (i >= 0) worldStateChangeListeners.splice(i, 1);
+  };
+}
+
+function notifyWorldStateChange(storageKey: string): void {
+  for (const listener of [...worldStateChangeListeners]) {
+    try {
+      listener(storageKey);
+    } catch {
+      /* subscriber errors must not break writes */
+    }
+  }
+}
+
 // Set when a write() hits a storage quota error, so the UI can surface it
 // instead of silently losing the write. Cleared via clearStorageQuotaError().
 let storageQuotaError = false;
@@ -321,6 +350,7 @@ function write<T>(key: string, value: T[]): boolean {
   if (typeof localStorage === "undefined") return false;
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    notifyWorldStateChange(key);
     return true;
   } catch (err) {
     if (isQuotaError(err)) {
@@ -345,6 +375,23 @@ export const WorldStateService = {
     const now = Date.now();
     const series: Series = { id: uid("series"), name: name.trim() || "Untitled Series", episodeOrder: [], createdAt: now, updatedAt: now };
     const all = read<Series>(SERIES_KEY);
+    all.push(series);
+    write(SERIES_KEY, all);
+    return series;
+  },
+
+  /**
+   * Create a Series with a CALLER-SUPPLIED id if it doesn't exist yet (no-op
+   * returning the existing record otherwise). Used when adopting a series that
+   * originated in the shared Series Bible (e.g. created by ScriptToScreen),
+   * where the bible's series id is authoritative and must be preserved.
+   */
+  ensureSeries(id: string, name: string): Series {
+    const all = read<Series>(SERIES_KEY);
+    const existing = all.find((s) => s.id === id);
+    if (existing) return existing;
+    const now = Date.now();
+    const series: Series = { id, name: name.trim() || "Untitled Series", episodeOrder: [], createdAt: now, updatedAt: now };
     all.push(series);
     write(SERIES_KEY, all);
     return series;
@@ -390,8 +437,10 @@ export const WorldStateService = {
       referenceMimeType: input.referenceMimeType,
       referenceFilePath: input.referenceFilePath,
       stsLocationKey: input.stsLocationKey || uid("stsloc"),
-      createdAt: now,
-      updatedAt: now,
+      // Callers may supply explicit timestamps (bible import preserves the
+      // bible record's updated_at so last-writer-wins stays symmetrical).
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
     };
     const all = read<WorldLocation>(LOCATIONS_KEY);
     all.push(loc);
@@ -403,7 +452,8 @@ export const WorldStateService = {
     const all = read<WorldLocation>(LOCATIONS_KEY);
     const i = all.findIndex((l) => l.id === id);
     if (i < 0) return null;
-    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: Date.now() };
+    // An explicit updates.updatedAt (bible import) is honored; otherwise stamp now.
+    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: updates.updatedAt ?? Date.now() };
     write(LOCATIONS_KEY, all);
     return all[i];
   },
@@ -442,8 +492,10 @@ export const WorldStateService = {
       referenceMimeType: input.referenceMimeType,
       referenceFilePath: input.referenceFilePath,
       stsCharacterKey: input.stsCharacterKey || uid("stschar"),
-      createdAt: now,
-      updatedAt: now,
+      // Callers may supply explicit timestamps (bible import preserves the
+      // bible record's updated_at so last-writer-wins stays symmetrical).
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
     };
     const all = read<WorldCharacter>(CHARACTERS_KEY);
     all.push(character);
@@ -455,7 +507,8 @@ export const WorldStateService = {
     const all = read<WorldCharacter>(CHARACTERS_KEY);
     const i = all.findIndex((c) => c.id === id);
     if (i < 0) return null;
-    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: Date.now() };
+    // An explicit updates.updatedAt (bible import) is honored; otherwise stamp now.
+    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: updates.updatedAt ?? Date.now() };
     write(CHARACTERS_KEY, all);
     return all[i];
   },

@@ -39,6 +39,7 @@ import {
 import ModelPicker from "../ModelPicker";
 import { parseCharactersWithTextAi, buildCharacterAssetPrompt } from "../../services/characterParserService";
 import { WorldStateService, extractLocationToken } from "../../services/worldStateService";
+import { isBibleSyncEnabled, setBibleSyncEnabled } from "../../services/bibleSyncService";
 import "./AssetPanel.css";
 
 interface AssetPanelProps {
@@ -96,6 +97,9 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
   const [analystProvider, setAnalystProvider] = useState<TextAiProvider>(() => getAnalystProviderSettings().provider);
   const [analystModel, setAnalystModel] = useState<string>(() => getAnalystProviderSettings().model);
   const [settingsMessage, setSettingsMessage] = useState("");
+  // Series Bible sync toggle (persisted; default ON). setBibleSyncEnabled
+  // live-starts/stops the sync for the active series.
+  const [bibleSyncOn, setBibleSyncOn] = useState<boolean>(() => isBibleSyncEnabled());
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptOverride, setPromptOverride] = useState("");
@@ -842,6 +846,29 @@ export default function AssetPanel({ project, assets, onAssetsChange, onGenerati
             </label>
             <p className="asset-muted">Selected model: {effectiveModel || "none yet"}</p>
             {settingsMessage && <p className="asset-status">{settingsMessage}</p>}
+          </section>
+
+          <section className="asset-settings-box">
+            <div className="asset-settings-heading">
+              <h3>Series Bible</h3>
+              <span>Auto-saved</span>
+            </div>
+            <p className="asset-muted">
+              Live two-way sync of this series&apos; characters &amp; locations with ScriptToScreen via a shared bible
+              (~/Library/Application Support/SeriesBible). Assets tagged in ScriptToScreen appear in the Knowledge Base here, and vice versa.
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={bibleSyncOn}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setBibleSyncOn(enabled);
+                  setBibleSyncEnabled(enabled);
+                }}
+              />
+              Sync series bible (shared with ScriptToScreen)
+            </label>
           </section>
 
           <section className="asset-settings-box">

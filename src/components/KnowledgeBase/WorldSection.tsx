@@ -1,5 +1,6 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { WorldStateService } from "../../services/worldStateService";
+import { getLastBibleSync, isBibleSyncEnabled, onBibleSyncStatus } from "../../services/bibleSyncService";
 import type { Project } from "../../services/storageService";
 
 // Series assignment for the current script. The shared, series-scoped SCENES and
@@ -24,6 +25,15 @@ export default function WorldSection({ project, onAssignSeries }: WorldSectionPr
 
   const [showNewSeries, setShowNewSeries] = useState(false);
   const [newSeriesName, setNewSeriesName] = useState("");
+
+  // Subtle "bible synced" note: re-render whenever the bible sync service
+  // finishes an import/export for the active series.
+  const [syncTick, setSyncTick] = useState(0);
+  useEffect(() => onBibleSyncStatus(() => setSyncTick((t) => t + 1)), []);
+  const lastBibleSync = useMemo(
+    () => (activeSeriesId && isBibleSyncEnabled() ? getLastBibleSync(activeSeriesId) : null),
+    [activeSeriesId, syncTick],
+  );
 
   const handleSeriesSelect = (e: ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -79,6 +89,11 @@ export default function WorldSection({ project, onAssignSeries }: WorldSectionPr
       {activeSeries ? (
         <div className="kb-empty">
           In <strong>{activeSeries.name}</strong>. Add shared scenes &amp; characters in the <strong>Scenes</strong> and <strong>Characters</strong> sections below, or click a scene heading / character name in the editor.
+          {lastBibleSync !== null && (
+            <div style={{ opacity: 0.7, marginTop: "0.35rem" }}>
+              Series bible synced {new Date(lastBibleSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} (shared with ScriptToScreen)
+            </div>
+          )}
         </div>
       ) : (
         !showNewSeries && (

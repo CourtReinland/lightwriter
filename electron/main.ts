@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, shell, ipcMain } from "electron";
 import * as fs from "node:fs/promises";
+import { watch as fsWatch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,11 +39,23 @@ function assetRootDir(): string {
   return path.join(app.getPath("userData"), "assets");
 }
 
+// The shared, app-neutral Series Bible root (contract with ScriptToScreen):
+// ~/Library/Application Support/SeriesBible — deliberately the appData ROOT,
+// not LightWriter's own userData dir, so both apps see the same files.
+function bibleRootDir(): string {
+  return path.join(app.getPath("appData"), "SeriesBible");
+}
+
+function isInsideRoot(resolved: string, root: string): boolean {
+  const relative = path.relative(path.resolve(root), resolved);
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
 function assertInsideAssetRoot(filePath: string): string {
   const resolved = path.resolve(filePath);
-  const root = path.resolve(assetRootDir());
-  const relative = path.relative(root, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  // Readable image roots: LightWriter's own asset folder, plus the shared
+  // Series Bible (imported records point at bible-owned asset copies).
+  if (!isInsideRoot(resolved, assetRootDir()) && !isInsideRoot(resolved, bibleRootDir())) {
     throw new Error("Asset image path is outside LightWriter's asset folder.");
   }
   return resolved;
@@ -77,6 +90,145 @@ function registerAssetIpc() {
     const bytes = await fs.readFile(filePath);
     const mimeType = mimeTypeForFilePath(filePath);
     return { dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}` };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Series Bible IPC (shared with ScriptToScreen).
+// Layout under bibleRootDir():
+//   index.json                    — series index
+//   <series_id>/bible.json        — characters/locations for one series
+//   <series_id>/assets/<key><ext> — bible-owned copies of reference images
+// Writes are ATOMIC (tmp + rename) and optimistic: the renderer passes the
+// mtimeMs it last read; if the file changed since, we return conflict=true
+// WITHOUT writing so the renderer can re-read, re-merge, and retry.
+// ---------------------------------------------------------------------------
+
+function assertSafeSeriesId(seriesId: unknown): string {
+  const id = String(seriesId || "");
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+    throw new Error("Invalid series id for the Series Bible.");
+  }
+  return id;
+}
+
+function bibleSeriesDir(seriesId: string): string {
+  return path.join(bibleRootDir(), assertSafeSeriesId(seriesId));
+}
+
+async function statMtimeMs(filePath: string): Promise<number | null> {
+  try {
+    return (await fs.stat(filePath)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+async function readJsonWithMtime(filePath: string): Promise<{ json: string | null; mtimeMs: number | null }> {
+  try {
+    const mtimeMs = (await fs.stat(filePath)).mtimeMs;
+    const json = await fs.readFile(filePath, "utf8");
+    return { json, mtimeMs };
+  } catch {
+    return { json: null, mtimeMs: null };
+  }
+}
+
+/**
+ * Atomic optimistic write: conflict (no write) when the file's mtime no longer
+ * matches what the caller read. expectedMtimeMs === null means "the caller saw
+ * no file" — a now-existing file is therefore also a conflict.
+ */
+async function writeJsonAtomic(filePath: string, json: string, expectedMtimeMs: number | null): Promise<{ ok: boolean; conflict: boolean; mtimeMs: number | null }> {
+  const current = await statMtimeMs(filePath);
+  if (current !== (expectedMtimeMs ?? null)) {
+    return { ok: false, conflict: true, mtimeMs: current };
+  }
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  await fs.writeFile(tmp, json, "utf8");
+  await fs.rename(tmp, filePath);
+  return { ok: true, conflict: false, mtimeMs: await statMtimeMs(filePath) };
+}
+
+const bibleWatchers = new Map<string, { watcher: FSWatcher; timer: ReturnType<typeof setTimeout> | null }>();
+
+function closeBibleWatcher(seriesId: string): void {
+  const entry = bibleWatchers.get(seriesId);
+  if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.watcher.close();
+  bibleWatchers.delete(seriesId);
+}
+
+function registerBibleIpc() {
+  ipcMain.handle("lightwriter:bible-read", async (_event, request: { seriesId?: string }) => {
+    return readJsonWithMtime(path.join(bibleSeriesDir(request.seriesId || ""), "bible.json"));
+  });
+
+  ipcMain.handle("lightwriter:bible-read-index", async () => {
+    return readJsonWithMtime(path.join(bibleRootDir(), "index.json"));
+  });
+
+  ipcMain.handle("lightwriter:bible-write", async (_event, request: { seriesId?: string; json?: string; expectedMtimeMs?: number | null }) => {
+    const file = path.join(bibleSeriesDir(request.seriesId || ""), "bible.json");
+    return writeJsonAtomic(file, request.json || "", request.expectedMtimeMs ?? null);
+  });
+
+  ipcMain.handle("lightwriter:bible-write-index", async (_event, request: { json?: string; expectedMtimeMs?: number | null }) => {
+    return writeJsonAtomic(path.join(bibleRootDir(), "index.json"), request.json || "", request.expectedMtimeMs ?? null);
+  });
+
+  // Copy a reference image INTO the bible so it owns a durable copy —
+  // bible records must never point at app-private paths.
+  ipcMain.handle("lightwriter:bible-copy-asset", async (_event, request: { seriesId?: string; sourcePath?: string; dataUrl?: string; mimeType?: string; stableKey?: string }) => {
+    const assetsDir = path.join(bibleSeriesDir(request.seriesId || ""), "assets");
+    await fs.mkdir(assetsDir, { recursive: true });
+    const key = safePathSegment(request.stableKey || "asset");
+    if (request.sourcePath) {
+      // SECURITY: only copy from LightWriter's own asset root or the bible
+      // root — otherwise the renderer could launder any readable file into
+      // the bible assets dir and read it back via load-asset-image.
+      const source = assertInsideAssetRoot(request.sourcePath);
+      const ext = path.extname(source).toLowerCase() || ".png";
+      const dest = path.join(assetsDir, `${key}${ext}`);
+      await fs.copyFile(source, dest);
+      return { filePath: dest };
+    }
+    const dataUrl = request.dataUrl || "";
+    const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
+    if (!match) throw new Error("Invalid bible asset payload: need a sourcePath or a base64 data url.");
+    const mimeType = request.mimeType || match[1] || "image/png";
+    const dest = path.join(assetsDir, `${key}.${extensionForMimeType(mimeType)}`);
+    await fs.writeFile(dest, Buffer.from(match[2], "base64"));
+    return { filePath: dest };
+  });
+
+  // Watch one series' bible dir; notify the renderer (debounced 500ms) so it
+  // can re-import when ScriptToScreen writes.
+  ipcMain.handle("lightwriter:bible-watch", async (event, request: { seriesId?: string }) => {
+    const seriesId = assertSafeSeriesId(request.seriesId || "");
+    if (bibleWatchers.has(seriesId)) return { ok: true };
+    const dir = bibleSeriesDir(seriesId);
+    await fs.mkdir(dir, { recursive: true });
+    const sender = event.sender;
+    const watcher = fsWatch(dir, () => {
+      const entry = bibleWatchers.get(seriesId);
+      if (!entry) return;
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => {
+        if (!sender.isDestroyed()) sender.send("lightwriter:bible-changed", { seriesId });
+      }, 500);
+    });
+    watcher.on("error", () => closeBibleWatcher(seriesId));
+    sender.once("destroyed", () => closeBibleWatcher(seriesId));
+    bibleWatchers.set(seriesId, { watcher, timer: null });
+    return { ok: true };
+  });
+
+  ipcMain.handle("lightwriter:bible-unwatch", async (_event, request: { seriesId?: string }) => {
+    closeBibleWatcher(assertSafeSeriesId(request.seriesId || ""));
+    return { ok: true };
   });
 }
 
@@ -218,6 +370,7 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(() => {
     registerAssetIpc();
+    registerBibleIpc();
     buildMenu();
     createWindow();
 

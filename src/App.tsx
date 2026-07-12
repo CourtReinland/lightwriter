@@ -29,6 +29,7 @@ import AddToSeriesPopup, { type AddToSeriesTarget } from "./components/Series/Ad
 import SeriesPrompt from "./components/Series/SeriesPrompt";
 import type { LineAffordance } from "./components/Editor/FountainEditor";
 import { WorldStateService, findSceneAtLine, listSceneHeadings } from "./services/worldStateService";
+import { startBibleSync, stopBibleSync } from "./services/bibleSyncService";
 import { serializeEpisodeContext } from "./services/seriesContextService";
 import AnalysisPanel from "./components/Analysis/AnalysisPanel";
 import ToolReviewPane, { type ToolReviewData } from "./components/Suggestions/ToolReviewPane";
@@ -171,6 +172,22 @@ export default function App() {
   useEffect(() => {
     void WorldStateService.migrateWorldImagesToDisk().catch(() => {});
   }, []);
+
+  // Live two-way Series Bible sync (shared with ScriptToScreen): while this
+  // project belongs to a series, keep its world records flowing to/from
+  // ~/Library/Application Support/SeriesBible. Imports bump worldVersion so
+  // the KB panel / gutter / AI context pick up records tagged in S2S.
+  const seriesIdForSync = project.seriesId;
+  useEffect(() => {
+    if (!seriesIdForSync) {
+      stopBibleSync();
+      return;
+    }
+    void startBibleSync(seriesIdForSync, {
+      onImported: () => setWorldVersion((v) => v + 1),
+    });
+    return () => stopBibleSync();
+  }, [seriesIdForSync]);
 
   // Auto-save project on content/settings changes (debounced 500ms).
   // The same tick records a version-history "edit" snapshot (collapsing typing
