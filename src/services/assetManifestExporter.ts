@@ -39,6 +39,8 @@ export interface Script2ScreenManifest {
   screenplay?: { script_hash: string; project_name: string; fountain: string };
   /** Series this script belongs to (portable World State). */
   series_name?: string;
+  /** Stable shared-bible series id — lets ScriptToScreen exact-match the series even if it's renamed. */
+  series_id?: string;
   characters: Record<string, { reference_image_path?: string; visual_prompt?: string; voice_id?: string; voice_provider?: string; voice_samples: string[]; world_character_key?: string }>;
   locations: Record<string, Record<string, unknown>>;
   /** Shared location library keyed by stable stsLocationKey, so the same location resolves identically across scripts in a series. */
@@ -148,6 +150,7 @@ export function buildScript2ScreenManifest(args: {
   const seriesId = args.project.seriesId;
   if (seriesId) {
     manifest.series_name = WorldStateService.getSeries(seriesId)?.name;
+    manifest.series_id = seriesId;
   }
 
   // 0-based scene index -> heading, so a shot can resolve its scene's location.

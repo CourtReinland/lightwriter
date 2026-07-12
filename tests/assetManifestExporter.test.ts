@@ -187,6 +187,7 @@ describe("script2screen manifest — world locations", () => {
     const manifest = buildScript2ScreenManifest({ project, assets: [] });
 
     expect(manifest.series_name).toBe("The Maddox Chronicles");
+    expect(manifest.series_id).toBe(series.id);
     // KITCHEN scene (index 0) resolved to the series location via its alias.
     expect(manifest.world_locations?.[kitchen.stsLocationKey]).toMatchObject({
       name: "Maddox Family Kitchen",

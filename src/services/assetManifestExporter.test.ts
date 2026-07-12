@@ -55,6 +55,7 @@ describe("buildScript2ScreenManifest — series characters + script link", () =>
 
     // Script is linked.
     expect(m.screenplay?.project_name).toBe("Pilot");
+    expect(m.series_id).toBe(s.id);
     expect(m.screenplay?.fountain).toBe(CONTENT);
     expect(m.screenplay?.script_hash).toBeTruthy();
 
@@ -130,6 +131,8 @@ describe("buildScript2ScreenManifest — series characters + script link", () =>
   it("omits the world layer for a script with no series", () => {
     const m = buildScript2ScreenManifest({ project: project(undefined), assets: [] });
     expect(m.world_characters).toBeUndefined();
+    expect(m.series_id).toBeUndefined();
+    expect(m.series_name).toBeUndefined();
     expect(m.screenplay?.fountain).toBe(CONTENT); // script link still present
   });
 });
