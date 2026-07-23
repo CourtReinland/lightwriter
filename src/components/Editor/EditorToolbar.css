@@ -1,4 +1,8 @@
 .editor-toolbar {
+  /* Frameless-window drag region (titleBarStyle: hiddenInset gives no
+     native title bar): the toolbar doubles as the grab area; every
+     interactive child opts out below. */
+  -webkit-app-region: drag;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -198,4 +202,16 @@
 
 .export-option + .export-option {
   border-top: 1px solid #333;
+}
+
+
+/* Frameless-drag opt-outs: clickable toolbar content must not drag the
+   window. */
+.editor-toolbar button,
+.editor-toolbar input,
+.editor-toolbar select,
+.editor-toolbar a,
+.editor-toolbar [role="button"],
+.editor-toolbar .toolbar-project-name {
+  -webkit-app-region: no-drag;
 }
