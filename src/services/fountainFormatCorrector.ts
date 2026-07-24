@@ -279,5 +279,5 @@ export function correctFountainFormatting(script: string, extraNames: string[] =
     i++;
   }
 
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").replace(/[\s\n]+$/, "") + "\n";
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").replace(/[\s\n]+$/, "");
 }
