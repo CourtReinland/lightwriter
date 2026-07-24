@@ -259,6 +259,77 @@ describe("exportSeriesToBible", () => {
     expect(isoToSeconds(tombstone.updated_at)).toBeGreaterThan(Math.floor(anHourAgo / 1000));
   });
 
+  it("preserves unmanaged top-level sections (objects + future) byte-for-byte across export rewrites", async () => {
+    const series = WorldStateService.createSeries("S");
+    WorldStateService.addCharacter(series.id, { name: "Aiden", stsCharacterKey: "k_lw", updatedAt: T0 });
+    // Sections another app (ScriptToScreen) owns and LightWriter must not touch.
+    const objects = {
+      obj_pie_deadbeef: {
+        name: "Pie",
+        aliases: ["PIE", "CHERRY PIE"],
+        description: "A lattice-top cherry pie.",
+        ref_image_path: "/bible/s/assets/obj_pie_deadbeef.png",
+        updated_at: toIsoSeconds(T0),
+        deleted: false,
+        source_app: "scripttoscreen",
+        scale_hint: "tabletop",
+      },
+    };
+    const future_section = { anything: [1, "two", { nested: true }], note: "unknown to LightWriter" };
+    const existing = {
+      version: 1,
+      series_id: series.id,
+      name: "S",
+      updated_at: toIsoSeconds(T0),
+      characters: {},
+      locations: {},
+      objects,
+      future_section,
+    };
+    const { bridge, state } = makeFakeBibleBridge(JSON.stringify(existing));
+    installWindow(bridge);
+
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const first = JSON.parse(state.bibleJson!) as Record<string, unknown>;
+    // Unmanaged sections survive byte-identical…
+    expect(JSON.stringify(first.objects)).toBe(JSON.stringify(objects));
+    expect(JSON.stringify(first.future_section)).toBe(JSON.stringify(future_section));
+    // …while the managed sections were still rewritten normally.
+    expect((first.characters as Record<string, { name: string }>).k_lw.name).toBe("Aiden");
+
+    // A second export (round-trip echo) still carries them unchanged.
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const second = JSON.parse(state.bibleJson!) as Record<string, unknown>;
+    expect(JSON.stringify(second.objects)).toBe(JSON.stringify(objects));
+    expect(JSON.stringify(second.future_section)).toBe(JSON.stringify(future_section));
+  });
+
+  it("preserves unmanaged sections through the conflict re-read-re-merge retry", async () => {
+    const series = WorldStateService.createSeries("S");
+    WorldStateService.addCharacter(series.id, { name: "Aiden", stsCharacterKey: "k_lw", updatedAt: T0 });
+    const { bridge, state } = makeFakeBibleBridge();
+    installWindow(bridge);
+    // Between our read and write, S2S lands a file that ALREADY has objects.
+    const objects = { obj_lamp_12345678: { name: "Lamp", aliases: ["LAMP"], description: "", ref_image_path: null, updated_at: toIsoSeconds(T0), deleted: false, source_app: "scripttoscreen", scale_hint: "handheld" } };
+    const s2sJson = JSON.stringify({ version: 1, series_id: series.id, name: "S", updated_at: toIsoSeconds(T0), characters: {}, locations: {}, objects });
+    const realWrite = bridge.writeBible!;
+    let firstWrite = true;
+    bridge.writeBible = vi.fn(async (seriesId: string, json: string, expected: number | null) => {
+      if (firstWrite) {
+        firstWrite = false;
+        state.bibleJson = s2sJson;
+        state.bibleMtime = 55;
+        return { ok: false, conflict: true, mtimeMs: 55 };
+      }
+      return realWrite(seriesId, json, expected);
+    });
+
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const bible = JSON.parse(state.bibleJson!) as Record<string, unknown>;
+    expect(JSON.stringify(bible.objects)).toBe(JSON.stringify(objects));
+    expect((bible.characters as Record<string, { name: string }>).k_lw.name).toBe("Aiden");
+  });
+
   it("no-ops without a bridge (browser) or without the series", async () => {
     installWindow(undefined);
     expect(await exportSeriesToBible("missing")).toBe(false);

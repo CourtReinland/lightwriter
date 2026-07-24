@@ -56,6 +56,9 @@ export interface BibleFile {
   updated_at: string;
   characters: Record<string, BibleCharacterRecord>;
   locations: Record<string, BibleLocationRecord>;
+  // Top-level sections LightWriter does not manage (e.g. "objects", future
+  // additions from other apps) are carried through UNCHANGED on every rewrite.
+  [unmanagedSection: string]: unknown;
 }
 
 export interface BibleIndexEntry {
@@ -68,6 +71,8 @@ export interface BibleIndexEntry {
 export interface BibleIndexFile {
   version: 1;
   series: BibleIndexEntry[];
+  // Unknown top-level keys pass through unchanged (same rule as bible.json).
+  [unmanagedSection: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,13 +157,17 @@ export function parseBibleJson(json: string | null): BibleFile | null {
   try {
     const parsed = JSON.parse(json) as Partial<BibleFile> | null;
     if (!parsed || typeof parsed !== "object") return null;
+    // Carry through every top-level key this service does not manage
+    // ("objects" and future sections) so rewrites never drop them.
+    const { version: _version, series_id, name, updated_at, characters, locations, ...unmanaged } = parsed as Record<string, unknown>;
     return {
+      ...unmanaged,
       version: 1,
-      series_id: String(parsed.series_id || ""),
-      name: String(parsed.name || ""),
-      updated_at: String(parsed.updated_at || toIsoSeconds(0)),
-      characters: parsed.characters && typeof parsed.characters === "object" ? (parsed.characters as Record<string, BibleCharacterRecord>) : {},
-      locations: parsed.locations && typeof parsed.locations === "object" ? (parsed.locations as Record<string, BibleLocationRecord>) : {},
+      series_id: String(series_id || ""),
+      name: String(name || ""),
+      updated_at: String(updated_at || toIsoSeconds(0)),
+      characters: characters && typeof characters === "object" ? (characters as Record<string, BibleCharacterRecord>) : {},
+      locations: locations && typeof locations === "object" ? (locations as Record<string, BibleLocationRecord>) : {},
     };
   } catch {
     return null;
@@ -170,7 +179,8 @@ export function parseIndexJson(json: string | null): BibleIndexFile {
     try {
       const parsed = JSON.parse(json) as Partial<BibleIndexFile> | null;
       if (parsed && Array.isArray(parsed.series)) {
-        return { version: 1, series: parsed.series as BibleIndexEntry[] };
+        const { version: _version, series, ...unmanaged } = parsed as Record<string, unknown>;
+        return { ...unmanaged, version: 1, series: series as BibleIndexEntry[] };
       }
     } catch {
       /* fall through to a fresh index */
@@ -186,7 +196,7 @@ export function upsertIndexEntry(index: BibleIndexFile, seriesId: string, name: 
   const series = existing
     ? index.series.map((s) => (s.id === seriesId ? { ...s, name, updated_at: nowIso } : s))
     : [...index.series, { id: seriesId, name, created_at: nowIso, updated_at: nowIso }];
-  return { version: 1, series };
+  return { ...index, version: 1, series };
 }
 
 export interface LightWriterWorldSnapshot {
