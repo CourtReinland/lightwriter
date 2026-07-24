@@ -88,9 +88,41 @@ export interface WorldCharacter {
   updatedAt: number;
 }
 
+/** Frozen scale vocabulary shared with the Series Bible / ScriptToScreen ("scale_hint"). */
+export type WorldObjectScaleHint = "" | "handheld" | "tabletop" | "furniture" | "large";
+
+export const OBJECT_SCALE_HINTS: readonly WorldObjectScaleHint[] = ["", "handheld", "tabletop", "furniture", "large"];
+
+/**
+ * A portable, series-scoped OBJECT (prop) — sibling to WorldLocation and
+ * WorldCharacter: the same cherry pie, with the same reference image and
+ * Series Bible key, across every script in the series.
+ */
+export interface WorldObject {
+  id: string;
+  seriesId: string;
+  /** Human-facing name, e.g. "Cherry Pie". */
+  name: string;
+  /** Uppercase mention tokens that resolve to this object, e.g. ["PIE", "CHERRY PIE"]. */
+  aliases: string[];
+  /** What it looks like — used for image generation & continuity. */
+  description: string;
+  /** Rough physical scale (fights scale drift in generated shots). */
+  scaleHint: WorldObjectScaleHint;
+  referenceImageDataUrl?: string;
+  referenceMimeType?: string;
+  /** Durable on-disk path of the reference image (Electron). */
+  referenceFilePath?: string;
+  /** Stable key shared with the Series Bible's objects{} ("obj_<slug>_<8hex>"). */
+  stsObjectKey: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 const SERIES_KEY = "lw-series";
 const LOCATIONS_KEY = "lw-world-locations";
 const CHARACTERS_KEY = "lw-world-characters";
+const OBJECTS_KEY = "lw-world-objects";
 const BINDINGS_PREFIX = "lw-scene-locations-";
 const ARCS_KEY = "lw-series-arcs";
 const CLIFFHANGERS_KEY = "lw-series-cliffhangers";
@@ -101,6 +133,26 @@ export type SceneLocationBindings = Record<string, string>;
 
 function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** Lowercase slug for bible-style stable keys (mirrors ScriptToScreen's _slug). */
+function slugForKey(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || "unnamed";
+}
+
+/**
+ * Mint a Series Bible-style stable object key ("obj_<slug>_<8hex>"), matching
+ * ScriptToScreen's convention so bible asset filenames stay readable and both
+ * apps mint interchangeable keys.
+ */
+export function mintObjectKey(name: string): string {
+  let hex = "";
+  for (let i = 0; i < 8; i++) hex += Math.floor(Math.random() * 16).toString(16);
+  return `obj_${slugForKey(name)}_${hex}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +463,7 @@ export const WorldStateService = {
     write(SERIES_KEY, read<Series>(SERIES_KEY).filter((s) => s.id !== id));
     write(LOCATIONS_KEY, read<WorldLocation>(LOCATIONS_KEY).filter((l) => l.seriesId !== id));
     write(CHARACTERS_KEY, read<WorldCharacter>(CHARACTERS_KEY).filter((c) => c.seriesId !== id));
+    write(OBJECTS_KEY, read<WorldObject>(OBJECTS_KEY).filter((o) => o.seriesId !== id));
   },
 
   // Locations ---------------------------------------------------------------
@@ -520,6 +573,56 @@ export const WorldStateService = {
   /** Characters in a series that match a CHARACTER cue, best first. */
   matchForCue(seriesId: string, cue: string): WorldCharacter[] {
     return matchCharacters(this.listCharacters(seriesId), extractCharacterName(cue));
+  },
+
+  // Objects (portable props, sibling to locations & characters) -------------
+  listObjects(seriesId: string): WorldObject[] {
+    return read<WorldObject>(OBJECTS_KEY)
+      .filter((o) => o.seriesId === seriesId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  getObject(id: string): WorldObject | null {
+    return read<WorldObject>(OBJECTS_KEY).find((o) => o.id === id) || null;
+  },
+
+  addObject(seriesId: string, input: Partial<WorldObject> & { name: string }): WorldObject {
+    const now = Date.now();
+    const object: WorldObject = {
+      id: uid("obj"),
+      seriesId,
+      name: input.name.trim(),
+      aliases: input.aliases && input.aliases.length ? input.aliases : [input.name.trim().toUpperCase()],
+      description: input.description || "",
+      scaleHint: input.scaleHint || "",
+      referenceImageDataUrl: input.referenceImageDataUrl,
+      referenceMimeType: input.referenceMimeType,
+      referenceFilePath: input.referenceFilePath,
+      // Bible-style key ("obj_<slug>_<8hex>") — matches ScriptToScreen's mint.
+      stsObjectKey: input.stsObjectKey || mintObjectKey(input.name),
+      // Callers may supply explicit timestamps (bible import preserves the
+      // bible record's updated_at so last-writer-wins stays symmetrical).
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
+    };
+    const all = read<WorldObject>(OBJECTS_KEY);
+    all.push(object);
+    write(OBJECTS_KEY, all);
+    return object;
+  },
+
+  updateObject(id: string, updates: Partial<WorldObject>): WorldObject | null {
+    const all = read<WorldObject>(OBJECTS_KEY);
+    const i = all.findIndex((o) => o.id === id);
+    if (i < 0) return null;
+    // An explicit updates.updatedAt (bible import) is honored; otherwise stamp now.
+    all[i] = { ...all[i], ...updates, id: all[i].id, seriesId: all[i].seriesId, updatedAt: updates.updatedAt ?? Date.now() };
+    write(OBJECTS_KEY, all);
+    return all[i];
+  },
+
+  deleteObject(id: string): void {
+    write(OBJECTS_KEY, read<WorldObject>(OBJECTS_KEY).filter((o) => o.id !== id));
   },
 
   // Per-script scene -> location bindings (override on top of alias auto-match)
@@ -713,9 +816,14 @@ export const WorldStateService = {
    * data url from storage, or — in the browser with no bridge — keep the inline
    * data url so browser mode still renders.
    */
-  async attachRecordImage(kind: "scene" | "character", id: string, dataUrl: string, mimeType: string): Promise<void> {
-    const record = kind === "scene" ? this.getLocation(id) : this.getCharacter(id);
+  async attachRecordImage(kind: "scene" | "character" | "object", id: string, dataUrl: string, mimeType: string): Promise<void> {
+    const record = kind === "scene" ? this.getLocation(id) : kind === "character" ? this.getCharacter(id) : this.getObject(id);
     if (!record) return;
+    const apply = (updates: Partial<WorldLocation> & Partial<WorldCharacter> & Partial<WorldObject>) => {
+      if (kind === "scene") this.updateLocation(id, updates);
+      else if (kind === "character") this.updateCharacter(id, updates);
+      else this.updateObject(id, updates);
+    };
     const filePath = await persistGeneratedImageFile({
       projectId: record.seriesId,
       assetId: id,
@@ -726,22 +834,19 @@ export const WorldStateService = {
     if (filePath) {
       // Disk-backed: store the path, drop the inline blob (undefined keys are
       // omitted from JSON.stringify, so it leaves localStorage entirely).
-      const updates = { referenceFilePath: filePath, referenceMimeType: mimeType, referenceImageDataUrl: undefined };
-      if (kind === "scene") this.updateLocation(id, updates);
-      else this.updateCharacter(id, updates);
+      apply({ referenceFilePath: filePath, referenceMimeType: mimeType, referenceImageDataUrl: undefined });
     } else {
       // Browser, no bridge: keep the inline data url as the only image source.
-      const updates = { referenceImageDataUrl: dataUrl, referenceMimeType: mimeType };
-      if (kind === "scene") this.updateLocation(id, updates);
-      else this.updateCharacter(id, updates);
+      apply({ referenceImageDataUrl: dataUrl, referenceMimeType: mimeType });
     }
   },
 
   /** Clear a record's reference image (inline + disk path + mime). */
-  detachRecordImage(kind: "scene" | "character", id: string): void {
+  detachRecordImage(kind: "scene" | "character" | "object", id: string): void {
     const updates = { referenceImageDataUrl: undefined, referenceFilePath: undefined, referenceMimeType: undefined };
     if (kind === "scene") this.updateLocation(id, updates);
-    else this.updateCharacter(id, updates);
+    else if (kind === "character") this.updateCharacter(id, updates);
+    else this.updateObject(id, updates);
   },
 
   /**
@@ -756,12 +861,16 @@ export const WorldStateService = {
     if (typeof localStorage === "undefined") return;
     if (localStorage.getItem(MIGRATION_KEY)) return;
     try {
-      const migrateOne = async (kind: "scene" | "character", rec: WorldLocation | WorldCharacter): Promise<void> => {
+      const migrateOne = async (kind: "scene" | "character" | "object", rec: WorldLocation | WorldCharacter | WorldObject): Promise<void> => {
         if (!rec.referenceImageDataUrl) return;
+        const apply = (updates: { referenceFilePath?: string; referenceImageDataUrl: undefined }) => {
+          if (kind === "scene") this.updateLocation(rec.id, updates);
+          else if (kind === "character") this.updateCharacter(rec.id, updates);
+          else this.updateObject(rec.id, updates);
+        };
         if (rec.referenceFilePath) {
           // Already on disk — just drop the redundant inline blob.
-          if (kind === "scene") this.updateLocation(rec.id, { referenceImageDataUrl: undefined });
-          else this.updateCharacter(rec.id, { referenceImageDataUrl: undefined });
+          apply({ referenceImageDataUrl: undefined });
           return;
         }
         const filePath = await persistGeneratedImageFile({
@@ -772,8 +881,7 @@ export const WorldStateService = {
           dataUrl: rec.referenceImageDataUrl,
         });
         if (filePath) {
-          if (kind === "scene") this.updateLocation(rec.id, { referenceFilePath: filePath, referenceImageDataUrl: undefined });
-          else this.updateCharacter(rec.id, { referenceFilePath: filePath, referenceImageDataUrl: undefined });
+          apply({ referenceFilePath: filePath, referenceImageDataUrl: undefined });
         }
         // No filePath (browser): leave the record untouched.
       };
@@ -783,6 +891,9 @@ export const WorldStateService = {
       }
       for (const c of read<WorldCharacter>(CHARACTERS_KEY)) {
         if (c.referenceImageDataUrl) await migrateOne("character", c);
+      }
+      for (const o of read<WorldObject>(OBJECTS_KEY)) {
+        if (o.referenceImageDataUrl) await migrateOne("object", o);
       }
       localStorage.setItem(MIGRATION_KEY, "1");
     } catch (err) {

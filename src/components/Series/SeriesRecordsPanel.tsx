@@ -5,18 +5,23 @@ import {
   type WorldLocation,
   type WorldLocationCategory,
   type WorldCharacter,
+  type WorldObject,
+  type WorldObjectScaleHint,
 } from "../../services/worldStateService";
 import { loadPersistedImageDataUrl } from "../../services/imageAssetStorageService";
 import useRecordImageUrl from "./useRecordImageUrl";
 import SeriesImageField, { type SeriesImageValue } from "./SeriesImageField";
 import "./SeriesRecordsPanel.css";
 
-// Renders the portable, series-scoped SCENES (WorldLocation) or CHARACTERS
-// (WorldCharacter) for a series, with an inline image (upload OR generate) and
-// add/edit/delete. Mounted at the top of the KB "Scenes" and "Characters"
-// sections so series records and per-project KB notes live in one place.
+// Renders the portable, series-scoped SCENES (WorldLocation), CHARACTERS
+// (WorldCharacter) or OBJECTS (WorldObject props) for a series, with an inline
+// image (upload OR generate) and add/edit/delete. Mounted at the top of the KB
+// "Scenes", "Characters" and "Objects" sections so series records and
+// per-project KB notes live in one place.
 
-type RecordKind = "scene" | "character";
+type RecordKind = "scene" | "character" | "object";
+
+type WorldRecord = WorldLocation | WorldCharacter | WorldObject;
 
 interface SeriesRecordsPanelProps {
   seriesId: string;
@@ -36,6 +41,7 @@ interface RecordDraft {
   description: string;
   traits: string; // characters only
   voiceNotes: string; // characters only
+  scaleHint: WorldObjectScaleHint; // objects only
   referenceImageDataUrl?: string;
   referenceMimeType?: string;
   referenceFilePath?: string;
@@ -49,10 +55,13 @@ const EMPTY_DRAFT: RecordDraft = {
   description: "",
   traits: "",
   voiceNotes: "",
+  scaleHint: "",
 };
 
 export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKey = 0 }: SeriesRecordsPanelProps) {
   const isScene = kind === "scene";
+  const isCharacter = kind === "character";
+  const isObject = kind === "object";
   const [version, setVersion] = useState(0);
   const refresh = () => {
     setVersion((v) => v + 1);
@@ -60,8 +69,9 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
   };
 
   const scenes = useMemo(() => (isScene ? WorldStateService.listLocations(seriesId) : []), [isScene, seriesId, version, refreshKey]);
-  const characters = useMemo(() => (!isScene ? WorldStateService.listCharacters(seriesId) : []), [isScene, seriesId, version, refreshKey]);
-  const records: (WorldLocation | WorldCharacter)[] = isScene ? scenes : characters;
+  const characters = useMemo(() => (isCharacter ? WorldStateService.listCharacters(seriesId) : []), [isCharacter, seriesId, version, refreshKey]);
+  const objects = useMemo(() => (isObject ? WorldStateService.listObjects(seriesId) : []), [isObject, seriesId, version, refreshKey]);
+  const records: WorldRecord[] = isScene ? scenes : isCharacter ? characters : objects;
 
   const [draft, setDraft] = useState<RecordDraft | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -74,21 +84,25 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
 
   const aliasLabel = isScene
     ? "Aliases — scene-heading words, comma-separated (KITCHEN, FAMILY KITCHEN)"
-    : "Aliases — cue spellings, comma-separated (AIDEN, YOUNG AIDEN)";
-  const noun = isScene ? "scene" : "character";
-  const NounCap = isScene ? "Scene" : "Character";
+    : isCharacter
+      ? "Aliases — cue spellings, comma-separated (AIDEN, YOUNG AIDEN)"
+      : "Aliases — prop mentions, comma-separated (PIE, CHERRY PIE)";
+  const noun = isScene ? "scene" : isCharacter ? "character" : "object";
+  const NounCap = isScene ? "Scene" : isCharacter ? "Character" : "Object";
 
-  const startEdit = (rec: WorldLocation | WorldCharacter) => {
+  const startEdit = (rec: WorldRecord) => {
     const asScene = rec as WorldLocation;
     const asChar = rec as WorldCharacter;
+    const asObject = rec as WorldObject;
     setDraft({
       id: rec.id,
       name: rec.name,
       aliases: rec.aliases.join(", "),
       category: isScene ? asScene.category : "interior",
       description: rec.description,
-      traits: !isScene && asChar.traits ? asChar.traits.join(", ") : "",
-      voiceNotes: !isScene ? asChar.voiceNotes || "" : "",
+      traits: isCharacter && asChar.traits ? asChar.traits.join(", ") : "",
+      voiceNotes: isCharacter ? asChar.voiceNotes || "" : "",
+      scaleHint: isObject ? asObject.scaleHint || "" : "",
       referenceImageDataUrl: rec.referenceImageDataUrl,
       referenceMimeType: rec.referenceMimeType,
       referenceFilePath: rec.referenceFilePath,
@@ -126,17 +140,20 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
       description: draft.description.trim(),
     };
 
-    let saved: WorldLocation | WorldCharacter | null;
+    let saved: WorldRecord | null;
     if (isScene) {
       const fields = { ...common, category: draft.category };
       saved = draft.id ? WorldStateService.updateLocation(draft.id, fields) : WorldStateService.addLocation(seriesId, fields);
-    } else {
+    } else if (isCharacter) {
       const fields = {
         ...common,
         traits: parseTraits(draft.traits),
         voiceNotes: draft.voiceNotes.trim() || undefined,
       };
       saved = draft.id ? WorldStateService.updateCharacter(draft.id, fields) : WorldStateService.addCharacter(seriesId, fields);
+    } else {
+      const fields = { ...common, scaleHint: draft.scaleHint };
+      saved = draft.id ? WorldStateService.updateObject(draft.id, fields) : WorldStateService.addObject(seriesId, fields);
     }
 
     // Image side-channel. attachRecordImage owns disk persistence + stripping the
@@ -154,10 +171,11 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
     refresh();
   };
 
-  const handleDelete = (rec: WorldLocation | WorldCharacter) => {
+  const handleDelete = (rec: WorldRecord) => {
     if (!window.confirm(`Delete ${noun} "${rec.name}"? This removes it from the whole series.`)) return;
     if (isScene) WorldStateService.deleteLocation(rec.id);
-    else WorldStateService.deleteCharacter(rec.id);
+    else if (isCharacter) WorldStateService.deleteCharacter(rec.id);
+    else WorldStateService.deleteObject(rec.id);
     if (draft?.id === rec.id) setDraft(null);
     refresh();
   };
@@ -171,7 +189,7 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
         <div className="kb-field-label">{draft.id ? `EDIT ${NounCap.toUpperCase()}` : `NEW ${NounCap.toUpperCase()}`}</div>
         <input
           className="kb-input-sm"
-          placeholder={isScene ? "Name (e.g. Maddox Family Kitchen)" : "Name (e.g. Aiden)"}
+          placeholder={isScene ? "Name (e.g. Maddox Family Kitchen)" : isCharacter ? "Name (e.g. Aiden)" : "Name (e.g. Cherry Pie)"}
           value={draft.name}
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
         />
@@ -192,14 +210,36 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
             <option value="other">Other</option>
           </select>
         )}
+        {isObject && (
+          <label className="series-rec-scale-row">
+            <span className="kb-field-label">Scale</span>
+            <select
+              className="kb-input-sm"
+              value={draft.scaleHint}
+              onChange={(e) => setDraft({ ...draft, scaleHint: e.target.value as WorldObjectScaleHint })}
+            >
+              <option value="">Unspecified</option>
+              <option value="handheld">Handheld</option>
+              <option value="tabletop">Tabletop</option>
+              <option value="furniture">Furniture</option>
+              <option value="large">Large</option>
+            </select>
+          </label>
+        )}
         <textarea
           className="kb-textarea-sm"
           rows={3}
-          placeholder={isScene ? "Visual description (used for image generation & continuity)" : "Appearance / who they are (used for portrait generation & continuity)"}
+          placeholder={
+            isScene
+              ? "Visual description (used for image generation & continuity)"
+              : isCharacter
+                ? "Appearance / who they are (used for portrait generation & continuity)"
+                : "What it looks like (used for image generation & continuity)"
+          }
           value={draft.description}
           onChange={(e) => setDraft({ ...draft, description: e.target.value })}
         />
-        {!isScene && (
+        {isCharacter && (
           <>
             <input
               className="kb-input-sm"
@@ -218,7 +258,7 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
         )}
         <SeriesImageField
           scopeId={seriesId}
-          kind={isScene ? "scene_set" : "character"}
+          kind={isScene ? "scene_set" : isCharacter ? "character" : "prop"}
           name={draft.name}
           description={draft.description}
           imageDataUrl={draft.referenceImageDataUrl}
@@ -234,7 +274,7 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
   return (
     <div className="series-records">
       <div className="series-records-head">
-        <span className="kb-field-label">SERIES {isScene ? "SCENES" : "CHARACTERS"} ({records.length})</span>
+        <span className="kb-field-label">SERIES {isScene ? "SCENES" : isCharacter ? "CHARACTERS" : "OBJECTS"} ({records.length})</span>
         <button className="kb-add-btn" title={`Add a series ${noun}`} onClick={() => setDraft({ ...EMPTY_DRAFT })}>+</button>
       </div>
 
@@ -246,7 +286,7 @@ export default function SeriesRecordsPanel({ seriesId, kind, onChange, refreshKe
 
       {records.map((rec) => (
         <Fragment key={rec.id}>
-          <SeriesRecordRow rec={rec} portrait={!isScene} onEdit={startEdit} onDelete={handleDelete} />
+          <SeriesRecordRow rec={rec} thumbShape={isScene ? "wide" : isCharacter ? "portrait" : "square"} onEdit={startEdit} onDelete={handleDelete} />
           {/* Editor opens right here, under the record being edited. */}
           {draft?.id === rec.id && renderEditor()}
         </Fragment>
@@ -267,23 +307,24 @@ function parseTraits(input: string): string[] {
 // conditionally inside a .map callback.
 function SeriesRecordRow({
   rec,
-  portrait,
+  thumbShape,
   onEdit,
   onDelete,
 }: {
-  rec: WorldLocation | WorldCharacter;
-  portrait: boolean;
-  onEdit: (rec: WorldLocation | WorldCharacter) => void;
-  onDelete: (rec: WorldLocation | WorldCharacter) => void;
+  rec: WorldRecord;
+  thumbShape: "portrait" | "wide" | "square";
+  onEdit: (rec: WorldRecord) => void;
+  onDelete: (rec: WorldRecord) => void;
 }) {
   const thumbUrl = useRecordImageUrl(rec);
   const editTitle = `Edit ${rec.name} — add or change image`;
+  const thumbClass = thumbShape === "portrait" ? "" : thumbShape;
   return (
     <div className="kb-asset-entry">
       {thumbUrl ? (
-        <img className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"}`} src={thumbUrl} alt={rec.name} title={editTitle} onClick={() => onEdit(rec)} />
+        <img className={`kb-asset-thumb series-rec-clickable ${thumbClass}`} src={thumbUrl} alt={rec.name} title={editTitle} onClick={() => onEdit(rec)} />
       ) : (
-        <div className={`kb-asset-thumb series-rec-clickable ${portrait ? "" : "wide"} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => onEdit(rec)}>
+        <div className={`kb-asset-thumb series-rec-clickable ${thumbClass} kb-thumb-empty`} title={`Add an image to ${rec.name}`} onClick={() => onEdit(rec)}>
           + add image
         </div>
       )}

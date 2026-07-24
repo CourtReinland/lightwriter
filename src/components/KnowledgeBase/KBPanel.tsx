@@ -119,6 +119,7 @@ export default function KBPanel({
     series: false,
     characters: true,
     scenes: false,
+    objects: false,
     generate: false,
     world: false,
     plot: false,
@@ -150,8 +151,10 @@ export default function KBPanel({
   const seriesId = project.seriesId;
   const seriesCharacters = useMemo(() => (seriesId ? WorldStateService.listCharacters(seriesId) : []), [seriesId, worldVersion]);
   const seriesLocations = useMemo(() => (seriesId ? WorldStateService.listLocations(seriesId) : []), [seriesId, worldVersion]);
+  const seriesObjects = useMemo(() => (seriesId ? WorldStateService.listObjects(seriesId) : []), [seriesId, worldVersion]);
   const seriesCharacterCount = seriesCharacters.length;
   const seriesSceneCount = seriesLocations.length;
+  const seriesObjectCount = seriesObjects.length;
   const seriesCharNames = useMemo(() => new Set(seriesCharacters.map((c) => norm(c.name))), [seriesCharacters]);
   // Match on the location's human name only — a series location ("Kitchen") and a
   // per-project scene heading ("INT. KITCHEN - DAY") are different granularities,
@@ -745,6 +748,20 @@ export default function KBPanel({
               );
             })}
           </>
+        )}
+      </div>
+
+      {/* Objects — series-scoped props (pies, lamps, heirlooms) shared with ScriptToScreen via the Series Bible. */}
+      <div className="kb-section">
+        <div className="kb-section-header" role="button" tabIndex={0} onClick={() => toggleSection("objects")} onKeyDown={(e) => handleSectionKeyDown(e, "objects")}>
+          <span>{expandedSections.objects ? "v" : ">"} Objects ({seriesObjectCount})</span>
+        </div>
+        {expandedSections.objects && (
+          project.seriesId ? (
+            <SeriesRecordsPanel seriesId={project.seriesId} kind="object" onChange={onWorldChange} refreshKey={worldVersion} />
+          ) : (
+            <div className="kb-empty">Assign this script to a series (Series section above) to track shared objects/props across every script.</div>
+          )
         )}
       </div>
 

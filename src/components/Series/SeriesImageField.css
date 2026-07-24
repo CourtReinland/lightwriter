@@ -19,6 +19,7 @@
 }
 .sif-preview.wide { width: 160px; height: 90px; }
 .sif-preview.portrait { width: 80px; height: 120px; }
+.sif-preview.square { width: 100px; height: 100px; }
 
 .sif-empty {
   font-size: 11px;

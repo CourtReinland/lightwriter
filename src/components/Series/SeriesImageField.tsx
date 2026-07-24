@@ -23,7 +23,7 @@ export interface SeriesImageValue {
 interface SeriesImageFieldProps {
   /** Id used as the projectId of the generation request (a series id or project id). */
   scopeId: string;
-  kind: "scene_set" | "character";
+  kind: "scene_set" | "character" | "prop";
   /** Entity name (generation request name + scriptRef). */
   name: string;
   /** Description used to seed the generation prompt. */
@@ -78,10 +78,11 @@ export default function SeriesImageField({ scopeId, kind, name, description, ima
         kind,
         provider,
         model: chosenModel,
-        name: name || (kind === "character" ? "Character" : "Scene"),
+        name: name || (kind === "character" ? "Character" : kind === "prop" ? "Object" : "Scene"),
         prompt: text,
-        scriptRef: { scriptHash: "", ...(kind === "character" ? { characterName: name } : { sceneHeading: name }) },
-        aspectRatio: kind === "character" ? "2:3" : "16:9",
+        // Props have no scene/character anchor — their scriptRef stays bare.
+        scriptRef: { scriptHash: "", ...(kind === "character" ? { characterName: name } : kind === "scene_set" ? { sceneHeading: name } : {}) },
+        aspectRatio: kind === "character" ? "2:3" : kind === "prop" ? "1:1" : "16:9",
       };
       const result = await generateImageAsset(request);
       if (!result.imageDataUrl) throw new Error("No image was returned.");
@@ -99,7 +100,7 @@ export default function SeriesImageField({ scopeId, kind, name, description, ima
     <div className="series-image-field">
       {imageDataUrl ? (
         <div className="sif-preview-row">
-          <img className={`sif-preview ${kind === "character" ? "portrait" : "wide"}`} src={imageDataUrl} alt={name || "reference"} />
+          <img className={`sif-preview ${kind === "character" ? "portrait" : kind === "prop" ? "square" : "wide"}`} src={imageDataUrl} alt={name || "reference"} />
           <button type="button" className="sif-btn ghost" onClick={() => onChange(null)}>Remove</button>
         </div>
       ) : (

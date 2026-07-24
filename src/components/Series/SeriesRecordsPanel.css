@@ -39,6 +39,22 @@
   gap: 6px;
 }
 
+/* Objects editor: "Scale" label + the frozen scale-hint select on one row. */
+.series-rec-scale-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.series-rec-scale-row .kb-input-sm {
+  flex: 1;
+}
+
+/* Object (prop) thumbnails are square (1:1 reference images). */
+.kb-asset-thumb.square {
+  width: 60px;
+  height: 60px;
+}
+
 /* Click a series record's thumbnail or name to open its editor (add/change image). */
 .series-rec-clickable { cursor: pointer; }
 .kb-entry-name.series-rec-clickable:hover { text-decoration: underline; }

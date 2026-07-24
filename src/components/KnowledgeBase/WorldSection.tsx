@@ -88,7 +88,7 @@ export default function WorldSection({ project, onAssignSeries }: WorldSectionPr
 
       {activeSeries ? (
         <div className="kb-empty">
-          In <strong>{activeSeries.name}</strong>. Add shared scenes &amp; characters in the <strong>Scenes</strong> and <strong>Characters</strong> sections below, or click a scene heading / character name in the editor.
+          In <strong>{activeSeries.name}</strong>. Add shared scenes, characters &amp; objects in the <strong>Scenes</strong>, <strong>Characters</strong> and <strong>Objects</strong> sections below, or click a scene heading / character name in the editor.
           {lastBibleSync !== null && (
             <div style={{ opacity: 0.7, marginTop: "0.35rem" }}>
               Series bible synced {new Date(lastBibleSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} (shared with ScriptToScreen)

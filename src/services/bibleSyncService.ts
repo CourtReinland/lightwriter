@@ -1,8 +1,8 @@
 // Live two-way sync between LightWriter's World State (series-scoped
-// characters & locations) and the shared Series Bible on disk:
+// characters, locations & objects) and the shared Series Bible on disk:
 //   ~/Library/Application Support/SeriesBible/
 //     index.json                    — {"version":1,"series":[{id,name,created_at,updated_at}]}
-//     <series_id>/bible.json        — characters{} / locations{} keyed by stable key
+//     <series_id>/bible.json        — characters{} / locations{} / objects{} keyed by stable key
 //     <series_id>/assets/           — bible-owned copies of reference images
 //
 // ScriptToScreen implements the identical contract, so assets tagged there
@@ -18,6 +18,8 @@ import {
   type WorldCharacter,
   type WorldLocation,
   type WorldLocationCategory,
+  type WorldObject,
+  type WorldObjectScaleHint,
 } from "./worldStateService";
 import { persistGeneratedImageFile } from "./imageAssetStorageService";
 
@@ -49,6 +51,18 @@ export interface BibleLocationRecord {
   deleted: boolean;
 }
 
+export interface BibleObjectRecord {
+  name: string;
+  aliases: string[];
+  description: string;
+  /** "" | "handheld" | "tabletop" | "furniture" | "large" (S2S SCALE_HINTS). */
+  scale_hint: string;
+  ref_image_path: string | null;
+  updated_at: string;
+  source_app: BibleSourceApp;
+  deleted: boolean;
+}
+
 export interface BibleFile {
   version: 1;
   series_id: string;
@@ -56,8 +70,9 @@ export interface BibleFile {
   updated_at: string;
   characters: Record<string, BibleCharacterRecord>;
   locations: Record<string, BibleLocationRecord>;
-  // Top-level sections LightWriter does not manage (e.g. "objects", future
-  // additions from other apps) are carried through UNCHANGED on every rewrite.
+  objects: Record<string, BibleObjectRecord>;
+  // Top-level sections LightWriter does not manage (future additions from
+  // other apps) are carried through UNCHANGED on every rewrite.
   [unmanagedSection: string]: unknown;
 }
 
@@ -149,6 +164,7 @@ export function emptyBible(seriesId: string, name: string, nowMs: number): Bible
     updated_at: toIsoSeconds(nowMs),
     characters: {},
     locations: {},
+    objects: {},
   };
 }
 
@@ -158,8 +174,8 @@ export function parseBibleJson(json: string | null): BibleFile | null {
     const parsed = JSON.parse(json) as Partial<BibleFile> | null;
     if (!parsed || typeof parsed !== "object") return null;
     // Carry through every top-level key this service does not manage
-    // ("objects" and future sections) so rewrites never drop them.
-    const { version: _version, series_id, name, updated_at, characters, locations, ...unmanaged } = parsed as Record<string, unknown>;
+    // (unknown future sections) so rewrites never drop them.
+    const { version: _version, series_id, name, updated_at, characters, locations, objects, ...unmanaged } = parsed as Record<string, unknown>;
     return {
       ...unmanaged,
       version: 1,
@@ -168,6 +184,7 @@ export function parseBibleJson(json: string | null): BibleFile | null {
       updated_at: String(updated_at || toIsoSeconds(0)),
       characters: characters && typeof characters === "object" ? (characters as Record<string, BibleCharacterRecord>) : {},
       locations: locations && typeof locations === "object" ? (locations as Record<string, BibleLocationRecord>) : {},
+      objects: objects && typeof objects === "object" ? (objects as Record<string, BibleObjectRecord>) : {},
     };
   } catch {
     return null;
@@ -203,10 +220,40 @@ export interface LightWriterWorldSnapshot {
   seriesName: string;
   locations: WorldLocation[];
   characters: WorldCharacter[];
+  objects: WorldObject[];
 }
 
 function normalizeCategory(category: string): WorldLocationCategory {
   return category === "interior" || category === "exterior" || category === "other" ? category : "other";
+}
+
+/** Clamp a bible scale_hint to the frozen vocabulary (mirrors normalizeCategory). */
+export function normalizeScaleHint(hint: unknown): WorldObjectScaleHint {
+  const h = String(hint ?? "").trim().toLowerCase();
+  return h === "handheld" || h === "tabletop" || h === "furniture" || h === "large" ? h : "";
+}
+
+/** Canonical (uppercase, trimmed) name/alias token for object convergence matching. */
+function canonToken(s: string): string {
+  return s.trim().toUpperCase();
+}
+
+/**
+ * Find the live bible object whose canonical name or alias overlaps the given
+ * name/aliases. This is how "the same object tagged in both apps" converges on
+ * ONE stable key instead of forking into duplicates. Tombstones never match
+ * (tagging a deleted name is a fresh object — same rule as S2S's
+ * find_record_key skipping deleted records).
+ */
+export function findObjectKeyByName(objects: Record<string, BibleObjectRecord>, name: string, aliases: string[]): string | null {
+  const mine = new Set([name, ...aliases].map(canonToken).filter(Boolean));
+  if (!mine.size) return null;
+  for (const [key, record] of Object.entries(objects)) {
+    if (record.deleted) continue;
+    const theirs = [record.name, ...(record.aliases ?? [])].map(canonToken);
+    if (theirs.some((t) => t && mine.has(t))) return key;
+  }
+  return null;
 }
 
 /**
@@ -221,12 +268,14 @@ export function mergeWorldIntoBible(args: {
   seriesId: string;
   world: LightWriterWorldSnapshot;
   refImagePaths: Map<string, string>;
-  tombstoneKeys: { characters: string[]; locations: string[] };
+  tombstoneKeys: { characters: string[]; locations: string[]; objects: string[] };
   nowMs: number;
+  /** OUT (optional): LW object key -> incumbent bible key it converged onto. */
+  objectKeyReuse?: Map<string, string>;
 }): BibleFile {
-  const { existing, seriesId, world, refImagePaths, tombstoneKeys, nowMs } = args;
+  const { existing, seriesId, world, refImagePaths, tombstoneKeys, nowMs, objectKeyReuse } = args;
   const next: BibleFile = existing
-    ? { ...existing, series_id: seriesId, characters: { ...existing.characters }, locations: { ...existing.locations } }
+    ? { ...existing, series_id: seriesId, characters: { ...existing.characters }, locations: { ...existing.locations }, objects: { ...existing.objects } }
     : emptyBible(seriesId, world.seriesName, nowMs);
   next.name = world.seriesName || next.name;
 
@@ -257,6 +306,34 @@ export function mergeWorldIntoBible(args: {
       description: location.description || "",
       ref_image_path: refImagePaths.get(key) ?? incumbent?.ref_image_path ?? null,
       updated_at: toIsoSeconds(location.updatedAt),
+      source_app: "lightwriter",
+      deleted: false,
+    };
+  }
+
+  for (const object of world.objects) {
+    // Converge on the incumbent's key when the same object was tagged in both
+    // apps under different freshly-minted keys (matched by canonical
+    // name/alias); otherwise write under LW's own stable key.
+    let key = object.stsObjectKey;
+    if (!next.objects[key]) {
+      const reuse = findObjectKeyByName(next.objects, object.name, object.aliases ?? []);
+      if (reuse) {
+        key = reuse;
+        objectKeyReuse?.set(object.stsObjectKey, reuse);
+      }
+    }
+    const incumbent = next.objects[key];
+    if (incumbent && !incomingWins(msToSeconds(object.updatedAt), isoToSeconds(incumbent.updated_at))) continue;
+    next.objects[key] = {
+      name: object.name,
+      aliases: object.aliases ?? [],
+      description: object.description || "",
+      scale_hint: object.scaleHint || "",
+      // Ref images were copied in under the LW key (before the merge knew about
+      // any key reuse), so look them up by the ORIGINAL key.
+      ref_image_path: refImagePaths.get(object.stsObjectKey) ?? incumbent?.ref_image_path ?? null,
+      updated_at: toIsoSeconds(object.updatedAt),
       source_app: "lightwriter",
       deleted: false,
     };
@@ -296,10 +373,31 @@ export function mergeWorldIntoBible(args: {
       deleted: true,
     };
   }
+  // Live object keys include both the LW keys AND any incumbent keys they
+  // converged onto, so a just-reused key can never be tombstoned in the same pass.
+  const liveObjectKeys = new Set(world.objects.flatMap((o) => {
+    const reused = objectKeyReuse?.get(o.stsObjectKey);
+    return reused ? [o.stsObjectKey, reused] : [o.stsObjectKey];
+  }));
+  for (const key of tombstoneKeys.objects) {
+    if (liveObjectKeys.has(key)) continue;
+    const incumbent = next.objects[key];
+    if (incumbent && !incomingWins(msToSeconds(nowMs), isoToSeconds(incumbent.updated_at))) continue;
+    next.objects[key] = {
+      name: incumbent?.name || key,
+      aliases: incumbent?.aliases ?? [],
+      description: incumbent?.description || "",
+      scale_hint: incumbent?.scale_hint || "",
+      ref_image_path: null,
+      updated_at: toIsoSeconds(nowMs),
+      source_app: "lightwriter",
+      deleted: true,
+    };
+  }
 
   // File-level updated_at = newest record timestamp (or now).
   let newest = msToSeconds(nowMs);
-  for (const record of [...Object.values(next.characters), ...Object.values(next.locations)]) {
+  for (const record of [...Object.values(next.characters), ...Object.values(next.locations), ...Object.values(next.objects)]) {
     newest = Math.max(newest, isoToSeconds(record.updated_at));
   }
   next.updated_at = toIsoSeconds(newest * 1000);
@@ -371,6 +469,7 @@ function markSynced(seriesId: string): void {
 interface ExportedKeysSnapshot {
   characters: string[];
   locations: string[];
+  objects: string[];
 }
 
 function readExportedKeys(seriesId: string): ExportedKeysSnapshot {
@@ -380,9 +479,11 @@ function readExportedKeys(seriesId: string): ExportedKeysSnapshot {
     return {
       characters: Array.isArray(parsed?.characters) ? parsed.characters : [],
       locations: Array.isArray(parsed?.locations) ? parsed.locations : [],
+      // Back-compat: pre-objects snapshots simply have no object keys yet.
+      objects: Array.isArray(parsed?.objects) ? parsed.objects : [],
     };
   } catch {
-    return { characters: [], locations: [] };
+    return { characters: [], locations: [], objects: [] };
   }
 }
 
@@ -406,9 +507,11 @@ let importingFromBible = false;
 async function copyRefImagesIntoBible(api: LightWriterBibleBridge, seriesId: string, world: LightWriterWorldSnapshot): Promise<Map<string, string>> {
   const paths = new Map<string, string>();
   if (!api.copyAssetIn) return paths;
-  const records: Array<{ key: string; record: WorldLocation | WorldCharacter }> = [
-    ...world.characters.map((c) => ({ key: c.stsCharacterKey, record: c as WorldLocation | WorldCharacter })),
-    ...world.locations.map((l) => ({ key: l.stsLocationKey, record: l as WorldLocation | WorldCharacter })),
+  type WorldRecord = WorldLocation | WorldCharacter | WorldObject;
+  const records: Array<{ key: string; record: WorldRecord }> = [
+    ...world.characters.map((c) => ({ key: c.stsCharacterKey, record: c as WorldRecord })),
+    ...world.locations.map((l) => ({ key: l.stsLocationKey, record: l as WorldRecord })),
+    ...world.objects.map((o) => ({ key: o.stsObjectKey, record: o as WorldRecord })),
   ];
   for (const { key, record } of records) {
     try {
@@ -465,13 +568,16 @@ export async function exportSeriesToBible(seriesId: string): Promise<boolean> {
     seriesName: series.name,
     locations: WorldStateService.listLocations(seriesId),
     characters: WorldStateService.listCharacters(seriesId),
+    objects: WorldStateService.listObjects(seriesId),
   };
   const refImagePaths = await copyRefImagesIntoBible(api, seriesId, world);
   const previous = readExportedKeys(seriesId);
 
   let written = false;
+  let objectKeyReuse = new Map<string, string>();
   for (let attempt = 0; attempt < 2; attempt++) {
     const { json, mtimeMs } = await api.readBible(seriesId);
+    objectKeyReuse = new Map(); // fresh per attempt — the retry re-merges against a fresh file
     const next = mergeWorldIntoBible({
       existing: parseBibleJson(json),
       seriesId,
@@ -479,6 +585,7 @@ export async function exportSeriesToBible(seriesId: string): Promise<boolean> {
       refImagePaths,
       tombstoneKeys: previous,
       nowMs: Date.now(),
+      objectKeyReuse,
     });
     const result = await api.writeBible(seriesId, JSON.stringify(next, null, 2), mtimeMs);
     if (result.ok) {
@@ -490,9 +597,29 @@ export async function exportSeriesToBible(seriesId: string): Promise<boolean> {
   }
   if (!written) return false;
 
+  // Objects that converged onto an incumbent bible key adopt that key locally,
+  // so both apps address ONE record from here on. Suppress the change-listener
+  // (like an import) — the adoption mirrors bible state, it isn't a new edit —
+  // and keep each record's updatedAt so LWW state is untouched.
+  if (objectKeyReuse.size) {
+    importingFromBible = true;
+    try {
+      for (const object of world.objects) {
+        const adopted = objectKeyReuse.get(object.stsObjectKey);
+        if (adopted) {
+          WorldStateService.updateObject(object.id, { stsObjectKey: adopted, updatedAt: object.updatedAt });
+          object.stsObjectKey = adopted; // keep the in-memory snapshot consistent below
+        }
+      }
+    } finally {
+      importingFromBible = false;
+    }
+  }
+
   writeExportedKeys(seriesId, {
     characters: world.characters.map((c) => c.stsCharacterKey),
     locations: world.locations.map((l) => l.stsLocationKey),
+    objects: world.objects.map((o) => o.stsObjectKey),
   });
   await writeIndexUpsert(api, seriesId, series.name);
   markSynced(seriesId);
@@ -578,6 +705,53 @@ export async function importBibleIntoSeries(seriesId: string): Promise<boolean> 
         WorldStateService.addLocation(seriesId, { ...updates, name: record.name, stsLocationKey: key });
       }
     }
+
+    // Objects -------------------------------------------------------------
+    const lwObjects = WorldStateService.listObjects(seriesId);
+    const claimed = new Set<string>(); // LW ids already matched to a bible key this pass
+    for (const [key, record] of Object.entries(bible.objects)) {
+      // Match by stable key first; otherwise converge by canonical name/alias
+      // onto an LW object whose own key is NOT in the bible yet (i.e. the same
+      // object tagged in both apps before either synced) — it adopts this key.
+      const existing =
+        lwObjects.find((o) => o.stsObjectKey === key) ??
+        (record.deleted
+          ? undefined
+          : lwObjects.find(
+              (o) =>
+                !claimed.has(o.id) &&
+                !bible.objects[o.stsObjectKey] &&
+                findObjectKeyByName({ [key]: record }, o.name, o.aliases) === key,
+            ));
+      if (existing) claimed.add(existing.id);
+      const bibleSeconds = isoToSeconds(record.updated_at);
+      if (record.deleted) {
+        if (existing && incomingWins(bibleSeconds, msToSeconds(existing.updatedAt))) {
+          WorldStateService.deleteObject(existing.id);
+        }
+        continue;
+      }
+      const updates: Partial<WorldObject> = {
+        name: record.name,
+        aliases: record.aliases?.length ? record.aliases : [record.name.toUpperCase()],
+        description: record.description || "",
+        scaleHint: normalizeScaleHint(record.scale_hint),
+        referenceFilePath: record.ref_image_path ?? undefined,
+        referenceImageDataUrl: undefined,
+        updatedAt: bibleSeconds * 1000,
+      };
+      if (existing) {
+        if (incomingWins(bibleSeconds, msToSeconds(existing.updatedAt))) {
+          WorldStateService.updateObject(existing.id, { ...updates, stsObjectKey: key });
+        } else if (existing.stsObjectKey !== key) {
+          // LW's fields win (newer or tied) but the KEY still converges on the
+          // bible's; keep updatedAt so the next export overwrites under it.
+          WorldStateService.updateObject(existing.id, { stsObjectKey: key, updatedAt: existing.updatedAt });
+        }
+      } else {
+        WorldStateService.addObject(seriesId, { ...updates, name: record.name, stsObjectKey: key });
+      }
+    }
   } finally {
     importingFromBible = false;
   }
@@ -613,7 +787,7 @@ const IMPORT_DEBOUNCE_MS = 300; // main already debounces fs.watch by 500ms
 const EXPORT_DEBOUNCE_MS = 2000;
 
 // World-state storage keys whose changes should trigger an export.
-const EXPORT_TRIGGER_KEYS = new Set(["lw-series", "lw-world-locations", "lw-world-characters"]);
+const EXPORT_TRIGGER_KEYS = new Set(["lw-series", "lw-world-locations", "lw-world-characters", "lw-world-objects"]);
 
 export interface BibleSyncOptions {
   /** Called after each import that may have changed world records (bump UI versions). */

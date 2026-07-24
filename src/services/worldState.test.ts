@@ -12,6 +12,7 @@ import {
   activeArcsForEpisode,
   cliffhangerEndingEpisode,
   cliffhangerOpeningEpisode,
+  mintObjectKey,
   WorldStateService,
   type WorldLocation,
   type WorldCharacter,
@@ -120,13 +121,41 @@ describe("series characters CRUD + cascade", () => {
     expect(WorldStateService.matchForCue(s.id, "MARA")).toEqual([]);
   });
 
-  it("deleteSeries purges its locations AND characters", () => {
+  it("deleteSeries purges its locations, characters AND objects", () => {
     const s = WorldStateService.createSeries("S");
     WorldStateService.addLocation(s.id, { name: "Kitchen" });
     WorldStateService.addCharacter(s.id, { name: "Aiden" });
+    WorldStateService.addObject(s.id, { name: "Pie" });
     WorldStateService.deleteSeries(s.id);
     expect(WorldStateService.listLocations(s.id)).toEqual([]);
     expect(WorldStateService.listCharacters(s.id)).toEqual([]);
+    expect(WorldStateService.listObjects(s.id)).toEqual([]);
+  });
+});
+
+describe("series objects CRUD", () => {
+  beforeEach(() => installLocalStorage());
+
+  it("CRUDs objects scoped to a series, sorted by name, defaulting alias, scale hint and bible-style key", () => {
+    const s = WorldStateService.createSeries("S");
+    const pie = WorldStateService.addObject(s.id, { name: "Cherry Pie", description: "lattice top" });
+    WorldStateService.addObject(s.id, { name: "Brass Lamp", aliases: ["LAMP"], scaleHint: "handheld" });
+    expect(pie.aliases).toEqual(["CHERRY PIE"]); // defaults to upper(name)
+    expect(pie.scaleHint).toBe(""); // unspecified by default
+    // LW mints the S2S bible key convention: obj_<slug>_<8hex>.
+    expect(pie.stsObjectKey).toMatch(/^obj_cherry_pie_[0-9a-f]{8}$/);
+    expect(WorldStateService.listObjects(s.id).map((o) => o.name)).toEqual(["Brass Lamp", "Cherry Pie"]);
+
+    WorldStateService.updateObject(pie.id, { description: "eaten", scaleHint: "tabletop" });
+    expect(WorldStateService.getObject(pie.id)).toMatchObject({ description: "eaten", scaleHint: "tabletop", seriesId: s.id });
+
+    WorldStateService.deleteObject(pie.id);
+    expect(WorldStateService.listObjects(s.id).map((o) => o.name)).toEqual(["Brass Lamp"]);
+  });
+
+  it("mintObjectKey slugs like the bible (lowercase, non-alnum runs -> _, fallback unnamed)", () => {
+    expect(mintObjectKey("Aiden's Pie!")).toMatch(/^obj_aiden_s_pie_[0-9a-f]{8}$/);
+    expect(mintObjectKey("---")).toMatch(/^obj_unnamed_[0-9a-f]{8}$/);
   });
 });
 
@@ -152,6 +181,21 @@ describe("disk-backed reference images", () => {
     expect(stored.referenceMimeType).toBe("image/png");
     // And the persisted JSON carries no base64 blob.
     expect(localStorage.getItem("lw-world-characters")).not.toContain("base64");
+  });
+
+  it("attachRecordImage handles the object kind (path stored, blob stripped)", async () => {
+    installAssetBridge({ saveImageAsset: async () => ({ filePath: "/disk/pie.png" }) });
+    const s = WorldStateService.createSeries("S");
+    const pie = WorldStateService.addObject(s.id, { name: "Pie" });
+
+    await WorldStateService.attachRecordImage("object", pie.id, DATA_URL, "image/png");
+
+    const stored = WorldStateService.getObject(pie.id)!;
+    expect(stored.referenceFilePath).toBe("/disk/pie.png");
+    expect(stored.referenceImageDataUrl).toBeUndefined();
+
+    WorldStateService.detachRecordImage("object", pie.id);
+    expect(WorldStateService.getObject(pie.id)!.referenceFilePath).toBeUndefined();
   });
 
   it("attachRecordImage (no bridge / browser) keeps the inline data url", async () => {

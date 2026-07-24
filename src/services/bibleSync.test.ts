@@ -10,6 +10,7 @@ import {
   upsertIndexEntry,
   parseIndexJson,
   type BibleFile,
+  type BibleObjectRecord,
   type BibleWriteResult,
   type LightWriterBibleBridge,
 } from "./bibleSyncService";
@@ -189,6 +190,7 @@ describe("exportSeriesToBible", () => {
         k_tie: { name: "Mara (S2S tie)", aliases: [], description: "", traits: [], ref_image_path: null, updated_at: toIsoSeconds(T0), source_app: "scripttoscreen", deleted: false },
       },
       locations: {},
+      objects: {},
     };
     const { bridge, state } = makeFakeBibleBridge(JSON.stringify(existing));
     installWindow(bridge);
@@ -217,6 +219,7 @@ describe("exportSeriesToBible", () => {
       updated_at: toIsoSeconds(T0 + 30_000),
       characters: { k_s2s: { name: "Boris", aliases: ["BORIS"], description: "", traits: [], ref_image_path: null, updated_at: toIsoSeconds(T0 + 30_000), source_app: "scripttoscreen", deleted: false } },
       locations: {},
+      objects: {},
     };
     const realWrite = bridge.writeBible!;
     let firstWrite = true;
@@ -259,10 +262,11 @@ describe("exportSeriesToBible", () => {
     expect(isoToSeconds(tombstone.updated_at)).toBeGreaterThan(Math.floor(anHourAgo / 1000));
   });
 
-  it("preserves unmanaged top-level sections (objects + future) byte-for-byte across export rewrites", async () => {
+  it("merges the MANAGED objects section (incumbents survive) and preserves unknown future sections byte-for-byte", async () => {
     const series = WorldStateService.createSeries("S");
     WorldStateService.addCharacter(series.id, { name: "Aiden", stsCharacterKey: "k_lw", updatedAt: T0 });
-    // Sections another app (ScriptToScreen) owns and LightWriter must not touch.
+    // An S2S-tagged object LightWriter holds no record for: the merge must keep
+    // it untouched (it is now MANAGED, but the incumbent wins when LW has nothing).
     const objects = {
       obj_pie_deadbeef: {
         name: "Pie",
@@ -291,8 +295,9 @@ describe("exportSeriesToBible", () => {
 
     expect(await exportSeriesToBible(series.id)).toBe(true);
     const first = JSON.parse(state.bibleJson!) as Record<string, unknown>;
-    // Unmanaged sections survive byte-identical…
+    // The S2S object record survives the merge unchanged…
     expect(JSON.stringify(first.objects)).toBe(JSON.stringify(objects));
+    // …UNKNOWN sections survive byte-identical (the passthrough contract)…
     expect(JSON.stringify(first.future_section)).toBe(JSON.stringify(future_section));
     // …while the managed sections were still rewritten normally.
     expect((first.characters as Record<string, { name: string }>).k_lw.name).toBe("Aiden");
@@ -304,14 +309,16 @@ describe("exportSeriesToBible", () => {
     expect(JSON.stringify(second.future_section)).toBe(JSON.stringify(future_section));
   });
 
-  it("preserves unmanaged sections through the conflict re-read-re-merge retry", async () => {
+  it("carries objects landed by a concurrent S2S write plus unknown sections through the conflict re-read-re-merge retry", async () => {
     const series = WorldStateService.createSeries("S");
     WorldStateService.addCharacter(series.id, { name: "Aiden", stsCharacterKey: "k_lw", updatedAt: T0 });
     const { bridge, state } = makeFakeBibleBridge();
     installWindow(bridge);
-    // Between our read and write, S2S lands a file that ALREADY has objects.
+    // Between our read and write, S2S lands a file that ALREADY has objects
+    // (and an unknown future section).
     const objects = { obj_lamp_12345678: { name: "Lamp", aliases: ["LAMP"], description: "", ref_image_path: null, updated_at: toIsoSeconds(T0), deleted: false, source_app: "scripttoscreen", scale_hint: "handheld" } };
-    const s2sJson = JSON.stringify({ version: 1, series_id: series.id, name: "S", updated_at: toIsoSeconds(T0), characters: {}, locations: {}, objects });
+    const future_section = { note: "still unknown to LightWriter" };
+    const s2sJson = JSON.stringify({ version: 1, series_id: series.id, name: "S", updated_at: toIsoSeconds(T0), characters: {}, locations: {}, objects, future_section });
     const realWrite = bridge.writeBible!;
     let firstWrite = true;
     bridge.writeBible = vi.fn(async (seriesId: string, json: string, expected: number | null) => {
@@ -327,6 +334,7 @@ describe("exportSeriesToBible", () => {
     expect(await exportSeriesToBible(series.id)).toBe(true);
     const bible = JSON.parse(state.bibleJson!) as Record<string, unknown>;
     expect(JSON.stringify(bible.objects)).toBe(JSON.stringify(objects));
+    expect(JSON.stringify(bible.future_section)).toBe(JSON.stringify(future_section));
     expect((bible.characters as Record<string, { name: string }>).k_lw.name).toBe("Aiden");
   });
 
@@ -344,7 +352,7 @@ describe("exportSeriesToBible", () => {
 // Import merge
 // ---------------------------------------------------------------------------
 
-function bibleWith(seriesId: string, partial: Partial<Pick<BibleFile, "characters" | "locations">>): string {
+function bibleWith(seriesId: string, partial: Partial<Pick<BibleFile, "characters" | "locations" | "objects">>): string {
   const bible: BibleFile = {
     version: 1,
     series_id: seriesId,
@@ -352,6 +360,7 @@ function bibleWith(seriesId: string, partial: Partial<Pick<BibleFile, "character
     updated_at: toIsoSeconds(T0),
     characters: partial.characters ?? {},
     locations: partial.locations ?? {},
+    objects: partial.objects ?? {},
   };
   return JSON.stringify(bible);
 }
@@ -438,6 +447,215 @@ describe("importBibleIntoSeries", () => {
     installWindow(bridge);
     await importBibleIntoSeries(series.id);
     expect(WorldStateService.listCharacters(series.id)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Objects: managed two-way merge (kind three, shipped S2S-side first)
+// ---------------------------------------------------------------------------
+
+/** Bible object record with contract defaults filled in. */
+function bObj(partial: Partial<BibleObjectRecord> & { name: string; updated_at: string }): BibleObjectRecord {
+  return { aliases: [], description: "", scale_hint: "", ref_image_path: null, source_app: "scripttoscreen", deleted: false, ...partial };
+}
+
+describe("objects managed sync", () => {
+  it("exports LW objects under their stable obj_ keys with scale_hint and image copy", async () => {
+    const { bridge, state } = makeFakeBibleBridge();
+    installWindow(bridge);
+    const series = WorldStateService.createSeries("S");
+    const pie = WorldStateService.addObject(series.id, {
+      name: "Cherry Pie",
+      aliases: ["PIE", "CHERRY PIE"],
+      description: "Lattice top, still steaming.",
+      scaleHint: "tabletop",
+      referenceFilePath: "/lw/assets/pie.png",
+      stsObjectKey: "obj_cherry_pie_11111111",
+      updatedAt: T0,
+    });
+
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const bible = parseBible(state.bibleJson);
+    expect(Object.keys(bible.objects)).toEqual(["obj_cherry_pie_11111111"]);
+    const bObject = bible.objects.obj_cherry_pie_11111111;
+    expect(bObject.name).toBe("Cherry Pie");
+    expect(bObject.aliases).toEqual(["PIE", "CHERRY PIE"]);
+    expect(bObject.description).toBe("Lattice top, still steaming.");
+    expect(bObject.scale_hint).toBe("tabletop");
+    expect(bObject.updated_at).toBe(toIsoSeconds(pie.updatedAt));
+    expect(bObject.source_app).toBe("lightwriter");
+    expect(bObject.deleted).toBe(false);
+    // Bible owns a COPY of the image, named after the stable key.
+    expect(bObject.ref_image_path).toBe(`/bible/${series.id}/assets/obj_cherry_pie_11111111.png`);
+    expect(bridge.copyAssetIn).toHaveBeenCalledWith(series.id, { sourcePath: "/lw/assets/pie.png" }, "obj_cherry_pie_11111111");
+  });
+
+  it("export merges objects LWW: newer bible records survive, ties keep the incumbent", async () => {
+    const series = WorldStateService.createSeries("S");
+    WorldStateService.addObject(series.id, { name: "Lamp (LW old)", stsObjectKey: "ko_old", updatedAt: T0 });
+    WorldStateService.addObject(series.id, { name: "Vase (LW tie)", stsObjectKey: "ko_tie", updatedAt: T0 + 500 }); // same SECOND as bible's T0
+    const existing = bibleWith(series.id, {
+      objects: {
+        ko_old: bObj({ name: "Lamp (S2S newer)", updated_at: toIsoSeconds(T0 + 60_000), scale_hint: "handheld" }),
+        ko_tie: bObj({ name: "Vase (S2S tie)", updated_at: toIsoSeconds(T0) }),
+      },
+    });
+    const { bridge, state } = makeFakeBibleBridge(existing);
+    installWindow(bridge);
+
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const bible = parseBible(state.bibleJson);
+    expect(bible.objects.ko_old.name).toBe("Lamp (S2S newer)");
+    expect(bible.objects.ko_old.scale_hint).toBe("handheld"); // S2S-set hint NOT wiped by the older LW record
+    expect(bible.objects.ko_old.source_app).toBe("scripttoscreen");
+    expect(bible.objects.ko_tie.name).toBe("Vase (S2S tie)");
+  });
+
+  it("a CONCURRENT newer S2S object write wins the conflict re-merge", async () => {
+    const series = WorldStateService.createSeries("S");
+    WorldStateService.addObject(series.id, { name: "Pie (LW)", stsObjectKey: "obj_pie_11111111", updatedAt: T0 });
+    const { bridge, state } = makeFakeBibleBridge();
+    installWindow(bridge);
+    // S2S re-tags the SAME key (newer) between our read and write.
+    const s2sJson = bibleWith(series.id, {
+      objects: { obj_pie_11111111: bObj({ name: "Pie (S2S)", scale_hint: "tabletop", updated_at: toIsoSeconds(T0 + 60_000) }) },
+    });
+    const realWrite = bridge.writeBible!;
+    let firstWrite = true;
+    bridge.writeBible = vi.fn(async (seriesId: string, json: string, expected: number | null) => {
+      if (firstWrite) {
+        firstWrite = false;
+        state.bibleJson = s2sJson;
+        state.bibleMtime = 55;
+        return { ok: false, conflict: true, mtimeMs: 55 };
+      }
+      return realWrite(seriesId, json, expected);
+    });
+
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const bible = parseBible(state.bibleJson);
+    expect(bible.objects.obj_pie_11111111.name).toBe("Pie (S2S)");
+    expect(bible.objects.obj_pie_11111111.scale_hint).toBe("tabletop");
+  });
+
+  it("export converges a same-named LW object onto the incumbent bible key (no duplicate), adopting it locally", async () => {
+    const series = WorldStateService.createSeries("S");
+    // Same pie tagged in S2S first (older), then created in LW with a DIFFERENT freshly-minted key.
+    const lwPie = WorldStateService.addObject(series.id, { name: "Cherry Pie", aliases: ["PIE"], description: "LW description", updatedAt: T0 + 60_000 });
+    expect(lwPie.stsObjectKey).not.toBe("obj_pie_deadbeef");
+    const existing = bibleWith(series.id, {
+      objects: { obj_pie_deadbeef: bObj({ name: "Pie", aliases: ["PIE"], description: "S2S description", updated_at: toIsoSeconds(T0) }) },
+    });
+    const { bridge, state } = makeFakeBibleBridge(existing);
+    installWindow(bridge);
+
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    const bible = parseBible(state.bibleJson);
+    // ONE record, under the incumbent's key, with the newer LW fields.
+    expect(Object.keys(bible.objects)).toEqual(["obj_pie_deadbeef"]);
+    expect(bible.objects.obj_pie_deadbeef.description).toBe("LW description");
+    expect(bible.objects.obj_pie_deadbeef.source_app).toBe("lightwriter");
+    // The LW record adopted the bible key, so both apps now address one record.
+    const after = WorldStateService.listObjects(series.id);
+    expect(after).toHaveLength(1);
+    expect(after[0].stsObjectKey).toBe("obj_pie_deadbeef");
+    // The adopted key is what the tombstone snapshot holds — a follow-up export
+    // must NOT tombstone it.
+    expect(await exportSeriesToBible(series.id)).toBe(true);
+    expect(parseBible(state.bibleJson).objects.obj_pie_deadbeef.deleted).toBe(false);
+  });
+
+  it("import converges an unknown bible key onto the same-named LW object (adopt key, LWW fields)", async () => {
+    const series = WorldStateService.createSeries("S");
+    // Bible newer -> bible fields win AND the key is adopted.
+    WorldStateService.addObject(series.id, { name: "Pie", aliases: ["PIE"], description: "LW", updatedAt: T0 });
+    const json = bibleWith(series.id, {
+      objects: { obj_pie_deadbeef: bObj({ name: "Pie", aliases: ["PIE"], description: "S2S", scale_hint: "tabletop", updated_at: toIsoSeconds(T0 + 60_000) }) },
+    });
+    const { bridge } = makeFakeBibleBridge(json);
+    installWindow(bridge);
+
+    expect(await importBibleIntoSeries(series.id)).toBe(true);
+    const objects = WorldStateService.listObjects(series.id);
+    expect(objects).toHaveLength(1); // converged — NOT duplicated
+    expect(objects[0].stsObjectKey).toBe("obj_pie_deadbeef");
+    expect(objects[0].description).toBe("S2S");
+    expect(objects[0].scaleHint).toBe("tabletop");
+    expect(Math.floor(objects[0].updatedAt / 1000)).toBe(isoToSeconds(toIsoSeconds(T0 + 60_000)));
+  });
+
+  it("import adopts the bible key even when LW's fields are newer (fields kept, key converged)", async () => {
+    const series = WorldStateService.createSeries("S");
+    WorldStateService.addObject(series.id, { name: "Pie", aliases: ["PIE"], description: "LW newer", updatedAt: T0 + 120_000 });
+    const json = bibleWith(series.id, {
+      objects: { obj_pie_deadbeef: bObj({ name: "Pie", aliases: ["PIE"], description: "S2S older", updated_at: toIsoSeconds(T0 + 60_000) }) },
+    });
+    const { bridge } = makeFakeBibleBridge(json);
+    installWindow(bridge);
+
+    await importBibleIntoSeries(series.id);
+    const objects = WorldStateService.listObjects(series.id);
+    expect(objects).toHaveLength(1);
+    expect(objects[0].stsObjectKey).toBe("obj_pie_deadbeef");
+    expect(objects[0].description).toBe("LW newer"); // LWW kept LW's fields
+    expect(Math.floor(objects[0].updatedAt / 1000)).toBe(Math.floor((T0 + 120_000) / 1000)); // timestamp untouched -> next export overwrites the bible
+  });
+
+  it("imports objects with scale_hint clamped to the frozen vocabulary", async () => {
+    const series = WorldStateService.createSeries("S");
+    const json = bibleWith(series.id, {
+      objects: {
+        obj_ok_11111111: bObj({ name: "Lamp", scale_hint: "handheld", updated_at: toIsoSeconds(T0) }),
+        obj_bad_22222222: bObj({ name: "Moon", scale_hint: "gigantic", updated_at: toIsoSeconds(T0) }),
+      },
+    });
+    const { bridge } = makeFakeBibleBridge(json);
+    installWindow(bridge);
+
+    await importBibleIntoSeries(series.id);
+    const byKey = new Map(WorldStateService.listObjects(series.id).map((o) => [o.stsObjectKey, o]));
+    expect(byKey.get("obj_ok_11111111")?.scaleHint).toBe("handheld");
+    expect(byKey.get("obj_bad_22222222")?.scaleHint).toBe(""); // clamped, not invented
+    expect(byKey.get("obj_ok_11111111")?.aliases).toEqual(["LAMP"]); // name fallback, uppercased
+  });
+
+  it("tombstones objects deleted in LightWriter since the previous export", async () => {
+    const { bridge, state } = makeFakeBibleBridge();
+    installWindow(bridge);
+    const series = WorldStateService.createSeries("S");
+    const anHourAgo = Date.now() - 3_600_000;
+    const doomed = WorldStateService.addObject(series.id, { name: "Old Lamp", stsObjectKey: "obj_old_lamp_33333333", updatedAt: anHourAgo });
+    await exportSeriesToBible(series.id);
+    expect(parseBible(state.bibleJson).objects.obj_old_lamp_33333333.deleted).toBe(false);
+
+    WorldStateService.deleteObject(doomed.id);
+    await exportSeriesToBible(series.id);
+    const tombstone = parseBible(state.bibleJson).objects.obj_old_lamp_33333333;
+    expect(tombstone.deleted).toBe(true);
+    expect(tombstone.source_app).toBe("lightwriter");
+    expect(tombstone.ref_image_path).toBeNull();
+    expect(isoToSeconds(tombstone.updated_at)).toBeGreaterThan(Math.floor(anHourAgo / 1000));
+  });
+
+  it("imported object tombstones delete the LW record, never resurrect, and never match by name", async () => {
+    const series = WorldStateService.createSeries("S");
+    WorldStateService.addObject(series.id, { name: "Lamp", stsObjectKey: "ko_dead", updatedAt: T0 });
+    // A DIFFERENT live LW pie whose name matches a tombstone — must survive
+    // (deleted records are excluded from name-based convergence).
+    WorldStateService.addObject(series.id, { name: "Pie", aliases: ["PIE"], updatedAt: T0 });
+    const json = bibleWith(series.id, {
+      objects: {
+        ko_dead: bObj({ name: "Lamp", updated_at: toIsoSeconds(T0 + 60_000), deleted: true }),
+        obj_gone_44444444: bObj({ name: "Ghost Prop", updated_at: toIsoSeconds(T0), deleted: true }),
+        obj_pie_tomb: bObj({ name: "Pie", aliases: ["PIE"], updated_at: toIsoSeconds(T0 + 60_000), deleted: true }),
+      },
+    });
+    const { bridge } = makeFakeBibleBridge(json);
+    installWindow(bridge);
+
+    await importBibleIntoSeries(series.id);
+    const names = WorldStateService.listObjects(series.id).map((o) => o.name);
+    expect(names).toEqual(["Pie"]); // Lamp deleted; Ghost Prop not resurrected; Pie untouched
   });
 });
 
@@ -544,6 +762,8 @@ describe("startBibleSync", () => {
     WorldStateService.addCharacter(series.id, { name: "A", stsCharacterKey: "ka", updatedAt: Date.now() });
     WorldStateService.addCharacter(series.id, { name: "B", stsCharacterKey: "kb", updatedAt: Date.now() });
     WorldStateService.addLocation(series.id, { name: "C", stsLocationKey: "kc", updatedAt: Date.now() });
+    // Object edits are an export trigger too ("lw-world-objects").
+    WorldStateService.addObject(series.id, { name: "D", stsObjectKey: "kd", updatedAt: Date.now() });
     await vi.advanceTimersByTimeAsync(10_000);
 
     const after = (bridge.writeBible as ReturnType<typeof vi.fn>).mock.calls.length;
@@ -551,6 +771,7 @@ describe("startBibleSync", () => {
     const bible = parseBible(state.bibleJson);
     expect(Object.keys(bible.characters).sort()).toEqual(["ka", "kb"]);
     expect(Object.keys(bible.locations)).toEqual(["kc"]);
+    expect(Object.keys(bible.objects)).toEqual(["kd"]);
   });
 });
 
